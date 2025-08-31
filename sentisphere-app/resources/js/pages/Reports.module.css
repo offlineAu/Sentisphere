@@ -1,0 +1,69 @@
+.headerTitle {
+  color: #0d8c4f;
+  font-size: 2rem;
+  font-weight: bold;
+}
+
+.headerSubtitle {
+  color: #6b7280;
+  font-size: 1rem;
+}
+
+.sectionTitle {
+  color: #0d8c4f;
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.riskHigh {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.riskMedium {
+  background: #fef9c3;
+  color: #b45309;
+}
+
+.riskLow {
+  background: #e5e5e5;
+  color: #0d8c4f;
+}
+
+.riskNone {
+  background: #d1fae5;
+  color: #047857;
+}
+
+.alertHigh {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.alertMedium {
+  background: #fef9c3;
+  color: #b45309;
+}
+
+.alertLow {
+  background: #e5e5e5;
+  color: #0d8c4f;
+}
+
+.tableTitle {
+  color: #d32f2f;
+  font-weight: 600;
+  font-size: 1rem;
+  display: flex;
+  align-items: center;
+}
+
+.concernTag {
+  background: #e5e5e5;
+  color: #333;
+  border-radius: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  margin-right: 0.25rem;
+  font-size: 0.75rem;
+  display: inline-block;
+}
