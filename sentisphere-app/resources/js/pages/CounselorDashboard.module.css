@@ -1,0 +1,54 @@
+.headerTitle {
+  color: #0d8c4f;
+  font-size: 2rem;
+  font-weight: 600;
+}
+
+.headerSubtitle {
+  color: #6b7280;
+  font-size: 1rem;
+}
+
+.statCardTitle {
+  color: #6b7280;
+  font-size: 1rem;
+  font-weight: 500;
+}
+
+.statCardValue {
+  color: #333;
+  font-size: 2rem;
+  font-weight: bold;
+}
+
+.statCardDelta {
+  color: #6b7280;
+  font-size: 0.875rem;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.sectionTitle {
+  color: #0d8c4f;
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.appointmentCard {
+  border-radius: 1rem;
+  padding: 1rem;
+  background: #f5f5f5;
+  border: 1px solid #e5e5e5;
+}
+
+.appointmentStatus {
+  color: #0d8c4f;
+  background: #e5e5e5;
+  border-radius: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: capitalize;
+}

@@ -3,18 +3,29 @@
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
+// Dashboard
 Route::get('/', function () {
-    return Inertia::render('welcome');
-})->name('home');
-
-Route::middleware(['auth', 'verified'])->group(function () {
-    Route::get('dashboard', function () {
-        return Inertia::render('dashboard');
-    })->name('dashboard');
+    return Inertia::render('CounselorDashboard');
 });
 
-Route::get('/', function () {
-    return Inertia::render('main'); // loads Dashboard.tsx
+// Chat
+Route::get('/chat', function () {
+    return Inertia::render('Chat');
+});
+
+// Appointments
+Route::get('/appointments', function () {
+    return Inertia::render('Appointments');
+});
+
+// Reports
+Route::get('/reports', function () {
+    return Inertia::render('Reports');
+});
+
+// Profile
+Route::get('/profile', function () {
+    return Inertia::render('Profile');
 });
 
 require __DIR__.'/settings.php';

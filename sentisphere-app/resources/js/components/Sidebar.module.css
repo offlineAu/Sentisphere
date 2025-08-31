@@ -1,0 +1,60 @@
+.sidebar {
+  height: 100vh;
+  width: 16rem;
+  background: #fff;
+  border-right: 1px solid #eee;
+  box-shadow: 0 0 16px 0 rgba(0,0,0,0.04);
+  display: flex;
+  flex-direction: column;
+  padding: 2rem 1.5rem;
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 50; /* Make sure this is high */
+}
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 3rem;
+}
+.logoIcon {
+  width: 2rem;
+  height: 2rem;
+  background: #0d8c4f;
+  color: #fff;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 1.25rem;
+}
+.logoText {
+  color: #0d8c4f;
+  font-size: 2rem;
+  font-weight: bold;
+}
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.nav a {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: #444;
+  text-decoration: none;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  font-weight: 500;
+  transition: background 0.2s;
+}
+.nav a:hover {
+  background: #f5f5f5;
+}
+.icon {
+  width: 1.25rem;
+  height: 1.25rem;
+}

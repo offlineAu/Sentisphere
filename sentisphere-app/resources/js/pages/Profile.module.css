@@ -1,0 +1,150 @@
+.headerTitle {
+  font-size: 2rem;
+  font-weight: bold;
+  color: #222;
+}
+
+.headerSubtitle {
+  color: #6b7280;
+  font-size: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.profileCard {
+  background: #fff;
+  border-radius: 1rem;
+  box-shadow: 0 0 8px 0 rgba(0,0,0,0.04);
+  padding: 2rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.profileName {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-top: 1rem;
+}
+
+.profileRole {
+  color: #6b7280;
+  font-size: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.profileOrg {
+  background: #e5e5e5;
+  color: #333;
+  font-size: 0.85rem;
+  border-radius: 0.5rem;
+  padding: 0.25rem 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.profileInfo {
+  color: #333;
+  font-size: 0.95rem;
+  margin-bottom: 0.25rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.profileOverview {
+  background: #fff;
+  border-radius: 1rem;
+  box-shadow: 0 0 8px 0 rgba(0,0,0,0.04);
+  padding: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.overviewTitle {
+  font-weight: 600;
+  margin-bottom: 1rem;
+}
+
+.overviewItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+  color: #333;
+}
+
+.overviewBadge {
+  background: #e5e5e5;
+  color: #222;
+  border-radius: 1rem;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.tabs {
+  display: flex;
+  gap: 2rem;
+  margin-bottom: 1rem;
+}
+
+.tab {
+  background: #f5f5f5;
+  border-radius: 0.5rem;
+  padding: 0.5rem 2rem;
+  font-weight: 500;
+  color: #333;
+  cursor: pointer;
+  border: none;
+}
+
+.tabActive {
+  background: #fff;
+  border: 1px solid #e5e5e5;
+  color: #0d8c4f;
+}
+
+.sectionCard {
+  background: #fff;
+  border-radius: 1rem;
+  box-shadow: 0 0 8px 0 rgba(0,0,0,0.04);
+  padding: 2rem;
+  margin-bottom: 1rem;
+}
+
+.sectionTitle {
+  font-weight: 600;
+  font-size: 1.1rem;
+  margin-bottom: 0.5rem;
+}
+
+.inputRow {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.input,
+.textarea {
+  width: 100%;
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid #e5e5e5;
+  font-size: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.textarea {
+  min-height: 60px;
+  resize: vertical;
+}
+
+.saveBtn {
+  background: #0d8c4f;
+  color: #fff;
+  border-radius: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  margin-top: 1rem;
+}
