@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { motion } from "framer-motion";
 import {
   AreaChart,
@@ -11,6 +11,8 @@ import {
   PieChart,
   Pie,
   Cell,
+  LineChart,
+  Line,
 } from "recharts";
 import {
   Activity,
@@ -82,6 +84,18 @@ const riskBadge = (risk: StudentRisk) => {
   );
 };
 
+const severityBadge = (severity: string) => {
+  let color = "";
+  if (severity === "high" || severity === "critical") color = "bg-red-100 text-red-700";
+  else if (severity === "medium") color = "bg-yellow-100 text-yellow-700";
+  else color = "bg-blue-100 text-blue-700";
+  return (
+    <span className={`ml-1 px-2 py-0.5 rounded text-xs font-medium ${color}`}>
+      {severity.charAt(0).toUpperCase() + severity.slice(1)}
+    </span>
+  );
+};
+
 const StatCard: React.FC<{
   title: string;
   value: string | number;
@@ -112,10 +126,11 @@ export default function CounselorDashboard() {
   >([]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [flaggedStudents, setFlaggedStudents] = useState<StudentFlag[]>([]);
+  const [recentAlerts, setRecentAlerts] = useState<any[]>([]);
 
   // Fetch from backend
   useEffect(() => {
-    fetch("/api/mood-trend")
+    fetch("http://localhost:5000/api/mood-trend")
       .then((res) => res.json())
       .then(setMoodTrend)
       .catch(console.error);
@@ -134,7 +149,14 @@ export default function CounselorDashboard() {
       .then((res) => res.json())
       .then(setFlaggedStudents)
       .catch(console.error);
+
+    fetch("http://localhost:5000/api/recent-alerts")
+      .then((res) => res.json())
+      .then(setRecentAlerts)
+      .catch(console.error);
   }, []);
+
+  const reversedMoodTrend = [...moodTrend].reverse();
 
   return (
     <div className="flex bg-[#f5f5f5] min-h-screen">
@@ -144,9 +166,9 @@ export default function CounselorDashboard() {
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.35 }}
-          className="p-6 space-y-6"
+          className="p-4 sm:p-6 space-y-6 max-w-full"
         >
-          {/* 🔹 Header */}
+          {/* Header */}
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
             <div>
               <h1 className={styles.headerTitle}>Counselor Dashboard</h1>
@@ -164,8 +186,8 @@ export default function CounselorDashboard() {
             </div>
           </div>
 
-          {/* 🔹 Stats */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* Stats */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <StatCard
               title="Students Monitored"
               value={flaggedStudents.length}
@@ -183,29 +205,85 @@ export default function CounselorDashboard() {
             />
             <StatCard
               title="High-Risk Flags"
-              value={flaggedStudents.filter((s) => s.risk === "high").length}
+              value={recentAlerts.filter((a) => a.severity === "high" || a.severity === "critical").length}
               icon={<AlertTriangle className="h-4 w-4 text-red-500" />}
             />
           </div>
 
-          {/* 🔹 Weekly Mood Trend */}
-          <div className="bg-white rounded-2xl shadow p-4">
-            <h2 className={styles.sectionTitle}>Weekly Mood Trend</h2>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={moodTrend}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="week" stroke="#6b7280" />
-                  <YAxis domain={[1, 5]} ticks={[1, 2, 3, 4, 5]} stroke="#6b7280" />
-                  <RTooltip />
-                  <Area
-                    type="monotone"
-                    dataKey="avgMood"
-                    stroke="#2563eb"
-                    fill="#2563eb20"
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
+          {/* Weekly Mood Trend - moved up and made more prominent */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {/* Weekly Mood Trend (2/3 width on desktop) */}
+            <div className="lg:col-span-2">
+              <div className="bg-white rounded-2xl shadow p-4 w-full max-w-full">
+                <h2 className={styles.sectionTitle}>Weekly Mood Trend</h2>
+                <div className="overflow-x-auto" style={{ minHeight: 250, maxHeight: 400 }}>
+                  <div
+                    style={{
+                      width: Math.max(moodTrend.length * 120, 900),
+                      minWidth: 900,
+                      height: 350,
+                      display: "flex",
+                      alignItems: "center",
+                    }}
+                  >
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={reversedMoodTrend}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="week" stroke="#6b7280" />
+                        <YAxis domain={['auto', 'auto']} stroke="#6b7280" />
+                        <RTooltip />
+                        <Line
+                          type="monotone"
+                          dataKey="avgMood"
+                          stroke="#2563eb"
+                          strokeWidth={3}
+                          dot={{ r: 6, stroke: "#2563eb", strokeWidth: 2, fill: "#fff" }}
+                          activeDot={{ r: 8, fill: "#2563eb" }}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Recent Alerts (1/3 width on desktop) */}
+            <div>
+              <div className="bg-white rounded-2xl shadow p-4">
+                <h3 className="font-semibold text-[#0d8c4f] text-lg mb-1">Recent Alerts</h3>
+                <p className="text-[#6b7280] text-sm mb-3">Students who may need attention</p>
+                <div className="space-y-3">
+                  {recentAlerts.map((alert, idx) => (
+                    <div
+                      key={alert.id}
+                      className="flex items-center justify-between bg-[#f7fafd] rounded-xl px-3 py-2"
+                    >
+                      <div className="flex items-center gap-2">
+                        <AlertTriangle className={
+                          alert.severity === "high" || alert.severity === "critical"
+                            ? "h-4 w-4 text-red-500"
+                            : alert.severity === "medium"
+                            ? "h-4 w-4 text-yellow-500"
+                            : "h-4 w-4 text-blue-500"
+                        } />
+                        <div>
+                          <div className="font-semibold text-[#333] flex items-center gap-2">
+                            {alert.name}
+                            {severityBadge(alert.severity)}
+                          </div>
+                          <div className="text-xs text-[#6b7280]">
+                            {alert.reason} • {new Date(alert.created_at).toLocaleDateString()}
+                          </div>
+                        </div>
+                      </div>
+                      <span className="text-[#bdbdbd] text-xl">&rarr;</span>
+                    </div>
+                  ))}
+                </div>
+                <button className="w-full mt-4 py-2 rounded-xl border text-[#2563eb] font-medium hover:bg-[#f5faff] text-sm">
+                  View All Alerts
+                </button>
+              </div>
             </div>
           </div>
 
