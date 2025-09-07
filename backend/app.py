@@ -62,5 +62,27 @@ def recent_alerts():
         ]
     return jsonify(data)
 
+@app.route("/api/students-monitored")
+def students_monitored():
+    query = """
+        SELECT COUNT(*) AS count
+        FROM user
+        WHERE role = 'student' AND is_active = TRUE
+    """
+    with engine.connect() as conn:
+        result = conn.execute(text(query)).mappings().first()
+        return jsonify({"count": result["count"]})
+
+@app.route("/api/open-appointments")
+def open_appointments():
+    query = """
+        SELECT COUNT(*) AS count
+        FROM appointment_log
+        WHERE form_type = 'scheduled'
+    """
+    with engine.connect() as conn:
+        result = conn.execute(text(query)).mappings().first()
+        return jsonify({"count": result["count"]})
+
 if __name__ == "__main__":
     app.run(debug=True)

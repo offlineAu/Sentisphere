@@ -127,6 +127,8 @@ export default function CounselorDashboard() {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [flaggedStudents, setFlaggedStudents] = useState<StudentFlag[]>([]);
   const [recentAlerts, setRecentAlerts] = useState<any[]>([]);
+  const [studentsMonitored, setStudentsMonitored] = useState(0);
+  const [openAppointments, setOpenAppointments] = useState(0);
 
   // Fetch from backend
   useEffect(() => {
@@ -153,6 +155,16 @@ export default function CounselorDashboard() {
     fetch("http://localhost:5000/api/recent-alerts")
       .then((res) => res.json())
       .then(setRecentAlerts)
+      .catch(console.error);
+
+    fetch("http://localhost:5000/api/students-monitored")
+      .then((res) => res.json())
+      .then(data => setStudentsMonitored(data.count))
+      .catch(console.error);
+
+    fetch("http://localhost:5000/api/open-appointments")
+      .then((res) => res.json())
+      .then(data => setOpenAppointments(data.count))
       .catch(console.error);
   }, []);
 
@@ -190,7 +202,7 @@ export default function CounselorDashboard() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <StatCard
               title="Students Monitored"
-              value={flaggedStudents.length}
+              value={studentsMonitored}
               icon={<UserRound className="h-4 w-4 text-[#0d8c4f]" />}
             />
             <StatCard
@@ -200,7 +212,7 @@ export default function CounselorDashboard() {
             />
             <StatCard
               title="Open Appointments"
-              value={appointments.filter((a) => a.status === "scheduled").length}
+              value={openAppointments}
               icon={<CalendarDays className="h-4 w-4 text-[#6b7280]" />}
             />
             <StatCard
