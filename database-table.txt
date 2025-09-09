@@ -1,0 +1,152 @@
+-- USER
+CREATE TABLE user (
+    user_id INT PRIMARY KEY AUTO_INCREMENT,
+    email VARCHAR(100) UNIQUE NOT NULL,
+    name VARCHAR(100),
+    role ENUM('student', 'counselor', 'admin') NOT NULL,
+    azure_oid VARCHAR(255),
+    nickname VARCHAR(50),
+    current_streak INT DEFAULT 0,
+    longest_streak INT DEFAULT 0,
+    last_login DATETIME,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- COUNSELOR PROFILE
+CREATE TABLE counselor_profile (
+    user_id INT PRIMARY KEY,
+    department VARCHAR(100),
+    contact_number VARCHAR(20),
+    availability VARCHAR(100),
+    year_experience INT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES user(user_id)
+);
+
+-- JOURNAL
+CREATE TABLE journal (
+    journal_id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT,
+    content TEXT,
+    deleted_at DATETIME NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES user(user_id)
+);
+
+-- JOURNAL SENTIMENT
+CREATE TABLE journal_sentiment (
+    journal_sentiment_id INT PRIMARY KEY AUTO_INCREMENT,
+    journal_id INT,
+    sentiment VARCHAR(50),
+    emotions VARCHAR(255),
+    confidence FLOAT,
+    model_version VARCHAR(50),
+    analyzed_at DATETIME,
+    FOREIGN KEY (journal_id) REFERENCES journal(journal_id)
+);
+
+-- EMOTIONAL CHECKIN
+CREATE TABLE emotional_checkin (
+    checkin_id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT,
+    mood_level INT,
+    comment TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES user(user_id)
+);
+
+-- CHECKIN SENTIMENT
+CREATE TABLE checkin_sentiment (
+    checkin_sentiment_id INT PRIMARY KEY AUTO_INCREMENT,
+    checkin_id INT,
+    sentiment VARCHAR(50),
+    emotions VARCHAR(255),
+    confidence FLOAT,
+    model_version VARCHAR(50),
+    analyzed_at DATETIME,
+    FOREIGN KEY (checkin_id) REFERENCES emotional_checkin(checkin_id)
+);
+
+-- NOTIFICATION
+CREATE TABLE notification (
+    notification_id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT,
+    message TEXT,
+    type VARCHAR(50),
+    is_read BOOLEAN DEFAULT FALSE,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES user(user_id)
+);
+
+-- RESOURCE LOG
+CREATE TABLE resource_log (
+    resource_id INT PRIMARY KEY AUTO_INCREMENT,
+    title VARCHAR(100),
+    content TEXT,
+    category VARCHAR(50),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- USER ACTIVITIES
+CREATE TABLE user_activities (
+    activity_id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT,
+    action VARCHAR(50),
+    target_type VARCHAR(50),
+    target_id INT,
+    started_at DATETIME,
+    ended_at DATETIME,
+    duration_seconds INT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES user(user_id)
+);
+
+-- ALERT
+CREATE TABLE alert (
+    alert_id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT,
+    reason VARCHAR(255),
+    severity ENUM('low', 'medium', 'high', 'critical'),
+    assigned_to INT,
+    status ENUM('open', 'in_progress', 'resolved') DEFAULT 'open',
+    resolved_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES user(user_id),
+    FOREIGN KEY (assigned_to) REFERENCES user(user_id)
+);
+
+-- CONVERSATIONS
+CREATE TABLE conversations (
+    conversation_id INT PRIMARY KEY AUTO_INCREMENT,
+    initiator_user_id INT,
+    initiator_role VARCHAR(50),
+    subject VARCHAR(100),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_activity_at DATETIME,
+    FOREIGN KEY (initiator_user_id) REFERENCES user(user_id)
+);
+
+-- MESSAGE
+CREATE TABLE message (
+    message_id INT PRIMARY KEY AUTO_INCREMENT,
+    sender_id INT,
+    receiver_id INT,
+    conversation_id INT,
+    content TEXT,
+    is_read BOOLEAN DEFAULT FALSE,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (sender_id) REFERENCES user(user_id),
+    FOREIGN KEY (receiver_id) REFERENCES user(user_id),
+    FOREIGN KEY (conversation_id) REFERENCES conversations(conversation_id)
+);
+
+-- APPOINTMENT LOG
+CREATE TABLE appointment_log (
+    log_id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT,
+    form_type VARCHAR(100),
+    downloaded_at DATETIME,
+    remarks TEXT,
+    FOREIGN KEY (user_id) REFERENCES user(user_id)
+);
