@@ -132,37 +132,32 @@ export default function CounselorDashboard() {
 
   // Fetch from backend
   useEffect(() => {
-    fetch("http://localhost:5000/api/mood-trend")
+    fetch("http://localhost:8001/api/mood-trend")
       .then((res) => res.json())
       .then(setMoodTrend)
       .catch(console.error);
 
-    fetch("/api/sentiments")
+    fetch("http://localhost:8001/api/sentiments")
       .then((res) => res.json())
       .then(setSentimentBreakdown)
       .catch(console.error);
 
-    fetch("/api/appointments")
+    fetch("http://localhost:8001/api/appointments")
       .then((res) => res.json())
       .then(setAppointments)
       .catch(console.error);
 
-    fetch("/api/flags")
-      .then((res) => res.json())
-      .then(setFlaggedStudents)
-      .catch(console.error);
-
-    fetch("http://localhost:5000/api/recent-alerts")
+    fetch("http://localhost:8001/api/recent-alerts")
       .then((res) => res.json())
       .then(setRecentAlerts)
       .catch(console.error);
 
-    fetch("http://localhost:5000/api/students-monitored")
+    fetch("http://localhost:8001/api/students-monitored")
       .then((res) => res.json())
       .then(data => setStudentsMonitored(data.count))
       .catch(console.error);
 
-    fetch("http://localhost:5000/api/open-appointments")
+    fetch("http://localhost:8001/api/open-appointments")
       .then((res) => res.json())
       .then(data => setOpenAppointments(data.count))
       .catch(console.error);
@@ -241,16 +236,16 @@ export default function CounselorDashboard() {
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart data={reversedMoodTrend}>
                         <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="week" stroke="#6b7280" />
-                        <YAxis domain={['auto', 'auto']} stroke="#6b7280" />
+                        <XAxis dataKey="week" stroke="#0d8c4f" />
+                        <YAxis domain={['auto', 'auto']} stroke="#0d8c4f" />
                         <RTooltip />
                         <Line
                           type="monotone"
                           dataKey="avgMood"
-                          stroke="#2563eb"
+                          stroke="#0d8c4f"
                           strokeWidth={3}
-                          dot={{ r: 6, stroke: "#2563eb", strokeWidth: 2, fill: "#fff" }}
-                          activeDot={{ r: 8, fill: "#2563eb" }}
+                          dot={{ r: 6, stroke: "#0d8c4f", strokeWidth: 2, fill: "#fff" }}
+                          activeDot={{ r: 8, fill: "#0d8c4f" }}
                         />
                       </LineChart>
                     </ResponsiveContainer>
@@ -292,7 +287,7 @@ export default function CounselorDashboard() {
                     </div>
                   ))}
                 </div>
-                <button className="w-full mt-4 py-2 rounded-xl border text-[#2563eb] font-medium hover:bg-[#f5faff] text-sm">
+                <button className="w-full mt-4 py-2 rounded-xl border text-[#0d8c4f] font-medium hover:bg-[#f5faff] text-sm">
                   View All Alerts
                 </button>
               </div>
