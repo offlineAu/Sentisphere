@@ -5,7 +5,7 @@ export default function Sidebar() {
   return (
     <aside className={styles.sidebar}>
       <div className={styles.logo}>
-        <div className={styles.logoIcon}>S</div>
+        <img src="/logo.png" alt="Logo" className={styles.logoIcon} />
         <span className={styles.logoText}>Sentisphere</span>
       </div>
       <nav className={styles.nav}>

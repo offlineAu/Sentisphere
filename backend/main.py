@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, text
 from datetime import datetime, timedelta
@@ -21,17 +21,19 @@ def mood_trend():
     query = """
         SELECT
             YEAR(created_at) AS year,
-            WEEK(created_at) AS week,
+            MONTH(created_at) AS month_num,
+            MONTHNAME(created_at) AS month_name,
+            WEEK(created_at, 3) - WEEK(DATE_SUB(created_at, INTERVAL DAYOFMONTH(created_at)-1 DAY), 3) + 1 AS week_in_month,
             ROUND(AVG(mood_level), 2) AS avgMood
         FROM emotional_checkin
-        GROUP BY year, week
-        ORDER BY year, week
+        GROUP BY year, month_num, week_in_month
+        ORDER BY year, month_num, week_in_month
     """
     with engine.connect() as conn:
         result = conn.execute(text(query)).mappings()
         data = [
             {
-                "week": f"{row['year']}-W{str(row['week']).zfill(2)}",
+                "week": f"{row['year']}-{row['month_name']}-Week{row['week_in_month']}",
                 "avgMood": float(row["avgMood"] or 0)
             }
             for row in result
@@ -39,17 +41,30 @@ def mood_trend():
     return data
 
 @app.get("/api/sentiments")
-def sentiment_breakdown():
-    thirty_days_ago = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S')
+def sentiment_breakdown(period: str = Query("month", enum=["week", "month", "year"])):
+    now = datetime.now()
+    if period == "week":
+        start = now - timedelta(days=7)
+    elif period == "year":
+        start = now.replace(month=1, day=1)
+    else:  # month
+        start = now.replace(day=1)
+
+    # Combine sentiments from both tables
     query = """
-        SELECT sentiment AS name, COUNT(*) AS value
-        FROM checkin_sentiment
+        SELECT sentiment, COUNT(*) AS value FROM (
+            SELECT sentiment, analyzed_at FROM checkin_sentiment
+            UNION ALL
+            SELECT sentiment, analyzed_at FROM journal_sentiment
+        ) AS combined
         WHERE analyzed_at >= :date
         GROUP BY sentiment
     """
     with engine.connect() as conn:
-        result = conn.execute(text(query), {"date": thirty_days_ago}).mappings()
-        return list(result)
+        result = conn.execute(text(query), {"date": start.strftime('%Y-%m-%d %H:%M:%S')}).mappings()
+        # Ensure data is always an array and chart-friendly
+        data = [{"name": row["sentiment"], "value": row["value"]} for row in result]
+        return data
 
 @app.get("/api/appointments")
 def appointments():
