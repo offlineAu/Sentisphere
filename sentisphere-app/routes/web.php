@@ -6,7 +6,11 @@ use Inertia\Inertia;
 // Dashboard
 Route::get('/', function () {
     return Inertia::render('CounselorDashboard');
-});
+})->name('home');
+
+Route::get('/dashboard', function () {
+    return Inertia::render('CounselorDashboard');
+})->name('dashboard');
 
 // Chat
 Route::get('/chat', function () {

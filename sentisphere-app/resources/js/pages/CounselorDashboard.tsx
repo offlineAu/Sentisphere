@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { motion } from "framer-motion";
 import {
   AreaChart,
@@ -129,46 +130,151 @@ export default function CounselorDashboard() {
   const [recentAlerts, setRecentAlerts] = useState<any[]>([]);
   const [studentsMonitored, setStudentsMonitored] = useState(0);
   const [openAppointments, setOpenAppointments] = useState(0);
+  const [sentimentPeriod, setSentimentPeriod] = useState<"week" | "month" | "year">("month");
+  const [page, setPage] = useState(0);
 
   // Fetch from backend
   useEffect(() => {
-    fetch("http://localhost:5000/api/mood-trend")
+    fetch("http://localhost:8001/api/mood-trend")
       .then((res) => res.json())
       .then(setMoodTrend)
       .catch(console.error);
 
-    fetch("/api/sentiments")
-      .then((res) => res.json())
-      .then(setSentimentBreakdown)
-      .catch(console.error);
-
-    fetch("/api/appointments")
+    fetch("http://localhost:8001/api/appointments")
       .then((res) => res.json())
       .then(setAppointments)
       .catch(console.error);
 
-    fetch("/api/flags")
-      .then((res) => res.json())
-      .then(setFlaggedStudents)
-      .catch(console.error);
-
-    fetch("http://localhost:5000/api/recent-alerts")
+    fetch("http://localhost:8001/api/recent-alerts")
       .then((res) => res.json())
       .then(setRecentAlerts)
       .catch(console.error);
 
-    fetch("http://localhost:5000/api/students-monitored")
+    fetch("http://localhost:8001/api/students-monitored")
       .then((res) => res.json())
       .then(data => setStudentsMonitored(data.count))
       .catch(console.error);
 
-    fetch("http://localhost:5000/api/open-appointments")
+    fetch("http://localhost:8001/api/open-appointments")
       .then((res) => res.json())
       .then(data => setOpenAppointments(data.count))
       .catch(console.error);
   }, []);
 
-  const reversedMoodTrend = [...moodTrend].reverse();
+  // Only run this on initial mount
+  useEffect(() => {
+    let isMounted = true;
+    getFirstPeriodWithData().then((period) => {
+      if (isMounted) setSentimentPeriod(period);
+    });
+    return () => { isMounted = false; };
+  }, []);
+
+  // Fetch sentiment breakdown when sentimentPeriod changes
+  useEffect(() => {
+    fetch(`http://localhost:8001/api/sentiments?period=${sentimentPeriod}`)
+      .then((res) => res.json())
+      .then(setSentimentBreakdown)
+      .catch(console.error);
+  }, [sentimentPeriod]);
+
+const parseWeekString = (weekStr: string) => {
+  const [yearStr, monthStr, weekLabel] = weekStr.split("-");
+  const year = parseInt(yearStr, 10);
+  const month = new Date(`${monthStr} 1, ${year}`).getMonth(); // 0-based month
+  const week = parseInt(weekLabel.replace(/\D/g, ""), 10);
+
+  return { year, month, week };
+};
+
+const sortedMoodTrend = [...moodTrend].sort((a, b) => {
+  const pa = parseWeekString(a.week);
+  const pb = parseWeekString(b.week);
+
+  if (pb.year !== pa.year) return pb.year - pa.year;
+  if (pb.month !== pa.month) return pb.month - pa.month;
+  return pb.week - pa.week; // ascending week, W5 > W1
+});
+
+// Paginate (3 per page)
+const itemsPerPage = 3;
+const startIndex = page * itemsPerPage;
+const paginatedMoodTrend = sortedMoodTrend.slice(startIndex, startIndex + itemsPerPage);
+ // reverse so oldest on left
+
+const maxPage = Math.ceil(sortedMoodTrend.length / itemsPerPage) - 1;
+
+const DynamicMarginLineChart = ({ data }: any) => {
+  const [bottomMargin, setBottomMargin] = useState(30);
+
+  useEffect(() => {
+    // Find the longest label in your data (worst case height)
+    const longestLabel = data.reduce((max: string, d: any) =>
+      d.week.length > max.length ? d.week : max,
+    "");
+    
+    // Estimate text height (two lines = ~40px, more lines = more space)
+    const lineCount = longestLabel.split("-").length; 
+    setBottomMargin(lineCount * 20); // each line ~20px tall
+  }, [data]);
+
+  return (
+    <ResponsiveContainer width="100%" height={400}>
+      <LineChart
+        data={data}
+        margin={{ top: 20, right: 30, left: 20, bottom: bottomMargin }}
+      >
+        <XAxis
+          dataKey="week"
+          interval={0}
+          height={bottomMargin}
+          tick={<CustomWeekTick />}
+        />
+        <YAxis />
+        <RTooltip />
+        <Line type="monotone" dataKey="mood" stroke="#0d8c4f" />
+      </LineChart>
+    </ResponsiveContainer>
+  );
+};
+
+const CustomWeekTick = ({ x, y, payload }: any) => {
+  const parts = payload.value.split("-");
+  return (
+    <g transform={`translate(${x},${y})`}>
+      {parts.map((p: string, i: number) => (
+        <text
+          key={i}
+          x={0}
+          y={0}
+          dy={20 + i * 16}
+          textAnchor="middle"
+          fill="#0d8c4f"
+          fontSize={12}
+        >
+          {p}
+        </text>
+      ))}
+    </g>
+  );
+};
+
+
+  // Sentiment period labels
+  const periodLabels = {
+    week: "This Week",
+    month: "This Month",
+    year: "This Year",
+  };
+
+  const getFirstPeriodWithData = async () => {
+    for (const period of ["week", "month", "year"] as const) {
+      const res = await fetch(`http://localhost:8001/api/sentiments?period=${period}`);
+      const data = await res.json();
+      if (data.length > 0) return period;
+    }
+    return "year"; // fallback if all are empty
+  };
 
   return (
     <div className="flex bg-[#f5f5f5] min-h-screen">
@@ -227,37 +333,64 @@ export default function CounselorDashboard() {
             {/* Weekly Mood Trend (2/3 width on desktop) */}
             <div className="lg:col-span-2">
               <div className="bg-white rounded-2xl shadow p-4 w-full max-w-full">
-                <h2 className={styles.sectionTitle}>Weekly Mood Trend</h2>
-                <div className="overflow-x-auto" style={{ minHeight: 250, maxHeight: 400 }}>
-                  <div
-                    style={{
-                      width: Math.max(moodTrend.length * 120, 900),
-                      minWidth: 900,
-                      height: 350,
-                      display: "flex",
-                      alignItems: "center",
-                    }}
-                  >
+                <div className="flex justify-between items-center mb-2">
+                  <h2 className={styles.sectionTitle}>Weekly Mood Trend</h2>
+                  <div className="flex items-center gap-2">
+                    <button
+                      className={`p-2 rounded-full border ${
+                        page === 0
+                          ? "opacity-40 cursor-not-allowed"
+                          : "hover:bg-gray-100"
+                      }`}
+                      onClick={() => setPage((p) => Math.max(p - 1, 0))}
+                      disabled={page === 0}
+                    >
+                      <ChevronLeft className="h-5 w-5 text-[#0d8c4f]" />
+                    </button>
+                    <button
+                      className={`p-2 rounded-full border ${
+                        page === maxPage
+                          ? "opacity-40 cursor-not-allowed"
+                          : "hover:bg-gray-100"
+                      }`}
+                      onClick={() => setPage((p) => Math.min(p + 1, maxPage))}
+                      disabled={page === maxPage}
+                    >
+                      <ChevronRight className="h-5 w-5 text-[#0d8c4f]" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="h-[350px] flex items-center justify-center">
+                  {paginatedMoodTrend.length === 0 ? (
+                    <span className="text-gray-500 text-sm">No mood data available.</span>
+                  ) : (
                     <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={reversedMoodTrend}>
+                      <LineChart data={paginatedMoodTrend} margin={{ top: 20, right: 35, bottom: 40, left: 20 }}>
                         <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="week" stroke="#6b7280" />
-                        <YAxis domain={['auto', 'auto']} stroke="#6b7280" />
+                        <XAxis
+                          dataKey="week"
+                          stroke="#0d8c4f"
+                          interval={0}
+                          tick={<CustomWeekTick />}
+                        />
+                        <YAxis domain={["auto", "auto"]} stroke="#0d8c4f" />
                         <RTooltip />
                         <Line
                           type="monotone"
                           dataKey="avgMood"
-                          stroke="#2563eb"
+                          stroke="#0d8c4f"
                           strokeWidth={3}
-                          dot={{ r: 6, stroke: "#2563eb", strokeWidth: 2, fill: "#fff" }}
-                          activeDot={{ r: 8, fill: "#2563eb" }}
+                          dot={{ r: 6, stroke: "#0d8c4f", strokeWidth: 2, fill: "#fff" }}
+                          activeDot={{ r: 8, fill: "#0d8c4f" }}
                         />
                       </LineChart>
                     </ResponsiveContainer>
-                  </div>
+                  )}
                 </div>
               </div>
             </div>
+
 
             {/* Recent Alerts (1/3 width on desktop) */}
             <div>
@@ -292,35 +425,62 @@ export default function CounselorDashboard() {
                     </div>
                   ))}
                 </div>
-                <button className="w-full mt-4 py-2 rounded-xl border text-[#2563eb] font-medium hover:bg-[#f5faff] text-sm">
+                <button className="w-full mt-4 py-2 rounded-xl border text-[#0d8c4f] font-medium hover:bg-[#f5faff] text-sm">
                   View All Alerts
                 </button>
               </div>
             </div>
           </div>
 
-          {/* 🔹 Sentiment Breakdown */}
-          <div className="bg-white rounded-2xl shadow p-4">
-            <h2 className={styles.sectionTitle}>
-              Sentiment Breakdown (30d)
-            </h2>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    dataKey="value"
-                    data={sentimentBreakdown}
-                    outerRadius={100}
-                    label
-                  >
-                    {sentimentBreakdown.map((_, i) => (
-                      <Cell key={i} fill={i % 2 === 0 ? "#0d8c4f" : "#2563eb"} />
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4">
+            {/* Sentiment Breakdown (2/3 width on desktop) */}
+            <div className="lg:col-span-2">
+              <div className="bg-white rounded-2xl shadow p-4 w-full max-w-full">
+                <div className="flex justify-between items-center mb-2">
+                  <h2 className={styles.sectionTitle}>
+                    Sentiment Breakdown
+                  </h2>
+                  <div className="flex gap-2">
+                    {(["week", "month", "year"] as const).map((p) => (
+                      <button
+                        key={p}
+                        className={`px-3 py-1 rounded-lg text-sm font-medium border ${
+                          sentimentPeriod === p
+                            ? "bg-[#0d8c4f] text-white border-[#0d8c4f]"
+                            : "bg-[#f5f5f5] text-[#0d8c4f] border-[#e5e5e5]"
+                        } transition`}
+                        onClick={() => setSentimentPeriod(p)}
+                      >
+                        {periodLabels[p]}
+                      </button>
                     ))}
-                  </Pie>
-                  <RTooltip />
-                </PieChart>
-              </ResponsiveContainer>
+                  </div>
+                </div>
+                <div className="h-64 flex items-center justify-center">
+                  {sentimentBreakdown.length === 0 ? (
+                    <span className="text-[#6b7280] text-sm">No sentiment data available for this period.</span>
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          dataKey="value"
+                          data={sentimentBreakdown}
+                          outerRadius={100}
+                          label={({ name, value }) => `${name}: ${value}`}
+                        >
+                          {sentimentBreakdown.map((entry, i) => (
+                            <Cell key={i} fill={entry.name === "positive" ? "#4ade80" : entry.name === "negative" ? "#f87171" : "#fbbf24"} />
+                          ))}
+                        </Pie>
+                        <RTooltip />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
+              </div>
             </div>
+            {/* Empty space or another section (1/3 width) */}
+            <div></div>
           </div>
 
           {/* 🔹 Appointments */}
