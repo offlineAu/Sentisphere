@@ -224,6 +224,118 @@ def send_message(conversation_id: int, message: MessageIn):
             "content": message.content,
             "timestamp": str(datetime.now())
         }
+    
+# --- Reports APIs ---
+
+@app.get("/api/reports/top-stats")
+def get_top_stats():
+    query = """
+        SELECT 
+            (SELECT COUNT(*) FROM user WHERE role = 'student') AS total_students,
+            (SELECT COUNT(*) FROM user WHERE is_active = TRUE) AS active_users,
+            (SELECT COUNT(*) FROM alert WHERE severity IN ('high','critical') AND status='open') AS at_risk_students,
+            (SELECT ROUND(AVG(mood_level),2) FROM emotional_checkin) AS avg_wellness_score
+    """
+    with engine.connect() as conn:
+        row = conn.execute(text(query)).mappings().first()
+        return {
+            "total_students": row["total_students"],
+            "active_users": row["active_users"],
+            "at_risk_students": row["at_risk_students"],
+            "avg_wellness_score": float(row["avg_wellness_score"] or 0),
+        }
+
+
+@app.get("/api/reports/attention")
+def get_attention_students():
+    query = """
+        SELECT 
+            u.name,
+            COALESCE(a.severity, 'low') AS risk,
+            ROUND(AVG(e.mood_level), 1) AS score,
+            (SELECT name FROM user WHERE user_id = a.assigned_to) AS counselor,
+            MAX(a.created_at) AS last_contact,
+            GROUP_CONCAT(DISTINCT a.reason SEPARATOR ', ') AS concerns
+        FROM user u
+        LEFT JOIN alert a ON u.user_id = a.user_id AND a.status='open'
+        LEFT JOIN emotional_checkin e ON u.user_id = e.user_id
+        WHERE u.role = 'student'
+        GROUP BY u.user_id, u.name, a.severity, a.assigned_to
+        HAVING risk != 'low'
+        ORDER BY score ASC
+        LIMIT 10
+    """
+    with engine.connect() as conn:
+        result = conn.execute(text(query)).mappings()
+        return [
+            {
+                "name": row["name"],
+                "risk": row["risk"].capitalize(),
+                "score": f"{row['score'] or 0}/10",
+                "counselor": row["counselor"] or "Unassigned",
+                "last_contact": row["last_contact"].strftime("%B %d, %Y") if row["last_contact"] else "",
+                "concerns": row["concerns"].split(", ") if row["concerns"] else [],
+            }
+            for row in result
+        ]
+
+
+@app.get("/api/reports/concerns")
+def get_concerns():
+    query = """
+        SELECT reason AS label, COUNT(*) AS students
+        FROM alert
+        WHERE status='open'
+        GROUP BY reason
+        ORDER BY students DESC
+        LIMIT 5
+    """
+    with engine.connect() as conn:
+        result = conn.execute(text(query)).mappings()
+        total = sum([row["students"] for row in result])
+        return [
+            {
+                "label": row["label"],
+                "students": row["students"],
+                "percent": round((row["students"]/total)*100, 1) if total > 0 else 0
+            }
+            for row in result
+        ]
+
+
+@app.get("/api/reports/interventions")
+def get_interventions():
+    query = """
+        SELECT form_type AS label, COUNT(*) AS participants
+        FROM appointment_log
+        GROUP BY form_type
+    """
+    with engine.connect() as conn:
+        result = conn.execute(text(query)).mappings()
+        total = sum([row["participants"] for row in result])
+        return [
+            {
+                "label": row["label"],
+                "participants": row["participants"],
+                "percent": round((row["participants"]/total)*100, 1) if total > 0 else 0
+            }
+            for row in result
+        ]
+
+@app.get("/api/reports/participation")
+def get_participation():
+    query_total = "SELECT COUNT(*) AS total FROM user WHERE role='student'"
+    query_submitted = """
+        SELECT COUNT(DISTINCT user_id) AS submitted 
+        FROM emotional_checkin
+        WHERE created_at >= CURDATE()
+    """
+    with engine.connect() as conn:
+        total = conn.execute(text(query_total)).mappings().first()["total"]
+        submitted = conn.execute(text(query_submitted)).mappings().first()["submitted"]
+        participation = round((submitted / total) * 100, 1) if total > 0 else 0
+    return {"total": total, "submitted": submitted, "participation": participation}
+
 
 # Run with: 
 # venv\Scripts\activate 

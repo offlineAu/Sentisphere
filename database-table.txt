@@ -6,8 +6,6 @@ CREATE TABLE user (
     role ENUM('student', 'counselor', 'admin') NOT NULL,
     azure_oid VARCHAR(255),
     nickname VARCHAR(50),
-    current_streak INT DEFAULT 0,
-    longest_streak INT DEFAULT 0,
     last_login DATETIME,
     is_active BOOLEAN DEFAULT TRUE,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
