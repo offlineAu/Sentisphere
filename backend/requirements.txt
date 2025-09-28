@@ -1,0 +1,6 @@
+Flask
+flask-cors
+SQLAlchemy
+mysql-connector-python
+Fastapi
+Uvicorn

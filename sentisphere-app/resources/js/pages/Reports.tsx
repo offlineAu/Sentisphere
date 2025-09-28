@@ -1,5 +1,6 @@
-import DashboardLayout from '../layouts/DashboardLayout';
-import styles from './Reports.module.css';
+import { useEffect, useState } from "react";
+import DashboardLayout from "../layouts/DashboardLayout";
+import styles from "./Reports.module.css";
 
 type TopStat = {
   label: string;
@@ -54,92 +55,64 @@ type AttentionStudent = {
   counselor: string;
 };
 
-function Reports({
-  topStats = [
-    { label: "Total Students", value: 1247, delta: "+12% from last month", deltaColor: "text-green-600" },
-    { label: "Active Users", value: 892, delta: "+8% from last month", deltaColor: "text-green-600" },
-    { label: "At-Risk Students", value: 23, delta: "+3 from last week", deltaColor: "text-red-600" },
-    { label: "Avg. Wellness Score", value: 7.2, delta: "+0.3 from last month", deltaColor: "text-green-600" },
-  ],
-  riskLevels = [
-    { label: "High Risk", className: styles.riskHigh, count: 8, change: "+2", changeColor: "text-red-600" },
-    { label: "Medium Risk", className: styles.riskMedium, count: 15, change: "+1", changeColor: "text-yellow-700" },
-    { label: "Low Risk", className: styles.riskLow, count: 45, change: "-3", changeColor: "text-green-600" },
-    { label: "No Risk", className: styles.riskNone, count: 1179, change: "+12", changeColor: "text-red-600" },
-  ],
-  alerts = [
-    { student: "Student #1247", risk: "High", riskClass: styles.alertHigh, time: "2 hours ago" },
-    { student: "Student #0892", risk: "Medium", riskClass: styles.alertMedium, time: "5 hours ago" },
-    { student: "Student #1156", risk: "Low", riskClass: styles.alertLow, time: "1 day ago" },
-  ],
-  secondaryStats = [
-    { label: "Overall Mood", value: "7.2/10", delta: "+0.3 from last period", deltaColor: "text-green-600" },
-    { label: "Stress Levels", value: "6.1/10", delta: "-0.3 from last period", deltaColor: "text-red-600" },
-    { label: "Sleep Quality", value: "6.8/10", delta: "0.0 from last period", deltaColor: "text-[#6b7280]" },
-    { label: "Social Connection", value: "7.5/10", delta: "+0.3 from last period", deltaColor: "text-green-600" },
-  ],
-  concerns = [
-    { label: "Academic Pressure", students: 169, percent: 88, barColor: "#2563eb" },
-    { label: "Financial Stress", students: 112, percent: 45, barColor: "#0d8c4f" },
-    { label: "Social Anxiety", students: 94, percent: 38, barColor: "#2563eb" },
-    { label: "Sleep Issues", students: 84, percent: 34, barColor: "#0d8c4f" },
-    { label: "Family Problems", students: 55, percent: 22, barColor: "#2563eb" },
-  ],
-  interventions = [
-    { label: "Mindfulness Training", participants: 45, percent: 87, barColor: "#0d8c4f" },
-    { label: "Peer Support Groups", participants: 38, percent: 82, barColor: "#2563eb" },
-    { label: "Sleep Hygiene Workshop", participants: 52, percent: 78, barColor: "#0d8c4f" },
-    { label: "Stress Management Course", participants: 67, percent: 76, barColor: "#2563eb" },
-    { label: "Time Management Training", participants: 29, percent: 71, barColor: "#0d8c4f" },
-  ],
-  attentionStudents = [
-    {
-      name: "Alex Thompson",
-      risk: "High",
-      riskClass: styles.riskHigh,
-      score: "8.2/10",
-      concerns: ["Mood decline", "Missed appointments", "+ more"],
-      lastContact: "March 20, 2025",
-      counselor: "Dr. Sarah Johnson",
-    },
-    {
-      name: "Morgan Chen",
-      risk: "High",
-      riskClass: styles.riskHigh,
-      score: "7.8/10",
-      concerns: ["Academic stress", "Sleep issues", "+ more"],
-      lastContact: "March 22, 2025",
-      counselor: "Dr. Michael Chen",
-    },
-    {
-      name: "Jordan Williams",
-      risk: "Medium",
-      riskClass: styles.riskMedium,
-      score: "6.5/10",
-      concerns: ["Financial stress", "Family issues"],
-      lastContact: "March 18, 2025",
-      counselor: "Dr. Emily Rodriguez",
-    },
-    {
-      name: "Casey Martinez",
-      risk: "Medium",
-      riskClass: styles.riskMedium,
-      score: "6.1/10",
-      concerns: ["Relationship problems", "Academic pressure"],
-      lastContact: "March 13, 2025",
-      counselor: "Dr. Sarah Johnson",
-    },
-    {
-      name: "Riley Johnson",
-      risk: "Low",
-      riskClass: styles.riskLow,
-      score: "5.9/10",
-      concerns: ["Social anxiety", "Low self-esteem"],
-      lastContact: "March 19, 2025",
-      counselor: "Dr. Michael Chen",
-    },
-  ],
-}) {
+function Reports() {
+  const [loading, setLoading] = useState(true);
+  const [topStats, setTopStats] = useState<TopStat[]>([]);
+  const [riskLevels, setRiskLevels] = useState<RiskLevel[]>([]);
+  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [secondaryStats, setSecondaryStats] = useState<SecondaryStat[]>([]);
+  const [concerns, setConcerns] = useState<Concern[]>([]);
+  const [interventions, setInterventions] = useState<Intervention[]>([]);
+  const [attentionStudents, setAttentionStudents] = useState<AttentionStudent[]>([]);
+
+  useEffect(() => {
+    fetch("http://localhost:8001/api/reports")
+      .then((res) => res.json())
+      .then((data) => {
+        setTopStats(data.topStats || []);
+        setRiskLevels(
+          (data.riskLevels || []).map((r: any) => ({
+            ...r,
+            className:
+              r.label.includes("High") ? styles.riskHigh :
+              r.label.includes("Medium") ? styles.riskMedium :
+              r.label.includes("Low") ? styles.riskLow :
+              styles.riskNone,
+          }))
+        );
+        setAlerts(
+          (data.alerts || []).map((a: any) => ({
+            ...a,
+            riskClass:
+              a.risk === "High" ? styles.alertHigh :
+              a.risk === "Medium" ? styles.alertMedium :
+              styles.alertLow,
+          }))
+        );
+        setSecondaryStats(data.secondaryStats || []);
+        setConcerns(data.concerns || []);
+        setInterventions(data.interventions || []);
+        setAttentionStudents(
+          (data.attentionStudents || []).map((s: any) => ({
+            ...s,
+            riskClass:
+              s.risk === "High" ? styles.riskHigh :
+              s.risk === "Medium" ? styles.riskMedium :
+              styles.riskLow,
+          }))
+        );
+        setLoading(false);
+      })
+      .catch((err) => {
+        console.error("Error fetching reports:", err);
+        setLoading(false);
+      });
+  }, []);
+
+  if (loading) {
+    return <div>Loading Reports...</div>;
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -176,23 +149,9 @@ function Reports({
               Export Chart
             </button>
           </div>
-          {/* Replace below with your chart component */}
+          {/* Placeholder for chart */}
           <div className="h-48 flex items-center justify-center text-[#6b7280]">
             <span>Chart goes here</span>
-          </div>
-          <div className="flex justify-between mt-4 text-sm">
-            <div>
-              <span className="font-bold text-[#333]">Current Average</span>
-              <div className="text-lg font-bold text-[#333]">7.2/10</div>
-            </div>
-            <div>
-              <span className="font-bold text-[#333]">Trend</span>
-              <div className="text-lg font-bold text-green-600">+0.4</div>
-            </div>
-            <div>
-              <span className="font-bold text-[#333]">Participation</span>
-              <div className="text-lg font-bold text-[#333]">89%</div>
-            </div>
           </div>
         </div>
         {/* Risk Assessment */}
@@ -218,9 +177,6 @@ function Reports({
                 </div>
               ))}
             </div>
-            <div className="mt-2 text-right">
-              <button className="text-[#2563eb] text-xs font-medium">View All Alerts</button>
-            </div>
           </div>
         </div>
       </div>
@@ -236,9 +192,8 @@ function Reports({
         ))}
       </div>
 
-      {/* Top Concerns & Intervention Success */}
+      {/* Top Concerns & Interventions */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Top Student Concerns */}
         <div className="bg-white rounded-2xl shadow p-4">
           <h3 className="text-[#333] font-semibold mb-2 text-sm">Top Student Concerns</h3>
           <div className="space-y-2">
@@ -256,7 +211,6 @@ function Reports({
             ))}
           </div>
         </div>
-        {/* Intervention Success Rates */}
         <div className="bg-white rounded-2xl shadow p-4">
           <h3 className="text-[#333] font-semibold mb-2 text-sm">Intervention Success Rates</h3>
           <div className="space-y-2">
@@ -276,7 +230,7 @@ function Reports({
         </div>
       </div>
 
-      {/* Students Requiring Attention Table */}
+      {/* Students Requiring Attention */}
       <div className="bg-white rounded-2xl shadow p-4">
         <h3 className={styles.tableTitle}>
           <span className="mr-2">Students Requiring Attention</span>
@@ -299,7 +253,9 @@ function Reports({
               <tr key={i} className="border-b">
                 <td className="py-2 font-medium text-[#333]">{student.name}</td>
                 <td>
-                  <span className={`px-2 py-1 rounded text-xs font-medium ${student.riskClass}`}>{student.risk}</span>
+                  <span className={`px-2 py-1 rounded text-xs font-medium ${student.riskClass}`}>
+                    {student.risk}
+                  </span>
                 </td>
                 <td className="font-bold text-[#333]">{student.score}</td>
                 <td>
