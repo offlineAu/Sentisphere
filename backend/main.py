@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, text
 from pydantic import BaseModel
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 app = FastAPI()
@@ -29,7 +29,7 @@ def mood_trend():
             WEEK(created_at, 3) - WEEK(DATE_SUB(created_at, INTERVAL DAYOFMONTH(created_at)-1 DAY), 3) + 1 AS week_in_month,
             ROUND(AVG(mood_level), 2) AS avgMood
         FROM emotional_checkin
-        GROUP BY year, month_num, week_in_month
+        GROUP BY year, month_num, month_name, week_in_month
         ORDER BY year, month_num, week_in_month
     """
     with engine.connect() as conn:
@@ -73,18 +73,15 @@ def sentiment_breakdown(period: str = Query("month", enum=["week", "month", "yea
 def appointments():
     query = """
         SELECT
-            a.appointment_id AS id,
+            a.log_id AS id,
             u.name AS student,
-            a.date,
-            a.time,
-            c.name AS counselor,
-            a.status,
-            a.notes
+            a.form_type,
+            a.downloaded_at,
+            a.remarks
         FROM appointment_log a
         JOIN user u ON a.user_id = u.user_id
-        JOIN user c ON a.counselor_id = c.user_id
-        WHERE a.date >= CURDATE()
-        ORDER BY a.date, a.time
+        WHERE a.downloaded_at >= CURDATE()
+        ORDER BY a.downloaded_at
         LIMIT 12
     """
     with engine.connect() as conn:
@@ -93,11 +90,9 @@ def appointments():
             {
                 "id": row["id"],
                 "student": row["student"],
-                "date": row["date"].strftime("%Y-%m-%d") if row["date"] else "",
-                "time": row["time"],
-                "counselor": row["counselor"],
-                "status": row["status"],
-                "notes": row["notes"],
+                "form_type": row["form_type"],
+                "downloaded_at": row["downloaded_at"].strftime("%Y-%m-%d %H:%M:%S") if row["downloaded_at"] else "",
+                "remarks": row["remarks"],
             }
             for row in result
         ]
@@ -230,4 +225,6 @@ def send_message(conversation_id: int, message: MessageIn):
             "timestamp": str(datetime.now())
         }
 
-# Run with: uvicorn main:app --reload --port 8001
+# Run with: 
+# venv\Scripts\activate 
+# uvicorn main:app --reload --port 8001
