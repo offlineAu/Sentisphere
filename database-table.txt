@@ -119,26 +119,25 @@ CREATE TABLE alert (
 -- CONVERSATIONS
 CREATE TABLE conversations (
     conversation_id INT PRIMARY KEY AUTO_INCREMENT,
-    initiator_user_id INT,
-    initiator_role VARCHAR(50),
+    initiator_user_id INT NOT NULL,
+    initiator_role ENUM('student') NOT NULL, -- only students can start
     subject VARCHAR(100),
+    status ENUM('open', 'ended') DEFAULT 'open', -- student controls this
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     last_activity_at DATETIME,
     FOREIGN KEY (initiator_user_id) REFERENCES user(user_id)
 );
 
 -- MESSAGE
-CREATE TABLE message (
+CREATE TABLE messages (
     message_id INT PRIMARY KEY AUTO_INCREMENT,
-    sender_id INT,
-    receiver_id INT,
-    conversation_id INT,
-    content TEXT,
+    conversation_id INT NOT NULL,
+    sender_id INT NOT NULL,
+    content TEXT NOT NULL,
     is_read BOOLEAN DEFAULT FALSE,
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (sender_id) REFERENCES user(user_id),
-    FOREIGN KEY (receiver_id) REFERENCES user(user_id),
-    FOREIGN KEY (conversation_id) REFERENCES conversations(conversation_id)
+    FOREIGN KEY (conversation_id) REFERENCES conversations(conversation_id),
+    FOREIGN KEY (sender_id) REFERENCES user(user_id)
 );
 
 -- APPOINTMENT LOG
@@ -606,3 +605,46 @@ INSERT INTO checkin_sentiment (checkin_id, sentiment, emotions, confidence, mode
 (98, 'Positive', 'peace, calm', 0.89, 'v1.0', '2023-04-12 14:05:00'),
 (99, 'Negative', 'anxiety, doubt', 0.80, 'v1.0', '2023-04-13 19:25:00'),
 (100,'Positive', 'gratitude, optimism', 0.93, 'v1.0', '2023-04-14 08:55:00');
+
+
+-- Alice Reyes (student_id = 1) starts a conversation with Michael Herrera (counselor_id = 21)
+INSERT INTO conversations (initiator_user_id, initiator_role, subject, status, created_at, last_activity_at)
+VALUES (1, 'student', 'Feeling stressed about exams', 'open', NOW() - INTERVAL 2 DAY, NOW() - INTERVAL 1 DAY);
+
+-- Mark Santos (student_id = 2) with Joanna Ramos (counselor_id = 22)
+INSERT INTO conversations (initiator_user_id, initiator_role, subject, status, created_at, last_activity_at)
+VALUES (2, 'student', 'Trouble managing time', 'open', NOW() - INTERVAL 3 DAY, NOW() - INTERVAL 2 DAY);
+
+-- Maria Lopez (student_id = 4) with Daniel Cruz (counselor_id = 23), conversation ended
+INSERT INTO conversations (initiator_user_id, initiator_role, subject, status, created_at, last_activity_at)
+VALUES (4, 'student', 'Anxiety about presentations', 'ended', NOW() - INTERVAL 5 DAY, NOW() - INTERVAL 4 DAY);
+
+-- Jasmine Flores (student_id = 6) with Sarah Villanueva (counselor_id = 24)
+INSERT INTO conversations (initiator_user_id, initiator_role, subject, status, created_at, last_activity_at)
+VALUES (6, 'student', 'Homesickness and adjustment', 'open', NOW() - INTERVAL 1 DAY, NOW());
+
+-- Conversation 1: Alice & Michael
+INSERT INTO messages (conversation_id, sender_id, content, is_read, timestamp) VALUES
+(1, 1, 'Hi Sir Michael, I feel really stressed about exams lately.', FALSE, NOW() - INTERVAL 2 DAY + INTERVAL 1 HOUR),
+(1, 21, 'Hi Alice, I understand. Let’s work on a study plan together.', TRUE, NOW() - INTERVAL 2 DAY + INTERVAL 2 HOUR),
+(1, 1, 'That would be very helpful, thank you!', TRUE, NOW() - INTERVAL 1 DAY + INTERVAL 1 HOUR);
+
+-- Conversation 2: Mark & Joanna
+INSERT INTO messages (conversation_id, sender_id, content, is_read, timestamp) VALUES
+(2, 2, 'Ma’am Joanna, I can’t seem to manage my tasks and schoolwork.', FALSE, NOW() - INTERVAL 3 DAY + INTERVAL 1 HOUR),
+(2, 22, 'Thanks for sharing, Mark. Let’s try breaking tasks into smaller steps.', TRUE, NOW() - INTERVAL 3 DAY + INTERVAL 2 HOUR),
+(2, 2, 'Yes, I’ll try that out this week!', TRUE, NOW() - INTERVAL 2 DAY + INTERVAL 3 HOUR);
+
+-- Conversation 3: Maria & Daniel (ended)
+INSERT INTO messages (conversation_id, sender_id, content, is_read, timestamp) VALUES
+(3, 4, 'Sir Daniel, I get anxious when speaking in class.', FALSE, NOW() - INTERVAL 5 DAY + INTERVAL 1 HOUR),
+(3, 23, 'That’s normal, Maria. We can practice short speeches.', TRUE, NOW() - INTERVAL 5 DAY + INTERVAL 2 HOUR),
+(3, 4, 'I feel more confident now. Thank you!', TRUE, NOW() - INTERVAL 4 DAY + INTERVAL 1 HOUR);
+
+-- Conversation 4: Jasmine & Sarah
+INSERT INTO messages (conversation_id, sender_id, content, is_read, timestamp) VALUES
+(4, 6, 'Hi Ma’am Sarah, I feel homesick since moving to campus.', FALSE, NOW() - INTERVAL 1 DAY + INTERVAL 2 HOUR),
+(4, 24, 'Hi Jasmine, that’s completely normal. Let’s talk about ways to adjust.', TRUE, NOW() - INTERVAL 1 DAY + INTERVAL 3 HOUR),
+(4, 6, 'Thank you! That makes me feel less alone.', TRUE, NOW() - INTERVAL 1 HOUR);
+
+

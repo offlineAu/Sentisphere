@@ -1,7 +1,10 @@
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, text
-from datetime import datetime, timedelta
+from pydantic import BaseModel
+from typing import List, Optional
+from datetime import datetime
+
 
 app = FastAPI()
 
@@ -152,5 +155,79 @@ def open_appointments():
     with engine.connect() as conn:
         result = conn.execute(text(query)).mappings().first()
         return {"count": result["count"]}
+
+# --- Conversations list ---
+@app.get("/api/conversations")
+def get_conversations(user_id: int = Query(...)):
+    query = """
+        SELECT DISTINCT
+            c.conversation_id AS id,
+            c.initiator_user_id,
+            c.initiator_role,
+            c.subject,
+            c.status,
+            c.created_at,
+            c.last_activity_at
+        FROM conversations c
+        LEFT JOIN messages m ON c.conversation_id = m.conversation_id
+        WHERE c.initiator_user_id = :uid   -- student initiated
+           OR m.sender_id = :uid           -- counselor/admin/student sent messages
+        ORDER BY c.last_activity_at DESC, c.created_at DESC
+    """
+    with engine.connect() as conn:
+        result = conn.execute(text(query), {"uid": user_id}).mappings()
+        return [dict(row) for row in result]
+
+
+# --- Messages per conversation ---
+@app.get("/api/conversations/{conversation_id}/messages")
+def get_messages(conversation_id: int):
+    query = """
+        SELECT 
+            m.message_id AS id,
+            m.conversation_id,
+            m.sender_id,
+            u.name AS sender_name,
+            u.role AS sender_role,
+            m.content,
+            m.is_read,
+            m.timestamp
+        FROM messages m
+        JOIN user u ON m.sender_id = u.user_id
+        WHERE m.conversation_id = :cid
+        ORDER BY m.timestamp ASC
+    """
+    with engine.connect() as conn:
+        result = conn.execute(text(query), {"cid": conversation_id}).mappings()
+        return [dict(row) for row in result]
+
+
+# --- Send message ---
+from pydantic import BaseModel
+
+class MessageIn(BaseModel):
+    sender_id: int
+    content: str
+
+@app.post("/api/conversations/{conversation_id}/messages")
+def send_message(conversation_id: int, message: MessageIn):
+    query = """
+        INSERT INTO messages (conversation_id, sender_id, content, timestamp)
+        VALUES (:cid, :sid, :content, NOW())
+    """
+    with engine.connect() as conn:
+        result = conn.execute(
+            text(query),
+            {"cid": conversation_id, "sid": message.sender_id, "content": message.content}
+        )
+        conn.commit()
+
+        return {
+            "id": result.lastrowid,
+            "conversation_id": conversation_id,
+            "sender_id": message.sender_id,
+            "content": message.content,
+            "timestamp": str(datetime.now())
+        }
 
 # Run with: uvicorn main:app --reload --port 8001

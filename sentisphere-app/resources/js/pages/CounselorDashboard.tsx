@@ -196,6 +196,21 @@ const sortedMoodTrend = [...moodTrend].sort((a, b) => {
   return pb.week - pa.week; // ascending week, W5 > W1
 });
 
+const getCurrentWeekString = () => {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = today.toLocaleString("default", { month: "short" }); // e.g. "Sep"
+
+  // get week number of current month
+  const day = today.getDate();
+  const week = Math.ceil(day / 7); // 1-5 depending on day of month
+
+  return `${year}-${month}-W${week}`;
+};
+
+const currentWeek = getCurrentWeekString();
+const thisWeekCheckins = moodTrend.filter(m => m.week === currentWeek).length;
+
 // Paginate (3 per page)
 const itemsPerPage = 3;
 const startIndex = page * itemsPerPage;
@@ -313,7 +328,7 @@ const CustomWeekTick = ({ x, y, payload }: any) => {
             />
             <StatCard
               title="This Week Check-ins"
-              value={moodTrend.length}
+              value={thisWeekCheckins}
               icon={<Activity className="h-4 w-4 text-[#2563eb]" />}
             />
             <StatCard
