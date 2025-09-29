@@ -18,10 +18,13 @@ import {
   Moon,
   Activity,
   Users,
+  User,
   Clock,
   CheckCircle,
   Star,
   Brain,
+  RefreshCcw,
+  Share2,
 } from 'lucide-react-native';
 
 type IconProps = {
@@ -43,10 +46,13 @@ type IconProps = {
     | 'moon'
     | 'activity'
     | 'users'
+    | 'user'
     | 'clock'
     | 'check-circle'
     | 'star'
-    | 'brain';
+    | 'brain'
+    | 'refresh-ccw'
+    | 'share-2';
   size?: number;
   color?: string;
 };
@@ -70,10 +76,13 @@ const icons: Record<string, any> = {
   'moon': Moon,
   'activity': Activity,
   'users': Users,
+  'user': User,
   'clock': Clock,
   'check-circle': CheckCircle,
   'star': Star,
   'brain': Brain,
+  'refresh-ccw': RefreshCcw,
+  'share-2': Share2,
 };
 
 export function Icon({ name, size = 20, color }: IconProps) {
@@ -98,10 +107,13 @@ export function Icon({ name, size = 20, color }: IconProps) {
     moon: 'moon',
     activity: 'activity',
     users: 'users',
+    user: 'user',
     clock: 'clock',
     'check-circle': 'check-circle',
     star: 'star',
     brain: 'cpu',
+    'refresh-ccw': 'refresh-ccw',
+    'share-2': 'share-2',
   };
   const featherName = featherNameMap[name] ?? 'circle';
   return <Feather name={featherName} size={size} color={color} />;

@@ -1,6 +1,6 @@
 "use client"
 
-import { StyleSheet, View, ScrollView, Dimensions, Pressable, Animated, Easing, Platform, useWindowDimensions } from "react-native"
+import { StyleSheet, View, ScrollView, Dimensions, Pressable, Animated, Easing, Platform, useWindowDimensions, Share } from "react-native"
 import { useEffect, useState, useRef } from "react"
 import { ThemedView } from "@/components/themed-view"
 import { ThemedText } from "@/components/themed-text"
@@ -15,7 +15,7 @@ import { LinearGradient } from "expo-linear-gradient"
 const { width } = Dimensions.get("window")
 const GRID_PADDING = 16 // matches scrollContent padding
 const CARD_CONTENT_PADDING = 20 // matches styles.cardContent padding
-const QUICK_GAP = 20 // matches styles.quickGrid.gap
+const QUICK_GAP = 16 // matches styles.quickGrid.gap
 const TILE_WIDTH = (width - GRID_PADDING * 2 - CARD_CONTENT_PADDING * 2 - QUICK_GAP) / 2
 const TILE_WIDTH_NATIVE = width < 400 ? ("100%" as const) : ("48%" as const)
 
@@ -105,16 +105,49 @@ export default function EnhancedDashboardScreen() {
     { id: "2", title: "Weekend Plans", date: "2024-01-14", mood: "Excited" },
   ])
 
+  // Quote from Real Inspire API: https://api.realinspire.live/v1/quotes/random
+  type InspireQuote = { content: string; author: string }
+  const [quote, setQuote] = useState<InspireQuote | null>(null)
+  const quoteFade = useRef(new Animated.Value(1)).current
+  const quoteTranslateY = quoteFade.interpolate({ inputRange: [0, 1], outputRange: [4, 0] })
+
+  const fetchQuote = async () => {
+    try {
+      const res = await fetch('https://api.realinspire.live/v1/quotes/random?maxLength=160')
+      const data = await res.json()
+      if (Array.isArray(data) && data[0]) {
+        setQuote({ content: data[0].content, author: data[0].author })
+      }
+    } catch (e) {
+      // keep previous quote on error
+    }
+  }
+
+  const refreshQuote = () => {
+    Animated.timing(quoteFade, { toValue: 0, duration: 140, easing: Easing.out(Easing.quad), useNativeDriver: true }).start(async () => {
+      await fetchQuote()
+      Animated.timing(quoteFade, { toValue: 1, duration: 200, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start()
+    })
+  }
+
+  const shareQuote = async () => {
+    try {
+      const msg = quote ? `“${quote.content}” — ${quote.author}` : 'Sentisphere'
+      await Share.share({ message: msg })
+    } catch {}
+  }
+
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000)
+    // load first quote
+    fetchQuote()
     return () => clearInterval(t)
   }, [])
 
   const greeting = (() => {
     const hour = now.getHours()
-    if (hour < 12) return { text: "Good morning", icon: "sun" as const, color: "#F59E0B" }
-    if (hour < 17) return { text: "Good afternoon", icon: "sun" as const, color: "#EF4444" }
-    return { text: "Good evening", icon: "moon" as const, color: "#8B5CF6" }
+    const text = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening"
+    return { text, icon: "user" as const, color: palette.tint }
   })()
 
   const getMoodColor = (mood: number) => {
@@ -130,6 +163,54 @@ export default function EnhancedDashboardScreen() {
     if (mood >= 4) return "😔"
     return "😢"
   }
+
+  // Inspiration subtle emphasis animations
+  const inspirePulse = useRef(new Animated.Value(0)).current
+  useEffect(() => {
+    const pulse = Animated.loop(
+      Animated.sequence([
+        Animated.timing(inspirePulse, { toValue: 1, duration: 2200, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+        Animated.timing(inspirePulse, { toValue: 0, duration: 2200, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+      ])
+    )
+    pulse.start()
+    return () => pulse.stop()
+  }, [inspirePulse])
+
+  const inspireGlowOpacity = inspirePulse.interpolate({ inputRange: [0, 1], outputRange: [0.06, 0.12] })
+  const inspireScale = inspirePulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.01] })
+  const inspireIconScale = inspirePulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.04] })
+
+  // Entrance animations for major sections
+  const entrance = useRef({
+    greet: new Animated.Value(0),
+    inspire: new Animated.Value(0),
+    stat: new Animated.Value(0),
+    quick: new Animated.Value(0),
+    activity: new Animated.Value(0),
+  }).current
+
+  useEffect(() => {
+    const seq = [entrance.greet, entrance.inspire, entrance.stat, entrance.quick, entrance.activity].map((v, idx) =>
+      Animated.timing(v, {
+        toValue: 1,
+        duration: 340,
+        delay: idx * 60,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      })
+    )
+    Animated.stagger(90, seq).start()
+  }, [])
+
+  const makeFadeUp = (v: Animated.Value) => ({
+    opacity: v,
+    transform: [
+      {
+        translateY: v.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }),
+      },
+    ],
+  })
 
   // Subtle interactive animation helpers for tiles
   const createTileAnim = () => {
@@ -189,16 +270,16 @@ export default function EnhancedDashboardScreen() {
       <LinearGradient colors={["#F8FAFC", "#EEF2FF"]} style={styles.pageBackground} pointerEvents="none" />
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         {/* Enhanced Greeting Section */}
-        <View style={styles.greetingSection}>
+        <Animated.View style={[styles.greetingSection, makeFadeUp(entrance.greet)]}>
           <View style={styles.greetingRow}>
             <View style={[styles.greetingIcon, { backgroundColor: `${greeting.color}20` }]}>
               <Icon name={greeting.icon} size={24} color={greeting.color} />
             </View>
             <View style={styles.greetingText}>
+              <ThemedText style={styles.welcomeText}>Welcome to Sentisphere</ThemedText>
               <ThemedText type="title" style={styles.greetingTitle}>
                 {greeting.text}, Jamie!
               </ThemedText>
-              <ThemedText style={styles.welcomeText}>Welcome to Sentisphere</ThemedText>
               <ThemedText style={[styles.dateText, { color: palette.muted }]}>
                 {now.toLocaleDateString("en-US", {
                   weekday: "long",
@@ -208,22 +289,40 @@ export default function EnhancedDashboardScreen() {
               </ThemedText>
             </View>
           </View>
-        </View>
+        </Animated.View>
+        <View style={styles.sectionSpacer} />
 
         {/* Enhanced Daily Inspiration with Gradient */}
-        <Card style={[styles.inspirationCard, styles.cardShadow]}>
-          <LinearGradient colors={["#F3E8FF", "#E9D5FF"]} style={styles.inspirationGradient}>
-            <CardContent style={styles.inspirationContent}>
-              <View style={styles.inspirationIcon}>
-                <Icon name="sparkles" size={28} color="#A855F7" />
-              </View>
-              <ThemedText style={styles.inspirationQuote}>
-                "Every small step forward is progress worth celebrating."
-              </ThemedText>
-              <ThemedText style={styles.inspirationAuthor}>— Daily Inspiration</ThemedText>
-            </CardContent>
-          </LinearGradient>
-        </Card>
+        <Animated.View style={makeFadeUp(entrance.inspire)}>
+          <Card style={[styles.inspirationCard, styles.cardShadow]}>
+            <LinearGradient colors={["#F3E8FF", "#E9D5FF"]} style={styles.inspirationGradient}>
+              <CardContent style={styles.inspirationContent}>
+                {/* Subtle animated glow overlay */}
+                <Animated.View pointerEvents="none" style={[styles.inspirationGlow, { opacity: inspireGlowOpacity, transform: [{ scale: inspireScale }] }]}>
+                  <LinearGradient colors={["rgba(255,255,255,0.25)", "rgba(255,255,255,0.05)"]} style={StyleSheet.absoluteFillObject as any} pointerEvents="none" />
+                </Animated.View>
+                {/* Inspiration actions */}
+                <View style={styles.inspirationActions}>
+                  <Pressable accessibilityLabel="Refresh quote" onPress={refreshQuote} style={({ pressed }) => [styles.inspirationActionBtn, pressed && { opacity: 0.85 }]} hitSlop={8}>
+                    <Icon name="refresh-ccw" size={16} color="#6B7280" />
+                  </Pressable>
+                  <Pressable accessibilityLabel="Share quote" onPress={shareQuote} style={({ pressed }) => [styles.inspirationActionBtn, pressed && { opacity: 0.85 }]} hitSlop={8}>
+                    <Icon name="share-2" size={16} color="#6B7280" />
+                  </Pressable>
+                </View>
+                <Animated.View style={[styles.inspirationIcon, { transform: [{ scale: inspireIconScale }] }]}> 
+                  <Icon name="sparkles" size={28} color="#A855F7" />
+                </Animated.View>
+                <Animated.View style={{ opacity: quoteFade, transform: [{ translateY: quoteTranslateY }] }}>
+                  <ThemedText style={styles.inspirationQuote}>
+                    “{quote?.content ?? 'Loading a little inspiration…'}”
+                  </ThemedText>
+                  <ThemedText style={styles.inspirationAuthor}>— {quote?.author ?? '—'}</ThemedText>
+                </Animated.View>
+              </CardContent>
+            </LinearGradient>
+          </Card>
+        </Animated.View>
 
         {/* Weekly Summary Cards (optional) */}
         {showSummaryRow && (
@@ -261,7 +360,8 @@ export default function EnhancedDashboardScreen() {
         )}
 
         {/* Journal Entries Stat */}
-        <Card style={[styles.statCard, styles.cardShadow]}>
+        <Animated.View style={makeFadeUp(entrance.stat)}>
+          <Card style={[styles.statCard, styles.cardShadow]}>
           <CardContent style={styles.statContent}>
             <View style={[styles.statIcon, { backgroundColor: "#ECFDF5" }]}>
               <Icon name="book-open" size={20} color="#16A34A" />
@@ -269,14 +369,19 @@ export default function EnhancedDashboardScreen() {
             <ThemedText style={styles.statNumber}>{journalCount}</ThemedText>
             <ThemedText style={styles.statLabel}>Journal Entries</ThemedText>
           </CardContent>
-        </Card>
+          </Card>
+        </Animated.View>
 
         {/* Enhanced Quick Actions */}
-        <Card style={styles.cardShadow}>
+        <Animated.View style={makeFadeUp(entrance.quick)}>
+          <Card style={styles.cardShadow}>
           <CardContent style={styles.cardContent}>
-            <ThemedText type="subtitle" style={styles.sectionTitle}>
-              Quick Actions
-            </ThemedText>
+            <View style={styles.sectionTitleRow}>
+              <View style={styles.sectionTitleIcon}>
+                <Icon name="sparkles" size={18} color="#6B7280" />
+              </View>
+              <ThemedText type="subtitle" style={styles.sectionTitle}>Quick Actions</ThemedText>
+            </View>
             <View style={styles.quickGrid}>
               <Link href="/(student)/(tabs)/mood" asChild>
                 <Pressable
@@ -308,7 +413,9 @@ export default function EnhancedDashboardScreen() {
                         <View style={[styles.qaIconWrap, { backgroundColor: "#EDE9FE" }]}> 
                           <Icon name="brain" size={20} color="#8B5CF6" />
                         </View>
-                        <Icon name="arrow-right" size={18} color="#7C3AED" />
+                        <View style={styles.qaArrowWrap}>
+                          <Icon name="arrow-right" size={18} color="#7C3AED" />
+                        </View>
                       </View>
                       <View style={styles.qaTextBlock}>
                         <ThemedText style={[styles.qaTitle, { color: "#7C3AED" }]}>Check Mood</ThemedText>
@@ -349,7 +456,9 @@ export default function EnhancedDashboardScreen() {
                         <View style={[styles.qaIconWrap, { backgroundColor: "#DCFCE7" }]}> 
                           <Icon name="book-open" size={20} color="#16A34A" />
                         </View>
-                        <Icon name="arrow-right" size={18} color="#16A34A" />
+                        <View style={styles.qaArrowWrap}>
+                          <Icon name="arrow-right" size={18} color="#16A34A" />
+                        </View>
                       </View>
                       <View style={styles.qaTextBlock}>
                         <ThemedText style={[styles.qaTitle, { color: "#16A34A" }]}>Write Journal</ThemedText>
@@ -390,7 +499,9 @@ export default function EnhancedDashboardScreen() {
                         <View style={[styles.qaIconWrap, { backgroundColor: "#DBEAFE" }]}> 
                           <Icon name="calendar" size={20} color="#3B82F6" />
                         </View>
-                        <Icon name="arrow-right" size={18} color="#2563EB" />
+                        <View style={styles.qaArrowWrap}>
+                          <Icon name="arrow-right" size={18} color="#2563EB" />
+                        </View>
                       </View>
                       <View style={styles.qaTextBlock}>
                         <ThemedText style={[styles.qaTitle, { color: "#2563EB" }]}>Book Session</ThemedText>
@@ -431,7 +542,9 @@ export default function EnhancedDashboardScreen() {
                         <View style={[styles.qaIconWrap, { backgroundColor: "#CFFAFE" }]}> 
                           <Icon name="message-square" size={20} color="#0D9488" />
                         </View>
-                        <Icon name="arrow-right" size={18} color="#0D9488" />
+                        <View style={styles.qaArrowWrap}>
+                          <Icon name="arrow-right" size={18} color="#0D9488" />
+                        </View>
                       </View>
                       <View style={styles.qaTextBlock}>
                         <ThemedText style={[styles.qaTitle, { color: "#0D9488" }]}>AI Chat</ThemedText>
@@ -443,14 +556,19 @@ export default function EnhancedDashboardScreen() {
               </Link>
             </View>
           </CardContent>
-        </Card>
+          </Card>
+        </Animated.View>
 
         {/* Recent Activity */}
-        <Card style={styles.cardShadow}>
+        <Animated.View style={makeFadeUp(entrance.activity)}>
+          <Card style={styles.cardShadow}>
           <CardContent style={styles.cardContent}>
-            <ThemedText type="subtitle" style={styles.sectionTitle}>
-              Recent Activity
-            </ThemedText>
+            <View style={styles.sectionTitleRow}>
+              <View style={styles.sectionTitleIcon}>
+                <Icon name="activity" size={18} color="#6B7280" />
+              </View>
+              <ThemedText type="subtitle" style={styles.sectionTitle}>Recent Activity</ThemedText>
+            </View>
             <View style={styles.activityList}>
               {recentActivity.map((item, i) => (
                 <Link key={item.id} href={item.href as any} asChild>
@@ -492,6 +610,7 @@ export default function EnhancedDashboardScreen() {
             </View>
           </CardContent>
         </Card>
+        </Animated.View>
 
         {/* Recent Mood Trends */}
         {showLegacySections && (
@@ -576,9 +695,12 @@ export default function EnhancedDashboardScreen() {
         {/* Upcoming Appointments */}
         <Card style={styles.cardShadow}>
           <CardContent style={styles.cardContent}>
-            <ThemedText type="subtitle" style={styles.sectionTitle}>
-              Upcoming
-            </ThemedText>
+            <View style={styles.sectionTitleRow}>
+              <View style={styles.sectionTitleIcon}>
+                <Icon name="calendar" size={18} color={palette.muted} />
+              </View>
+              <ThemedText type="subtitle" style={styles.sectionTitle}>Upcoming</ThemedText>
+            </View>
             <View style={styles.appointmentEmpty}>
               <Icon name="calendar" size={32} color={palette.muted} />
               <ThemedText style={[styles.emptyText, { color: palette.muted }]}>No appointments scheduled</ThemedText>
@@ -593,9 +715,12 @@ export default function EnhancedDashboardScreen() {
         <Card style={styles.cardShadow}>
           <CardContent style={styles.cardContent}>
             <View style={styles.sectionHeader}>
-              <ThemedText type="subtitle" style={styles.sectionTitle}>
-                Your Insights
-              </ThemedText>
+              <View style={styles.sectionTitleRow}>
+                <View style={styles.sectionTitleIcon}>
+                  <Icon name="target" size={18} color={palette.muted} />
+                </View>
+                <ThemedText type="subtitle" style={styles.sectionTitle}>Your Insights</ThemedText>
+              </View>
               <Link href="/(student)/analytics" asChild>
                 <Pressable>
                   <Icon name="arrow-right" size={16} color={palette.muted} />
@@ -629,19 +754,24 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
   },
   greetingSection: {
-    marginBottom: 16,
+    marginBottom: 8,
+  },
+  sectionSpacer: {
+    height: 12,
   },
   greetingRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 20,
+    gap: 12,
   },
   greetingIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     alignItems: "center",
     justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
   },
   greetingText: {
     flex: 1,
@@ -649,16 +779,17 @@ const styles = StyleSheet.create({
   greetingTitle: {
     fontSize: 24,
     fontWeight: "700",
-    marginBottom: 8,
+    marginBottom: 2,
     color: "#111827",
   },
   welcomeText: {
     fontSize: 14,
     color: "#6B7280",
-    marginBottom: 4,
+    marginBottom: 0,
   },
   dateText: {
-    fontSize: 16,
+    fontSize: 14,
+    lineHeight: 20,
   },
   inspirationCard: {
     overflow: "hidden",
@@ -670,12 +801,35 @@ const styles = StyleSheet.create({
     padding: 24,
     alignItems: "center",
   },
+  inspirationActions: {
+    position: "absolute",
+    top: 12,
+    right: 12,
+    flexDirection: "row",
+    gap: 8,
+    zIndex: 10,
+  },
+  inspirationActionBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.8)",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+  },
   inspirationIcon: {
     marginBottom: 16,
   },
+  inspirationGlow: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 12,
+  },
   inspirationQuote: {
     fontSize: 18,
-    fontWeight: "600",
+    // Ensure boldness on iOS with Inter family
+    fontFamily: "Inter_600SemiBold",
     color: "#1F2937",
     textAlign: "center",
     lineHeight: 26,
@@ -686,7 +840,7 @@ const styles = StyleSheet.create({
     color: "#6B7280",
   },
   statCard: {
-    alignSelf: "center",
+    width: "100%",
   },
   statContent: {
     padding: 20,
@@ -703,7 +857,7 @@ const styles = StyleSheet.create({
   },
   statNumber: {
     fontSize: 28,
-    fontWeight: "700",
+    fontFamily: "Inter_700Bold",
     color: "#111827",
   },
   statLabel: {
@@ -744,9 +898,26 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 18,
-    fontWeight: "600",
-    marginBottom: 16,
+    // Consistent bold weight
+    fontFamily: "Inter_600SemiBold",
+    marginBottom: 0,
+    lineHeight: 22,
     color: "#111827",
+  },
+  sectionTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 16,
+    minHeight: 28,
+  },
+  sectionTitleIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "transparent",
   },
   sectionHeader: {
     flexDirection: "row",
@@ -779,24 +950,24 @@ const styles = StyleSheet.create({
   quickGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 20,
+    gap: 16,
     justifyContent: "space-between",
   },
   qaTile: {
     width: Platform.select({ web: TILE_WIDTH as any, default: TILE_WIDTH_NATIVE as any }) as any,
-    minHeight: Platform.select({ web: 160, default: 200 }) as number,
-    borderRadius: 18,
-    paddingHorizontal: Platform.select({ web: 24, default: 24 }) as number,
-    paddingVertical: Platform.select({ web: 24, default: 28 }) as number,
+    minHeight: Platform.select({ web: 200, default: 240 }) as number,
+    borderRadius: 20,
+    paddingHorizontal: Platform.select({ web: 32, default: 32 }) as number,
+    paddingVertical: Platform.select({ web: 32, default: 36 }) as number,
     gap: Platform.select({ web: 14, default: 18 }) as number,
     position: "relative",
-    marginBottom: Platform.select({ web: 0, default: 20 }) as number,
+    marginBottom: Platform.select({ web: 0, default: 24 }) as number,
     overflow: "hidden",
   },
   qaTileInner: {
     flex: 1,
     justifyContent: "space-between",
-    gap: Platform.select({ web: 10, default: 12 }) as number,
+    gap: Platform.select({ web: 12, default: 14 }) as number,
   },
   tileGradient: {
     position: "absolute",
@@ -804,9 +975,10 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    borderRadius: 18,
-    opacity: Platform.select({ web: 0.9, default: 0.8 }) as number,
+    borderRadius: 20,
+    opacity: Platform.select({ web: 1, default: 0.95 }) as number,
   },
+  // Tile background color variants
   qaTilePurple: {
     backgroundColor: "#F5F3FF",
   },
@@ -819,18 +991,18 @@ const styles = StyleSheet.create({
   qaTileTeal: {
     backgroundColor: "#ECFEFF",
   },
+  qaIconWrap: {
+    width: Platform.select({ web: 36, default: 44 }) as number,
+    height: Platform.select({ web: 36, default: 44 }) as number,
+    borderRadius: Platform.select({ web: 18, default: 22 }) as number,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   qaHeaderRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: Platform.select({ web: 12, default: 18 }) as number,
-  },
-  qaIconWrap: {
-    width: Platform.select({ web: 32, default: 40 }) as number,
-    height: Platform.select({ web: 32, default: 40 }) as number,
-    borderRadius: Platform.select({ web: 16, default: 20 }) as number,
-    alignItems: "center",
-    justifyContent: "center",
+    marginBottom: Platform.select({ web: 10, default: 12 }) as number,
   },
   qaArrowWrap: {
     width: Platform.select({ web: 28, default: 28 }) as number,
@@ -842,16 +1014,21 @@ const styles = StyleSheet.create({
   },
   qaTitle: {
     fontSize: Platform.select({ web: 16, default: 18 }) as number,
-    fontWeight: "600",
+    // Ensure semi-bold weight across platforms
+    fontFamily: "Inter_600SemiBold",
     color: "#111827",
-    marginBottom: Platform.select({ web: 4, default: 12 }) as number,
+    // Slightly tighter spacing under title
+    marginBottom: Platform.select({ web: 2, default: 4 }) as number,
   },
   qaSubtitle: {
     fontSize: Platform.select({ web: 12, default: 13 }) as number,
-    marginTop: Platform.select({ web: 2, default: 8 }) as number,
+    // Tighter paragraph spacing on tiles
+    lineHeight: Platform.select({ web: 16, default: 16 }) as number,
+    marginTop: Platform.select({ web: 1, default: 2 }) as number,
   },
   qaTextBlock: {
-    marginTop: Platform.select({ web: 2, default: 12 }) as number,
+    // Reduce gap between header row and text block
+    marginTop: Platform.select({ web: 2, default: 4 }) as number,
   },
   textHighlight: {
     position: "absolute",
@@ -942,9 +1119,9 @@ const styles = StyleSheet.create({
   },
   journalTitle: {
     fontSize: 16,
-    fontWeight: "600",
+    fontFamily: "Inter_600SemiBold",
     color: "#1F2937",
-    marginBottom: 4,
+    marginBottom: 2,
   },
   journalMeta: {
     flexDirection: "row",
@@ -995,7 +1172,7 @@ const styles = StyleSheet.create({
     flex: 1,
     position: "relative",
     paddingHorizontal: 8,
-    paddingVertical: 6,
+    paddingVertical: 4,
     borderRadius: 10,
   },
   textHighlightSmall: {
@@ -1010,12 +1187,12 @@ const styles = StyleSheet.create({
   },
   activityTitle: {
     fontSize: 15,
-    fontWeight: "600",
+    fontFamily: "Inter_600SemiBold",
     color: "#111827",
   },
   activityDesc: {
     fontSize: 13,
-    marginTop: 2,
+    marginTop: 1,
   },
   activityMeta: {
     flexDirection: "row",
