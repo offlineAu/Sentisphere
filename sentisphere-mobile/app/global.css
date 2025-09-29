@@ -1,0 +1,9 @@
+:root, html, body, #root, #app {
+  background-color: #ffffff !important;
+  color: #000000 !important;
+}
+
+/* React Navigation web wrappers sometimes render containers without explicit bg */
+div[role="main"], main, .expo-root, .root {
+  background-color: #ffffff !important;
+}
