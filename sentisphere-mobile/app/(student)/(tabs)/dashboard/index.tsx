@@ -267,8 +267,8 @@ export default function EnhancedDashboardScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      <LinearGradient colors={["#F8FAFC", "#EEF2FF"]} style={styles.pageBackground} pointerEvents="none" />
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+      <LinearGradient colors={["#FFFFFF", "#FFFFFF"]} style={styles.pageBackground} pointerEvents="none" />
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[styles.scrollContent, { backgroundColor: '#FFFFFF' }]}>
         {/* Enhanced Greeting Section */}
         <Animated.View style={[styles.greetingSection, makeFadeUp(entrance.greet)]}>
           <View style={styles.greetingRow}>
@@ -359,19 +359,6 @@ export default function EnhancedDashboardScreen() {
           </View>
         )}
 
-        {/* Journal Entries Stat */}
-        <Animated.View style={makeFadeUp(entrance.stat)}>
-          <Card style={[styles.statCard, styles.cardShadow]}>
-          <CardContent style={styles.statContent}>
-            <View style={[styles.statIcon, { backgroundColor: "#ECFDF5" }]}>
-              <Icon name="book-open" size={20} color="#16A34A" />
-            </View>
-            <ThemedText style={styles.statNumber}>{journalCount}</ThemedText>
-            <ThemedText style={styles.statLabel}>Journal Entries</ThemedText>
-          </CardContent>
-          </Card>
-        </Animated.View>
-
         {/* Enhanced Quick Actions */}
         <Animated.View style={makeFadeUp(entrance.quick)}>
           <Card style={styles.cardShadow}>
@@ -409,16 +396,11 @@ export default function EnhancedDashboardScreen() {
                       pointerEvents="none"
                     />
                     <View style={styles.qaTileInner}>
-                      <View style={styles.qaHeaderRow}>
-                        <View style={[styles.qaIconWrap, { backgroundColor: "#EDE9FE" }]}> 
-                          <Icon name="brain" size={20} color="#8B5CF6" />
-                        </View>
-                        <View style={styles.qaArrowWrap}>
-                          <Icon name="arrow-right" size={18} color="#7C3AED" />
-                        </View>
-                      </View>
                       <View style={styles.qaTextBlock}>
-                        <ThemedText style={[styles.qaTitle, { color: "#7C3AED" }]}>Check Mood</ThemedText>
+                        <View style={styles.qaIconTop}><Icon name="brain" size={22} color="#7C3AED" /></View>
+                        <View style={[styles.qaTitleBadge, { backgroundColor: '#F1EAFE' }]}> 
+                          <ThemedText style={[styles.qaTitle, { color: "#7C3AED" }]}>Check Mood</ThemedText>
+                        </View>
                         <ThemedText style={[styles.qaSubtitle, { color: palette.muted }]} numberOfLines={2} ellipsizeMode="tail">How are you feeling today?</ThemedText>
                       </View>
                     </View>
@@ -426,7 +408,7 @@ export default function EnhancedDashboardScreen() {
                 </Pressable>
               </Link>
 
-              <Link href="/(student)/(tabs)/journal/new" asChild>
+              <Link href="/(student)/(tabs)/journal" asChild>
                 <Pressable
                   onHoverIn={qa2.onHoverIn}
                   onHoverOut={qa2.onHoverOut}
@@ -452,16 +434,11 @@ export default function EnhancedDashboardScreen() {
                       pointerEvents="none"
                     />
                     <View style={styles.qaTileInner}>
-                      <View style={styles.qaHeaderRow}>
-                        <View style={[styles.qaIconWrap, { backgroundColor: "#DCFCE7" }]}> 
-                          <Icon name="book-open" size={20} color="#16A34A" />
-                        </View>
-                        <View style={styles.qaArrowWrap}>
-                          <Icon name="arrow-right" size={18} color="#16A34A" />
-                        </View>
-                      </View>
                       <View style={styles.qaTextBlock}>
-                        <ThemedText style={[styles.qaTitle, { color: "#16A34A" }]}>Write Journal</ThemedText>
+                        <View style={styles.qaIconTop}><Icon name="book-open" size={22} color="#16A34A" /></View>
+                        <View style={[styles.qaTitleBadge, { backgroundColor: '#ECFDF5' }]}>
+                          <ThemedText style={[styles.qaTitle, { color: "#16A34A" }]}>Write Journal</ThemedText>
+                        </View>
                         <ThemedText style={[styles.qaSubtitle, { color: palette.muted }]} numberOfLines={2} ellipsizeMode="tail">Reflect on your thoughts</ThemedText>
                       </View>
                     </View>
@@ -495,16 +472,11 @@ export default function EnhancedDashboardScreen() {
                       pointerEvents="none"
                     />
                     <View style={styles.qaTileInner}>
-                      <View style={styles.qaHeaderRow}>
-                        <View style={[styles.qaIconWrap, { backgroundColor: "#DBEAFE" }]}> 
-                          <Icon name="calendar" size={20} color="#3B82F6" />
-                        </View>
-                        <View style={styles.qaArrowWrap}>
-                          <Icon name="arrow-right" size={18} color="#2563EB" />
-                        </View>
-                      </View>
                       <View style={styles.qaTextBlock}>
-                        <ThemedText style={[styles.qaTitle, { color: "#2563EB" }]}>Book Session</ThemedText>
+                        <View style={styles.qaIconTop}><Icon name="calendar" size={22} color="#2563EB" /></View>
+                        <View style={[styles.qaTitleBadge, { backgroundColor: '#EFF6FF' }]}>
+                          <ThemedText style={[styles.qaTitle, { color: "#2563EB" }]}>Book Session</ThemedText>
+                        </View>
                         <ThemedText style={[styles.qaSubtitle, { color: palette.muted }]} numberOfLines={2} ellipsizeMode="tail">Schedule with counselor</ThemedText>
                       </View>
                     </View>
@@ -538,16 +510,11 @@ export default function EnhancedDashboardScreen() {
                       pointerEvents="none"
                     />
                     <View style={styles.qaTileInner}>
-                      <View style={styles.qaHeaderRow}>
-                        <View style={[styles.qaIconWrap, { backgroundColor: "#CFFAFE" }]}> 
-                          <Icon name="message-square" size={20} color="#0D9488" />
-                        </View>
-                        <View style={styles.qaArrowWrap}>
-                          <Icon name="arrow-right" size={18} color="#0D9488" />
-                        </View>
-                      </View>
                       <View style={styles.qaTextBlock}>
-                        <ThemedText style={[styles.qaTitle, { color: "#0D9488" }]}>AI Chat</ThemedText>
+                        <View style={styles.qaIconTop}><Icon name="message-square" size={22} color="#0D9488" /></View>
+                        <View style={[styles.qaTitleBadge, { backgroundColor: '#ECFEFF' }]}>
+                          <ThemedText style={[styles.qaTitle, { color: "#0D9488" }]}>AI Chat</ThemedText>
+                        </View>
                         <ThemedText style={[styles.qaSubtitle, { color: palette.muted }]} numberOfLines={2} ellipsizeMode="tail">Get instant support</ThemedText>
                       </View>
                     </View>
@@ -859,6 +826,7 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontFamily: "Inter_700Bold",
     color: "#111827",
+    lineHeight: 34,
   },
   statLabel: {
     fontSize: 12,
@@ -966,8 +934,12 @@ const styles = StyleSheet.create({
   },
   qaTileInner: {
     flex: 1,
-    justifyContent: "space-between",
+    justifyContent: "flex-start",
     gap: Platform.select({ web: 12, default: 14 }) as number,
+    paddingHorizontal: Platform.select({ web: 6, default: 8 }) as number,
+    paddingVertical: Platform.select({ web: 4, default: 6 }) as number,
+    alignItems: 'center',
+    position: 'relative',
   },
   tileGradient: {
     position: "absolute",
@@ -1003,10 +975,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     marginBottom: Platform.select({ web: 10, default: 12 }) as number,
+    paddingHorizontal: Platform.select({ web: 4, default: 6 }) as number,
+    paddingTop: Platform.select({ web: 2, default: 4 }) as number,
   },
   qaArrowWrap: {
-    width: Platform.select({ web: 28, default: 28 }) as number,
-    height: Platform.select({ web: 28, default: 28 }) as number,
+    width: Platform.select({ web: 30, default: 30 }) as number,
+    height: Platform.select({ web: 30, default: 30 }) as number,
     borderRadius: Platform.select({ web: 14, default: 14 }) as number,
     alignItems: "center",
     justifyContent: "center",
@@ -1018,17 +992,34 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_600SemiBold",
     color: "#111827",
     // Slightly tighter spacing under title
-    marginBottom: Platform.select({ web: 2, default: 4 }) as number,
+    marginBottom: Platform.select({ web: 1, default: 2 }) as number,
   },
   qaSubtitle: {
     fontSize: Platform.select({ web: 12, default: 13 }) as number,
     // Tighter paragraph spacing on tiles
     lineHeight: Platform.select({ web: 16, default: 16 }) as number,
-    marginTop: Platform.select({ web: 1, default: 2 }) as number,
+    marginTop: Platform.select({ web: 0, default: 1 }) as number,
+  },
+  qaIconTop: {
+    alignSelf: 'flex-start',
+    marginBottom: Platform.select({ web: 6, default: 8 }) as number,
+  },
+  qaTitleBadge: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: Platform.select({ web: 10, default: 12 }) as number,
+    paddingVertical: Platform.select({ web: 6, default: 6 }) as number,
+    borderRadius: 12,
   },
   qaTextBlock: {
     // Reduce gap between header row and text block
     marginTop: Platform.select({ web: 2, default: 4 }) as number,
+    alignItems: 'center',
+    gap: Platform.select({ web: 4, default: 6 }) as number,
+  },
+  qaArrow: {
+    position: 'absolute',
+    top: Platform.select({ web: 10, default: 12 }) as number,
+    right: Platform.select({ web: 10, default: 12 }) as number,
   },
   textHighlight: {
     position: "absolute",

@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { Pressable, StyleSheet, ViewStyle, TextStyle, Animated, Easing } from 'react-native';
+import { Pressable, StyleSheet, ViewStyle, TextStyle, Animated, Easing, ActivityIndicator } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors } from '@/constants/theme';
@@ -11,9 +11,10 @@ export type ButtonProps = {
   style?: ViewStyle;
   textStyle?: TextStyle;
   disabled?: boolean;
+  loading?: boolean;
 };
 
-export function Button({ title, onPress, variant = 'primary', style, textStyle, disabled }: ButtonProps) {
+export function Button({ title, onPress, variant = 'primary', style, textStyle, disabled, loading }: ButtonProps) {
   const scheme = useColorScheme() ?? 'light';
   const palette = Colors[scheme] as any;
 
@@ -86,7 +87,7 @@ export function Button({ title, onPress, variant = 'primary', style, textStyle, 
 
   return (
     <Pressable
-      disabled={disabled}
+      disabled={disabled || loading}
       onPress={onPress}
       onHoverIn={() => { setHovered(true); animateTo(1.03, 150); }}
       onHoverOut={() => { setHovered(false); animateTo(1, 150); }}
@@ -95,7 +96,11 @@ export function Button({ title, onPress, variant = 'primary', style, textStyle, 
       style={combinedBase}
     >
       <Animated.View style={{ transform: [{ scale }] }}>
-        <ThemedText style={StyleSheet.flatten([styles.text, textStyle])}>{title}</ThemedText>
+        {loading ? (
+          <ActivityIndicator size="small" color={variant === 'primary' ? '#FFFFFF' : palette.text} />
+        ) : (
+          <ThemedText style={StyleSheet.flatten([styles.text, textStyle])}>{title}</ThemedText>
+        )}
       </Animated.View>
     </Pressable>
   );

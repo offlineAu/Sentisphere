@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { Animated, Easing, Pressable, StyleSheet, TextInput, View, Keyboard, Alert, TouchableWithoutFeedback, KeyboardAvoidingView, ScrollView, Platform } from 'react-native';
+import * as Haptics from 'expo-haptics';
 import Swipeable from 'react-native-gesture-handler/Swipeable';
 import { Feather } from '@expo/vector-icons';
 import { ThemedView } from '@/components/themed-view';
@@ -103,6 +104,16 @@ export default function JournalListScreen() {
   const [bodyFocused, setBodyFocused] = useState(false);
   const wordCount = useMemo(() => (body.trim() ? body.trim().split(/\s+/).length : 0), [body]);
   const charCount = body.length;
+  const [isSaving, setIsSaving] = useState(false);
+  // Saved toast animation
+  const toast = useRef(new Animated.Value(0)).current; // 0 hidden, 1 visible
+  const showSavedToast = () => {
+    Animated.timing(toast, { toValue: 1, duration: 220, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start(() => {
+      setTimeout(() => {
+        Animated.timing(toast, { toValue: 0, duration: 220, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+      }, 1200);
+    });
+  };
 
   // Sample entries (replace with data source later)
   const [entries, setEntries] = useState<Entry[]>([
@@ -125,13 +136,20 @@ export default function JournalListScreen() {
   const focusBlue = '#3B82F6';
 
   // Save handler (local state demo)
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (isSaving) return;
     const text = body.trim();
     if (!title.trim()) {
       Alert.alert('Add a title', 'Please add a title for your journal entry before saving.');
       return;
     }
     if (!text) return;
+    if (Platform.OS !== 'web') {
+      try { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {}
+    }
+    setIsSaving(true);
+    // small delay to give a saving feel; replace with real API call later
+    await new Promise((r) => setTimeout(r, 700));
     const newEntry: Entry = {
       id: String(Date.now()),
       title: title.trim(),
@@ -142,6 +160,11 @@ export default function JournalListScreen() {
     setBody('');
     setTitle('');
     onTabChange(1);
+    setIsSaving(false);
+    showSavedToast();
+    if (Platform.OS !== 'web') {
+      try { await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
+    }
   };
 
   return (
@@ -214,7 +237,7 @@ export default function JournalListScreen() {
                   <ToolbarButton icon="mic" label="Voice" onPress={handleVoicePress} active={isListening} bgColor="#FEE2E2" fgColor="#B91C1C" />
                   <ToolbarButton icon="activity" label="Analyze" onPress={handleAnalyzePress} bgColor="#EDE9FE" fgColor="#6D28D9" />
                   <View style={{ flex: 1 }} />
-                  <Button title="Save" onPress={handleSave} disabled={!body.trim()} />
+                  <Button title="Save" onPress={handleSave} disabled={!body.trim() || isSaving} loading={isSaving} />
                 </View>
               </CardContent>
             </Card>
@@ -235,6 +258,41 @@ export default function JournalListScreen() {
       )}
         </ScrollView>
       </KeyboardAvoidingView>
+      {/* Saved toast */}
+      <Animated.View
+        pointerEvents="none"
+        style={{
+          position: 'absolute',
+          left: 16,
+          right: 16,
+          bottom: 24,
+          transform: [{ translateY: toast.interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }],
+          opacity: toast,
+        }}
+      >
+        <View style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 10,
+          paddingVertical: 10,
+          paddingHorizontal: 14,
+          borderRadius: 12,
+          backgroundColor: '#111827',
+        }}>
+          <Animated.View style={{
+            width: 22,
+            height: 22,
+            borderRadius: 11,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: '#10B981',
+            transform: [{ scale: toast.interpolate({ inputRange: [0, 1], outputRange: [0.8, 1] }) }],
+          }}>
+            <Feather name="check" size={14} color="#FFFFFF" />
+          </Animated.View>
+          <ThemedText style={{ color: '#FFFFFF' }}>Saved</ThemedText>
+        </View>
+      </Animated.View>
     </ThemedView>
   );
 }
