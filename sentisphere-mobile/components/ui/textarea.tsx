@@ -2,7 +2,19 @@ import React from 'react';
 import { TextInput, StyleSheet, TextInputProps } from 'react-native';
 
 export function Textarea(props: TextInputProps) {
-  return <TextInput {...props} multiline style={[styles.input, props.style, { height: props.style && (props.style as any).height ? (props.style as any).height : 120 }]} />;
+  const { style, placeholderTextColor, ...rest } = props;
+  return (
+    <TextInput
+      {...rest}
+      multiline
+      placeholderTextColor={placeholderTextColor ?? '#9BA1A6'}
+      style={[
+        styles.input,
+        style,
+        { height: style && (style as any).height ? (style as any).height : 120 },
+      ]}
+    />
+  );
 }
 
 const styles = StyleSheet.create({
@@ -13,5 +25,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     textAlignVertical: 'top',
+    backgroundColor: '#FFFFFF',
+    color: '#000000',
   },
 });

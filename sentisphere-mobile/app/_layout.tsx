@@ -6,6 +6,7 @@ import './global.css';
 
 import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from '@expo-google-fonts/inter';
 import { View, ActivityIndicator, Platform } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useEffect } from 'react';
 import { Colors } from '@/constants/theme';
 
@@ -41,7 +42,8 @@ export default function RootLayout() {
   }
 
   return (
-    <ThemeProvider
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <ThemeProvider
       value={{
         ...DefaultTheme,
         dark: false,
@@ -54,12 +56,13 @@ export default function RootLayout() {
           primary: Colors.light.tint,
         },
       }}
-    >
-      <Stack screenOptions={{ contentStyle: { backgroundColor: Colors.light.background } }}>
-        <Stack.Screen name="(student)" options={{ headerShown: false }} />
-        <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
-      </Stack>
-      <StatusBar style="dark" />
-    </ThemeProvider>
+      >
+        <Stack screenOptions={{ contentStyle: { backgroundColor: Colors.light.background } }}>
+          <Stack.Screen name="(student)" options={{ headerShown: false }} />
+          <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
+        </Stack>
+        <StatusBar style="dark" />
+      </ThemeProvider>
+    </GestureHandlerRootView>
   );
 }

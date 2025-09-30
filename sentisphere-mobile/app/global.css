@@ -1,9 +1,23 @@
 :root, html, body, #root, #app {
   background-color: #ffffff !important;
   color: #000000 !important;
+  color-scheme: light !important; /* force browser widgets to light */
 }
 
 /* React Navigation web wrappers sometimes render containers without explicit bg */
 div[role="main"], main, .expo-root, .root {
   background-color: #ffffff !important;
+}
+
+/* Ensure common form controls render in light mode with black text */
+input, textarea, select, button {
+  background-color: #ffffff !important;
+  color: #000000 !important;
+  border-color: #e5e7eb !important;
+  caret-color: #000000 !important;
+}
+
+/* RNW elements sometimes apply inherited dark colors; reset */
+.css-view, .css-text, .rnw-view, .rnw-text {
+  color: inherit !important;
 }
