@@ -41,7 +41,6 @@ export default function Chat() {
 const userId = 24; // put your counselor's user_id from the DB
 const userRole: "counselor" | "counselor" = "counselor";
 
-
   // Fetch conversations
   useEffect(() => {
     axios
