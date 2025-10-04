@@ -1,9 +1,14 @@
 import DashboardLayout from '../layouts/DashboardLayout';
+import { useSidebar } from '../components/SidebarContext';
 import styles from './Profile.module.css';
 
 function Profile() {
+  const { open } = useSidebar();
+
   return (
-    <div className="pl-[2rem] p-6 space-y-6 bg-[#f9fafb] min-h-screen">
+    <main
+      className={`transition-all duration-200 bg-[#f9fafb] min-h-screen space-y-6 ${open ? 'pl-[17rem]' : 'pl-[4.5rem]'} pt-6 pr-6 pb-6`}
+    >
       <h1 className={styles.headerTitle}>Profile</h1>
       <p className={styles.headerSubtitle}>
         Manage your professional profile and settings
@@ -85,7 +90,7 @@ B.A. in Psychology, UCLA (2012)" placeholder="Education" />
           </div>
         </div>
       </div>
-    </div>
+    </main>
   );
 }
 

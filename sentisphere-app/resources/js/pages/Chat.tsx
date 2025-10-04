@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Send, MessageSquare, User } from "lucide-react";
+import { useSidebar } from "../components/SidebarContext";
 import Sidebar from "../components/Sidebar";
 import styles from "./Chat.module.css";
 import axios from "axios";
@@ -10,36 +11,36 @@ import axios from "axios";
 // -----------------------------
 interface Conversation {
   id: number;
-  student_id: number;
-  counselor_id: number;
-  is_active: boolean;
+  initiator_user_id: number;
+  initiator_role: string;
+  subject: string;
+  status: "open" | "ended";
   created_at: string;
+  last_activity_at: string;
+  initiator_nickname: string; // <-- add this
 }
 
 interface ChatMessage {
   id: number;
   conversation_id: number;
-  sender_id: number;   // ✅ numeric user id
+  sender_id: number;
   content: string;
-  created_at: string;
+  timestamp: string;
 }
-
 
 // -----------------------------
 // Component
 // -----------------------------
 export default function Chat() {
+  const { open } = useSidebar();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [activeConversation, setActiveConversation] = useState<number | null>(
-    null
-  );
+  const [activeConversation, setActiveConversation] = useState<number | null>(null);
   const [newMessage, setNewMessage] = useState("");
+  const [participantNickname, setParticipantNickname] = useState<string>("");
 
   // ⚡ Change this for logged-in user (student/counselor)
-// ⚡ Temporary hardcoded user (counselor dashboard)
-const userId = 24; // put your counselor's user_id from the DB
-const userRole: "counselor" | "counselor" = "counselor";
+  const userId = 22; // put your counselor's user_id from the DB
 
   // Fetch conversations
   useEffect(() => {
@@ -67,33 +68,54 @@ const userRole: "counselor" | "counselor" = "counselor";
       .catch((err) => console.error("Error fetching messages:", err));
   }, [activeConversation]);
 
-// Handle send
-const handleSend = () => {
-  if (!newMessage.trim() || !activeConversation) return;
-  axios
-    .post<ChatMessage>(
-      `http://localhost:8001/api/conversations/${activeConversation}/messages`,
-      {
-        sender_id: userId,   // ✅ numeric sender_id
-        content: newMessage,
-      }
-    )
-    .then((res) => {
-      setMessages((prev) => [...prev, res.data]);
-      setNewMessage("");
-    })
-    .catch((err) => console.error("Error sending message:", err));
-};
-
-
+  // Fetch participant nickname when conversation changes
   const currentConversation = conversations.find(
     (c) => c.id === activeConversation
   );
 
+  useEffect(() => {
+    if (!currentConversation) {
+      setParticipantNickname("");
+      return;
+    }
+    axios
+      .get<{ nickname: string }>(`http://localhost:8001/api/users/${currentConversation.initiator_user_id}`)
+      .then((res) => setParticipantNickname(res.data.nickname || ""))
+      .catch(() => setParticipantNickname(""));
+  }, [currentConversation]);
+
+  // Handle send
+  const handleSend = () => {
+    if (
+      !newMessage.trim() ||
+      !activeConversation ||
+      !currentConversation ||
+      currentConversation.status !== "open"
+    )
+      return;
+    axios
+      .post<ChatMessage>(
+        `http://localhost:8001/api/conversations/${activeConversation}/messages`,
+        {
+          sender_id: userId,
+          content: newMessage,
+        }
+      )
+      .then((res) => {
+        setMessages((prev) => [...prev, res.data]);
+        setNewMessage("");
+      })
+      .catch((err) => console.error("Error sending message:", err));
+  };
+
   return (
     <div className="flex bg-[#f5f5f5] min-h-screen">
       <Sidebar />
-      <main className="flex-1 ml-64">
+      <main
+        className={`transition-all duration-200 bg-[#f5f5f5] min-h-screen space-y-6 ${
+          open ? "pl-[17rem]" : "pl-[4.5rem]"
+        } pt-6 pr-6 pb-6`}
+      >
         <motion.div
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
@@ -131,16 +153,17 @@ const handleSend = () => {
                     >
                       <div className="flex justify-between items-center">
                         <span className="font-medium">
-                          Conversation #{c.id}
+                          {/* Optionally show nickname here too */}
+                          {c.initiator_nickname}
                         </span>
                         <span
                           className={`text-xs px-2 py-0.5 rounded-lg capitalize ${
-                            c.is_active
+                            c.status === "open"
                               ? "bg-green-100 text-green-700"
                               : "bg-gray-200 text-gray-600"
                           }`}
                         >
-                          {c.is_active ? "open" : "ended"}
+                          {c.status}
                         </span>
                       </div>
                     </li>
@@ -156,8 +179,14 @@ const handleSend = () => {
                   <>
                     {/* Chat Header */}
                     <div className="p-4 border-b flex justify-between items-center">
-                      <h2 className="font-semibold text-[#0d8c4f] text-lg">
-                        Conversation #{currentConversation.id}
+                      <h2
+                        className={`font-semibold text-lg ${
+                          currentConversation.status === "ended"
+                            ? "text-gray-400"
+                            : "text-[#0d8c4f]"
+                        }`}
+                      >
+                        {currentConversation.initiator_nickname}
                       </h2>
                       <User className="h-5 w-5 text-gray-500" />
                     </div>
@@ -169,13 +198,13 @@ const handleSend = () => {
                           key={m.id}
                           className={`max-w-[70%] px-4 py-2 rounded-2xl shadow-sm ${
                             m.sender_id === userId
-                              ? "bg-[#2563eb] text-white ml-auto rounded-br-md" // current user (counselor)
-                              : "bg-gray-100 text-[#333] mr-auto rounded-bl-md" // other side (student)
+                              ? "bg-[#2563eb] text-white ml-auto rounded-br-md"
+                              : "bg-gray-100 text-[#333] mr-auto rounded-bl-md"
                           }`}
                         >
                           <p>{m.content}</p>
                           <small className="block text-xs opacity-75 mt-1">
-                            {new Date(m.created_at).toLocaleTimeString([], {
+                            {new Date(m.timestamp).toLocaleTimeString([], {
                               hour: "2-digit",
                               minute: "2-digit",
                             })}
@@ -193,12 +222,26 @@ const handleSend = () => {
                         onKeyDown={(e) =>
                           e.key === "Enter" ? handleSend() : null
                         }
-                        placeholder="Type your message..."
-                        className="flex-1 border rounded-xl px-4 py-2 outline-none focus:ring-2 focus:ring-[#0d8c4f]"
+                        placeholder={
+                          currentConversation.status === "open"
+                            ? "Type your message..."
+                            : "This conversation has ended."
+                        }
+                        className={`flex-1 border rounded-xl px-4 py-2 outline-none focus:ring-2 ${
+                          currentConversation.status === "open"
+                            ? "focus:ring-[#0d8c4f] text-[#222]"
+                            : "bg-gray-100 text-gray-400 cursor-not-allowed"
+                        }`}
+                        disabled={currentConversation.status !== "open"}
                       />
                       <button
                         onClick={handleSend}
-                        className="bg-[#0d8c4f] text-white rounded-xl px-4 flex items-center gap-2 hover:bg-[#0b6d3f] transition"
+                        className={`rounded-xl px-4 flex items-center gap-2 transition ${
+                          currentConversation.status === "open"
+                            ? "bg-[#0d8c4f] text-white hover:bg-[#0b6d3f]"
+                            : "bg-gray-300 text-gray-500 cursor-not-allowed"
+                        }`}
+                        disabled={currentConversation.status !== "open"}
                       >
                         <Send className="h-4 w-4" /> Send
                       </button>

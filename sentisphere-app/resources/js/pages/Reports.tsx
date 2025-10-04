@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight, TrendingUp, AlertTriangle, UserRound, CalendarDays, Activity, Download, Filter } from "lucide-react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip } from "recharts";
 import DashboardLayout from "../layouts/DashboardLayout";
+import { useSidebar } from "../components/SidebarContext";
 import styles from "./Reports.module.css";
 
 type TopStat = {
@@ -76,6 +77,8 @@ function CustomWeekTick({ x, y, payload }: any) {
 }
 
 function Reports() {
+  const { open } = useSidebar();
+
   const [loading, setLoading] = useState(true);
 
   const [topStats, setTopStats] = useState<TopStat[]>([]);
@@ -207,7 +210,9 @@ function Reports() {
   const paginatedMoodTrend = sortedMoodTrend.slice(startIndex, startIndex + itemsPerPage);
 
   return (
-    <div className="pl-[2rem] p-6 space-y-6 bg-[#f9fafb] min-h-screen">
+    <main
+      className={`transition-all duration-200 bg-[#f9fafb] min-h-screen space-y-6 ${open ? "pl-[17rem]" : "pl-[4.5rem]"} pt-6 pr-6 pb-6`}
+    >
       {/* Header */}
       <div>
         <h1 className={styles.headerTitle}>Reports & Analytics</h1>
@@ -411,7 +416,7 @@ function Reports() {
           </tbody>
         </table>
       </div>
-    </div>
+    </main>
   );
 }
 
