@@ -3,7 +3,7 @@ import styles from './Profile.module.css';
 
 function Profile() {
   return (
-    <div>
+    <div className="pl-[2rem] p-6 space-y-6 bg-[#f9fafb] min-h-screen">
       <h1 className={styles.headerTitle}>Profile</h1>
       <p className={styles.headerSubtitle}>
         Manage your professional profile and settings
