@@ -1,7 +1,7 @@
 "use client"
 
 import { StyleSheet, View, ScrollView, Dimensions, Pressable, Animated, Easing, Platform, useWindowDimensions, Share } from "react-native"
-import { useEffect, useState, useRef } from "react"
+import { useEffect, useState, useRef, useCallback } from "react"
 import { ThemedView } from "@/components/themed-view"
 import { ThemedText } from "@/components/themed-text"
 import { Card, CardContent } from "@/components/ui/card"
@@ -12,6 +12,7 @@ import { Colors } from "@/constants/theme"
 import { Icon } from "@/components/ui/icon"
 import { LinearGradient } from "expo-linear-gradient"
 import * as Haptics from "expo-haptics"
+import { useFocusEffect } from '@react-navigation/native'
 
 const { width } = Dimensions.get("window")
 const GRID_PADDING = 16 // matches scrollContent padding
@@ -191,7 +192,14 @@ export default function EnhancedDashboardScreen() {
     activity: new Animated.Value(0),
   }).current
 
-  useEffect(() => {
+  const runEntrance = () => {
+    // reset
+    entrance.greet.setValue(0)
+    entrance.inspire.setValue(0)
+    entrance.stat.setValue(0)
+    entrance.quick.setValue(0)
+    entrance.activity.setValue(0)
+    // sequence
     const seq = [entrance.greet, entrance.inspire, entrance.stat, entrance.quick, entrance.activity].map((v, idx) =>
       Animated.timing(v, {
         toValue: 1,
@@ -202,7 +210,19 @@ export default function EnhancedDashboardScreen() {
       })
     )
     Animated.stagger(90, seq).start()
+  }
+
+  useEffect(() => {
+    runEntrance()
   }, [])
+
+  useFocusEffect(
+    // Re-run subtle entrance when navigating back to this screen
+    useCallback(() => {
+      runEntrance()
+      return () => {}
+    }, [])
+  )
 
   const makeFadeUp = (v: Animated.Value) => ({
     opacity: v,
@@ -270,16 +290,15 @@ export default function EnhancedDashboardScreen() {
     <ThemedView style={styles.container}>
       <LinearGradient colors={["#FFFFFF", "#FFFFFF"]} style={styles.pageBackground} pointerEvents="none" />
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[styles.scrollContent, { backgroundColor: '#FFFFFF' }]}>
-        {/* Enhanced Greeting Section */}
+        {/* Greeting Section (clean, prominent) */}
         <Animated.View style={[styles.greetingSection, makeFadeUp(entrance.greet)]}>
           <View style={styles.greetingRow}>
-            <View style={[styles.greetingIcon, { backgroundColor: `${greeting.color}20` }]}>
-              <Icon name={greeting.icon} size={24} color={greeting.color} />
-            </View>
             <View style={styles.greetingText}>
-              <ThemedText style={styles.welcomeText}>Welcome to Sentisphere</ThemedText>
+              <ThemedText style={styles.greetingLine}>
+                {greeting.text}
+              </ThemedText>
               <ThemedText type="title" style={styles.greetingTitle}>
-                {greeting.text}, Jamie!
+                Hyun
               </ThemedText>
               <ThemedText style={[styles.dateText, { color: palette.muted }]}>
                 {now.toLocaleDateString("en-US", {
@@ -289,14 +308,22 @@ export default function EnhancedDashboardScreen() {
                 })}
               </ThemedText>
             </View>
+            <Pressable
+              accessibilityLabel="Notifications"
+              onPressIn={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} } }}
+              hitSlop={8}
+              style={({ pressed }) => [styles.notifBtn, pressed && { opacity: 0.85 }]}
+            >
+              <Icon name="bell" size={20} color={palette.text} />
+            </Pressable>
           </View>
         </Animated.View>
         <View style={styles.sectionSpacer} />
 
         {/* Enhanced Daily Inspiration with Gradient */}
         <Animated.View style={makeFadeUp(entrance.inspire)}>
-          <Card style={[styles.inspirationCard, styles.cardShadow]}>
-            <LinearGradient colors={["#F3E8FF", "#E9D5FF"]} style={styles.inspirationGradient}>
+          <Card style={[styles.inspirationCard, styles.cardShadow, styles.inspirationShadow]}>
+            <LinearGradient colors={["#CFF2E2", "#0d8c4f"]} style={styles.inspirationGradient}>
               <CardContent style={styles.inspirationContent}>
                 {/* Subtle animated glow overlay */}
                 <Animated.View pointerEvents="none" style={[styles.inspirationGlow, { opacity: inspireGlowOpacity, transform: [{ scale: inspireScale }] }]}>
@@ -312,7 +339,7 @@ export default function EnhancedDashboardScreen() {
                   </Pressable>
                 </View>
                 <Animated.View style={[styles.inspirationIcon, { transform: [{ scale: inspireIconScale }] }]}> 
-                  <Icon name="sparkles" size={28} color="#A855F7" />
+                  <Icon name="sparkles" size={28} color={palette.tint} />
                 </Animated.View>
                 <Animated.View style={{ opacity: quoteFade, transform: [{ translateY: quoteTranslateY }] }}>
                   <ThemedText style={styles.inspirationQuote}>
@@ -380,10 +407,7 @@ export default function EnhancedDashboardScreen() {
                   style={({ hovered, pressed }) =>
                     StyleSheet.flatten([
                       styles.qaTile,
-                      styles.qaTilePurple,
                       styles.cardShadow,
-                      hovered && { backgroundColor: "#EDE9FE" },
-                      pressed && { backgroundColor: "#E9D5FF" },
                       hovered && styles.hoverLift,
                       pressed && styles.pressScale,
                       qaWidthStyle,
@@ -391,18 +415,14 @@ export default function EnhancedDashboardScreen() {
                   }
                 >
                   <Animated.View style={qa1.animStyle}>
-                    <LinearGradient
-                      colors={["#F7F2FF", "#F1EAFE"]}
-                      style={styles.tileGradient}
-                      pointerEvents="none"
-                    />
+                    <LinearGradient colors={["#8B5CF6", "#6D28D9"]} style={styles.tileGradient} pointerEvents="none" />
+                    <View style={[styles.tileOrb, { top: -20, right: -14 }]} />
+                    <View style={[styles.tileOrbSm, { bottom: -12, left: -10 }]} />
                     <View style={styles.qaTileInner}>
                       <View style={styles.qaTextBlock}>
-                        <View style={styles.qaIconTop}><Icon name="brain" size={22} color="#7C3AED" /></View>
-                        <View style={[styles.qaTitleBadge, { backgroundColor: '#F1EAFE' }]}> 
-                          <ThemedText style={[styles.qaTitle, { color: "#7C3AED" }]}>Check Mood</ThemedText>
-                        </View>
-                        <ThemedText style={[styles.qaSubtitle, { color: palette.muted }]} numberOfLines={2} ellipsizeMode="tail">How are you feeling today?</ThemedText>
+                        <View style={styles.iconCircle}><Icon name="brain" size={20} color="#4C1D95" /></View>
+                        <ThemedText style={styles.qaTitle}>Check Mood</ThemedText>
+                        <ThemedText style={styles.qaSubtitle} numberOfLines={2} ellipsizeMode="tail">How are you feeling today?</ThemedText>
                       </View>
                     </View>
                   </Animated.View>
@@ -418,10 +438,7 @@ export default function EnhancedDashboardScreen() {
                   style={({ hovered, pressed }) =>
                     StyleSheet.flatten([
                       styles.qaTile,
-                      styles.qaTileGreen,
                       styles.cardShadow,
-                      hovered && { backgroundColor: "#DCFCE7" },
-                      pressed && { backgroundColor: "#D1FAE5" },
                       hovered && styles.hoverLift,
                       pressed && styles.pressScale,
                       qaWidthStyle,
@@ -429,18 +446,14 @@ export default function EnhancedDashboardScreen() {
                   }
                 >
                   <Animated.View style={qa2.animStyle}>
-                    <LinearGradient
-                      colors={["#F2FFF7", "#ECFDF5"]}
-                      style={styles.tileGradient}
-                      pointerEvents="none"
-                    />
+                    <LinearGradient colors={["#34D399", "#0d8c4f"]} style={styles.tileGradient} pointerEvents="none" />
+                    <View style={[styles.tileOrb, { top: -20, right: -14 }]} />
+                    <View style={[styles.tileOrbSm, { bottom: -12, left: -10 }]} />
                     <View style={styles.qaTileInner}>
                       <View style={styles.qaTextBlock}>
-                        <View style={styles.qaIconTop}><Icon name="book-open" size={22} color="#16A34A" /></View>
-                        <View style={[styles.qaTitleBadge, { backgroundColor: '#ECFDF5' }]}>
-                          <ThemedText style={[styles.qaTitle, { color: "#16A34A" }]}>Write Journal</ThemedText>
-                        </View>
-                        <ThemedText style={[styles.qaSubtitle, { color: palette.muted }]} numberOfLines={2} ellipsizeMode="tail">Reflect on your thoughts</ThemedText>
+                        <View style={styles.iconCircle}><Icon name="book-open" size={20} color="#065F46" /></View>
+                        <ThemedText style={styles.qaTitle}>Write Journal</ThemedText>
+                        <ThemedText style={styles.qaSubtitle} numberOfLines={2} ellipsizeMode="tail">Reflect on your thoughts</ThemedText>
                       </View>
                     </View>
                   </Animated.View>
@@ -456,10 +469,7 @@ export default function EnhancedDashboardScreen() {
                   style={({ hovered, pressed }) =>
                     StyleSheet.flatten([
                       styles.qaTile,
-                      styles.qaTileBlue,
                       styles.cardShadow,
-                      hovered && { backgroundColor: "#DBEAFE" },
-                      pressed && { backgroundColor: "#BFDBFE" },
                       hovered && styles.hoverLift,
                       pressed && styles.pressScale,
                       qaWidthStyle,
@@ -467,18 +477,14 @@ export default function EnhancedDashboardScreen() {
                   }
                 >
                   <Animated.View style={qa3.animStyle}>
-                    <LinearGradient
-                      colors={["#F5F9FF", "#EFF6FF"]}
-                      style={styles.tileGradient}
-                      pointerEvents="none"
-                    />
+                    <LinearGradient colors={["#60A5FA", "#2563EB"]} style={styles.tileGradient} pointerEvents="none" />
+                    <View style={[styles.tileOrb, { top: -20, right: -14 }]} />
+                    <View style={[styles.tileOrbSm, { bottom: -12, left: -10 }]} />
                     <View style={styles.qaTileInner}>
                       <View style={styles.qaTextBlock}>
-                        <View style={styles.qaIconTop}><Icon name="calendar" size={22} color="#2563EB" /></View>
-                        <View style={[styles.qaTitleBadge, { backgroundColor: '#EFF6FF' }]}>
-                          <ThemedText style={[styles.qaTitle, { color: "#2563EB" }]}>Book Session</ThemedText>
-                        </View>
-                        <ThemedText style={[styles.qaSubtitle, { color: palette.muted }]} numberOfLines={2} ellipsizeMode="tail">Schedule with counselor</ThemedText>
+                        <View style={styles.iconCircle}><Icon name="calendar" size={20} color="#1D4ED8" /></View>
+                        <ThemedText style={styles.qaTitle}>Book Session</ThemedText>
+                        <ThemedText style={styles.qaSubtitle} numberOfLines={2} ellipsizeMode="tail">Schedule with counselor</ThemedText>
                       </View>
                     </View>
                   </Animated.View>
@@ -494,10 +500,7 @@ export default function EnhancedDashboardScreen() {
                   style={({ hovered, pressed }) =>
                     StyleSheet.flatten([
                       styles.qaTile,
-                      styles.qaTileTeal,
                       styles.cardShadow,
-                      hovered && { backgroundColor: "#CFFAFE" },
-                      pressed && { backgroundColor: "#A5F3FC" },
                       hovered && styles.hoverLift,
                       pressed && styles.pressScale,
                       qaWidthStyle,
@@ -505,18 +508,14 @@ export default function EnhancedDashboardScreen() {
                   }
                 >
                   <Animated.View style={qa4.animStyle}>
-                    <LinearGradient
-                      colors={["#F1FEFF", "#ECFEFF"]}
-                      style={styles.tileGradient}
-                      pointerEvents="none"
-                    />
+                    <LinearGradient colors={["#5EEAD4", "#0D9488"]} style={styles.tileGradient} pointerEvents="none" />
+                    <View style={[styles.tileOrb, { top: -20, right: -14 }]} />
+                    <View style={[styles.tileOrbSm, { bottom: -12, left: -10 }]} />
                     <View style={styles.qaTileInner}>
                       <View style={styles.qaTextBlock}>
-                        <View style={styles.qaIconTop}><Icon name="message-square" size={22} color="#0D9488" /></View>
-                        <View style={[styles.qaTitleBadge, { backgroundColor: '#ECFEFF' }]}>
-                          <ThemedText style={[styles.qaTitle, { color: "#0D9488" }]}>AI Chat</ThemedText>
-                        </View>
-                        <ThemedText style={[styles.qaSubtitle, { color: palette.muted }]} numberOfLines={2} ellipsizeMode="tail">Get instant support</ThemedText>
+                        <View style={styles.iconCircle}><Icon name="message-square" size={20} color="#0F766E" /></View>
+                        <ThemedText style={styles.qaTitle}>AI Chat</ThemedText>
+                        <ThemedText style={styles.qaSubtitle} numberOfLines={2} ellipsizeMode="tail">Get instant support</ThemedText>
                       </View>
                     </View>
                   </Animated.View>
@@ -730,6 +729,7 @@ const styles = StyleSheet.create({
   greetingRow: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: 'space-between',
     gap: 12,
   },
   greetingIcon: {
@@ -745,15 +745,25 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   greetingTitle: {
-    fontSize: 24,
-    fontWeight: "700",
+    fontSize: 36,
+    fontFamily: "Inter_700Bold",
+    marginTop: 2,
     marginBottom: 2,
     color: "#111827",
+  },
+  greetingLine: {
+    fontSize: 16,
+    fontFamily: "Inter_500Medium",
+    color: "#6B7280",
   },
   welcomeText: {
     fontSize: 14,
     color: "#6B7280",
-    marginBottom: 0,
+    marginBottom: 2,
+  },
+  notifBtn: {
+    padding: 8,
+    borderRadius: 12,
   },
   dateText: {
     fontSize: 14,
@@ -798,14 +808,14 @@ const styles = StyleSheet.create({
     fontSize: 18,
     // Ensure boldness on iOS with Inter family
     fontFamily: "Inter_600SemiBold",
-    color: "#1F2937",
+    color: "#FFFFFF",
     textAlign: "center",
     lineHeight: 26,
     marginBottom: 8,
   },
   inspirationAuthor: {
     fontSize: 14,
-    color: "#6B7280",
+    color: "rgba(255,255,255,0.9)",
   },
   statCard: {
     width: "100%",
@@ -905,6 +915,14 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     elevation: 2,
   },
+  inspirationShadow: {
+    // Deeper, soft shadow for emphasis
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 10,
+  },
   hoverLift: {
     // Web hover: subtle lift
     transform: [{ translateY: -2 }],
@@ -924,22 +942,23 @@ const styles = StyleSheet.create({
   },
   qaTile: {
     width: Platform.select({ web: TILE_WIDTH as any, default: TILE_WIDTH_NATIVE as any }) as any,
-    minHeight: Platform.select({ web: 200, default: 240 }) as number,
+    aspectRatio: 1,
+    minHeight: 0,
     borderRadius: 20,
-    paddingHorizontal: Platform.select({ web: 32, default: 32 }) as number,
-    paddingVertical: Platform.select({ web: 32, default: 36 }) as number,
-    gap: Platform.select({ web: 14, default: 18 }) as number,
+    paddingHorizontal: 20,
+    paddingVertical: 20,
+    gap: 10,
     position: "relative",
-    marginBottom: Platform.select({ web: 0, default: 24 }) as number,
+    marginBottom: Platform.select({ web: 0, default: 16 }) as number,
     overflow: "hidden",
   },
   qaTileInner: {
     flex: 1,
     justifyContent: "flex-start",
-    gap: Platform.select({ web: 12, default: 14 }) as number,
-    paddingHorizontal: Platform.select({ web: 6, default: 8 }) as number,
-    paddingVertical: Platform.select({ web: 4, default: 6 }) as number,
-    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+    alignItems: 'flex-start',
     position: 'relative',
   },
   tileGradient: {
@@ -950,6 +969,20 @@ const styles = StyleSheet.create({
     bottom: 0,
     borderRadius: 20,
     opacity: Platform.select({ web: 1, default: 0.95 }) as number,
+  },
+  tileOrb: {
+    position: 'absolute',
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+  },
+  tileOrbSm: {
+    position: 'absolute',
+    width: 90,
+    height: 90,
+    borderRadius: 45,
+    backgroundColor: 'rgba(255,255,255,0.12)',
   },
   // Tile background color variants
   qaTilePurple: {
@@ -991,7 +1024,7 @@ const styles = StyleSheet.create({
     fontSize: Platform.select({ web: 16, default: 18 }) as number,
     // Ensure semi-bold weight across platforms
     fontFamily: "Inter_600SemiBold",
-    color: "#111827",
+    color: "#FFFFFF",
     // Slightly tighter spacing under title
     marginBottom: Platform.select({ web: 1, default: 2 }) as number,
   },
@@ -1000,6 +1033,7 @@ const styles = StyleSheet.create({
     // Tighter paragraph spacing on tiles
     lineHeight: Platform.select({ web: 16, default: 16 }) as number,
     marginTop: Platform.select({ web: 0, default: 1 }) as number,
+    color: 'rgba(255,255,255,0.92)',
   },
   qaIconTop: {
     alignSelf: 'flex-start',
@@ -1014,8 +1048,17 @@ const styles = StyleSheet.create({
   qaTextBlock: {
     // Reduce gap between header row and text block
     marginTop: Platform.select({ web: 2, default: 4 }) as number,
+    alignItems: 'flex-start',
+    gap: 6,
+  },
+  iconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
-    gap: Platform.select({ web: 4, default: 6 }) as number,
+    justifyContent: 'center',
+    marginBottom: 8,
   },
   qaArrow: {
     position: 'absolute',
@@ -1204,7 +1247,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   appointmentButton: {
-    backgroundColor: "#3B82F6",
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 8,

@@ -18,12 +18,12 @@ const initialMessages: Msg[] = [
   { id: 'm3', role: 'ai', text: 'Yes, Do that!', time: '12:11 PM' },
 ];
 
-type Counselor = { id: string; name: string; title: string };
+type Counselor = { id: string; name: string; title: string; lastMessage: string; lastTime: string; unreadCount: number };
 const COUNSELORS: Counselor[] = [
-  { id: 'sarah', name: 'Dr. Sarah Johnson', title: 'Licensed Counselor' },
-  { id: 'marco', name: 'Marco Lee', title: 'Mental Health Coach' },
-  { id: 'emma', name: 'Emma Clark', title: 'Therapist, CBT' },
-  { id: 'alex', name: 'Alex Kim', title: 'Wellness Counselor' },
+  { id: 'sarah', name: 'Dr. Sarah Johnson', title: 'Licensed Counselor', lastMessage: 'Let’s review your plan this week.', lastTime: '2:10 PM', unreadCount: 2 },
+  { id: 'marco', name: 'Marco Lee', title: 'Mental Health Coach', lastMessage: 'How did the breathing exercise go?', lastTime: '1:34 PM', unreadCount: 0 },
+  { id: 'emma', name: 'Emma Clark', title: 'Therapist, CBT', lastMessage: 'See you Thursday!', lastTime: 'Yesterday', unreadCount: 0 },
+  { id: 'alex', name: 'Alex Kim', title: 'Wellness Counselor', lastMessage: 'Great progress noted.', lastTime: 'Mon', unreadCount: 1 },
 ];
 
 export default function ChatScreen() {
@@ -163,11 +163,16 @@ export default function ChatScreen() {
                     <View style={[styles.avatar, { backgroundColor: palette.primary }]}><ThemedText style={{ color: '#FFFFFF', fontFamily: 'Inter_700Bold' }}>{c.name[0]}</ThemedText></View>
                     <View style={{ gap: 2 }}>
                       <ThemedText style={{ fontFamily: 'Inter_600SemiBold' }}>{c.name}</ThemedText>
-                      <ThemedText style={{ color: palette.muted, fontSize: 12 }}>{c.title}</ThemedText>
+                      <ThemedText style={{ color: palette.muted, fontSize: 12 }} numberOfLines={1}>{c.lastMessage}</ThemedText>
                     </View>
                   </View>
-                  <View style={[styles.badge, { backgroundColor: palette.background, borderColor: palette.border }]}>
-                    <ThemedText style={[styles.badgeText, { color: palette.tint }]}>Tap to chat</ThemedText>
+                  <View style={styles.rightMeta}>
+                    <ThemedText style={{ color: palette.muted, fontSize: 12 }}>{c.lastTime}</ThemedText>
+                    {c.unreadCount > 0 && (
+                      <View style={[styles.unreadBadge, { backgroundColor: palette.tint }]}>
+                        <ThemedText style={{ color: '#FFFFFF', fontSize: 11, fontFamily: 'Inter_600SemiBold' }}>{c.unreadCount}</ThemedText>
+                      </View>
+                    )}
                   </View>
                 </Pressable>
               ))}
@@ -232,6 +237,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  rightMeta: { alignItems: 'flex-end', gap: 6 },
+  unreadBadge: { minWidth: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 },
   iconPill: {
     width: 28,
     height: 28,
