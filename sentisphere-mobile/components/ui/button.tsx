@@ -73,7 +73,7 @@ export function Button({ title, onPress, variant = 'primary', style, textStyle, 
   const computedBackground = (() => {
     if (variant === 'primary') {
       if (disabled) return '#9BA1A6';
-      const base = palette.primary as string;
+      const base = palette.tint as string;
       if (pressed) return adjustLightness(base, -7);
       if (hovered) return adjustLightness(base, -4);
       return base;

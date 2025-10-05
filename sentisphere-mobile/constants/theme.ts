@@ -5,20 +5,21 @@
 
 import { Platform } from 'react-native';
 
-const tintColorLight = '#0a7ea4';
-const tintColorDark = '#fff';
+const tintColorLight = '#0d8c4f';
+const tintColorDark = '#0d8c4f';
 
 export const Colors = {
   light: {
     text: '#000000',
     background: '#ffffff',
     tint: tintColorLight,
+    secondary: '#0d8c4f',
     icon: '#687076',
     tabIconDefault: '#687076',
     tabIconSelected: tintColorLight,
     // Sentisphere palette
     primary: 'hsl(220 13% 18%)',
-    learningAccent: 'hsl(142 76% 36%)',
+    learningAccent: '#0d8c4f',
     muted: 'hsl(220 9% 46%)',
     border: 'hsl(220 13% 91%)',
     destructive: 'hsl(0 84% 60%)',
@@ -27,12 +28,13 @@ export const Colors = {
     text: '#ECEDEE',
     background: '#151718',
     tint: tintColorDark,
+    secondary: '#0d8c4f',
     icon: '#9BA1A6',
     tabIconDefault: '#9BA1A6',
     tabIconSelected: tintColorDark,
     // Sentisphere palette (dark-tuned where reasonable)
     primary: '#E6E8EB',
-    learningAccent: 'hsl(142 76% 40%)',
+    learningAccent: '#0d8c4f',
     muted: '#9BA1A6',
     border: '#2A2D2E',
     destructive: 'hsl(0 84% 60%)',

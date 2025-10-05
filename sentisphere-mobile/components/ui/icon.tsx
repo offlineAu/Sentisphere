@@ -26,6 +26,7 @@ import {
   Brain,
   RefreshCcw,
   Share2,
+  Bell,
   Send,
 } from 'lucide-react-native';
 
@@ -56,6 +57,7 @@ type IconProps = {
     | 'brain'
     | 'refresh-ccw'
     | 'share-2'
+    | 'bell'
     | 'send';
   size?: number;
   color?: string;
@@ -88,6 +90,7 @@ const icons: Record<string, any> = {
   'brain': Brain,
   'refresh-ccw': RefreshCcw,
   'share-2': Share2,
+  'bell': Bell,
   'send': Send,
 };
 
@@ -121,6 +124,7 @@ export function Icon({ name, size = 20, color }: IconProps) {
     brain: 'cpu',
     'refresh-ccw': 'refresh-ccw',
     'share-2': 'share-2',
+    bell: 'bell',
     send: 'send',
   };
   const featherName = featherNameMap[name] ?? 'circle';

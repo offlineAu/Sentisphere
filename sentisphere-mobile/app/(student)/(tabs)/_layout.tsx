@@ -143,7 +143,10 @@ function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
               accessibilityState={isFocused ? { selected: true } : {}}
               style={styles.tabItem}
             >
-              <Animated.View pointerEvents="none" style={[styles.activeBg, { opacity: anim, transform: [{ scale: bgScale }] }]} />
+              <Animated.View
+                pointerEvents="none"
+                style={[styles.activeBg, { backgroundColor: palette.tint, opacity: anim, transform: [{ scale: bgScale }] }]}
+              />
               <Animated.View style={{ transform: [{ scale }, { translateY }], opacity: iconOpacity }}>
                 <Feather name={icon} size={22} color={isFocused ? '#FFFFFF' : palette.icon} />
               </Animated.View>
