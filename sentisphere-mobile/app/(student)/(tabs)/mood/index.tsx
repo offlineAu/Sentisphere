@@ -1,4 +1,4 @@
-import { StyleSheet, View, ScrollView, Pressable, Animated, Easing } from 'react-native';
+import { StyleSheet, View, ScrollView, Pressable, Animated, Easing, Platform } from 'react-native';
 import { useState } from 'react';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
@@ -9,6 +9,7 @@ import { Icon } from '@/components/ui/icon';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors } from '@/constants/theme';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as Haptics from 'expo-haptics';
 
 type MoodOption = { key: string; emoji: string; label: string };
 
@@ -60,7 +61,7 @@ export default function MoodScreen() {
         onPress={onPress}
         onHoverIn={() => to(1.05, 180)}
         onHoverOut={() => to(1, 180)}
-        onPressIn={() => to(0.97, 100)}
+        onPressIn={() => { to(0.97, 100); if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} } }}
         onPressOut={() => Animated.spring(scale, { toValue: 1.04, stiffness: 240, damping: 18, mass: 0.85, useNativeDriver: true }).start()}
         style={({ pressed }) => ({ opacity: pressed ? 0.96 : 1 })}
       >
@@ -89,7 +90,7 @@ export default function MoodScreen() {
         onPress={handlePress}
         onHoverIn={() => to(1.05, 180)}
         onHoverOut={() => to(1, 180)}
-        onPressIn={() => to(0.97, 100)}
+        onPressIn={() => { to(0.97, 100); if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} } }}
         onPressOut={() => to(1, 140)}
         style={({ pressed }) => ({ opacity: pressed ? 0.96 : 1 })}
       >
@@ -136,7 +137,7 @@ export default function MoodScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      <LinearGradient colors={["#F8FAFC", "#EEF2FF"]} style={styles.pageBackground} pointerEvents="none" />
+      <LinearGradient colors={["#FFFFFF", "#FFFFFF"]} style={styles.pageBackground} pointerEvents="none" />
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         {/* Header */}
         <View style={styles.headerWrap}>
@@ -336,7 +337,7 @@ export default function MoodScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
+  container: { flex: 1, backgroundColor: '#FFFFFF' },
   pageBackground: {
     position: 'absolute',
     top: 0,
