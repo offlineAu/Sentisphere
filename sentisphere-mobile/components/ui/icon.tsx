@@ -10,6 +10,7 @@ import {
   Book,
   Plus,
   ArrowRight,
+  ArrowLeft,
   Calendar,
   Target,
   Award,
@@ -25,6 +26,7 @@ import {
   Brain,
   RefreshCcw,
   Share2,
+  Send,
 } from 'lucide-react-native';
 
 type IconProps = {
@@ -38,6 +40,7 @@ type IconProps = {
     | 'book'
     | 'plus'
     | 'arrow-right'
+    | 'arrow-left'
     | 'calendar'
     | 'target'
     | 'award'
@@ -52,7 +55,8 @@ type IconProps = {
     | 'star'
     | 'brain'
     | 'refresh-ccw'
-    | 'share-2';
+    | 'share-2'
+    | 'send';
   size?: number;
   color?: string;
 };
@@ -68,6 +72,7 @@ const icons: Record<string, any> = {
   'book': Book,
   'plus': Plus,
   'arrow-right': ArrowRight,
+  'arrow-left': ArrowLeft,
   'calendar': Calendar,
   'target': Target,
   'award': Award,
@@ -83,6 +88,7 @@ const icons: Record<string, any> = {
   'brain': Brain,
   'refresh-ccw': RefreshCcw,
   'share-2': Share2,
+  'send': Send,
 };
 
 export function Icon({ name, size = 20, color }: IconProps) {
@@ -99,6 +105,7 @@ export function Icon({ name, size = 20, color }: IconProps) {
     book: 'book',
     plus: 'plus',
     'arrow-right': 'arrow-right',
+    'arrow-left': 'arrow-left',
     calendar: 'calendar',
     target: 'target',
     award: 'award',
@@ -114,6 +121,7 @@ export function Icon({ name, size = 20, color }: IconProps) {
     brain: 'cpu',
     'refresh-ccw': 'refresh-ccw',
     'share-2': 'share-2',
+    send: 'send',
   };
   const featherName = featherNameMap[name] ?? 'circle';
   return <Feather name={featherName} size={size} color={color} />;

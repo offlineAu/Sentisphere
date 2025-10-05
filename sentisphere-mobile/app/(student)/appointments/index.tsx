@@ -2,10 +2,11 @@ import { StyleSheet } from 'react-native';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Easing, Platform, Pressable, ScrollView, View, Modal, ActivityIndicator, LayoutAnimation, UIManager } from 'react-native';
+import { Animated, Easing, Platform, Pressable, ScrollView, View, Modal, ActivityIndicator, LayoutAnimation, UIManager, TextInput, Share, KeyboardAvoidingView, Image } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors } from '@/constants/theme';
 import { Icon } from '@/components/ui/icon';
@@ -24,22 +25,26 @@ const TIME_SLOTS = ['9:00 AM', '10:00 AM', '11:00 AM', '1:00 PM', '2:00 PM', '3:
 export default function AppointmentsScreen() {
   const scheme = useColorScheme() ?? 'light';
   const palette = Colors[scheme] as any;
+  const focusBlue = '#3B82F6';
 
-  // Tabs: 0 = Upcoming, 1 = Schedule New
-  const [tab, setTab] = useState<0 | 1>(1);
-  const [segW, setSegW] = useState(0);
-  const animTab = useRef(new Animated.Value(1)).current;
-  const onTabChange = (next: 0 | 1) => {
-    setTab(next);
-    Animated.timing(animTab, { toValue: next, duration: 260, easing: Easing.bezier(0.22, 1, 0.36, 1), useNativeDriver: true }).start();
-  };
-  const indicatorStyle = (() => {
-    const usable = Math.max(0, segW - 8);
-    const itemW = usable > 0 ? usable / 2 : 0;
-    const tx = animTab.interpolate({ inputRange: [0, 1], outputRange: [0, itemW] });
-    const opacity = segW > 0 ? 1 : 0;
-    return { width: Math.max(0, itemW - 0.5), transform: [{ translateX: tx }], opacity };
-  })();
+  // Form state (survey-style)
+  const [fullName, setFullName] = useState('');
+  const [studentId, setStudentId] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [preferredDate, setPreferredDate] = useState('');
+  const [preferredTime, setPreferredTime] = useState('');
+  const [preferredCounselor, setPreferredCounselor] = useState('');
+  const [urgency, setUrgency] = useState<'low' | 'medium' | 'high' | 'urgent'>('low');
+  const [reason, setReason] = useState('');
+  const [previous, setPrevious] = useState<'none' | 'institution' | 'other'>('none');
+  const [additional, setAdditional] = useState('');
+  // Focus states for inputs (active border)
+  const [focusFullName, setFocusFullName] = useState(false);
+  const [focusStudentId, setFocusStudentId] = useState(false);
+  const [focusEmail, setFocusEmail] = useState(false);
+  const [focusPhone, setFocusPhone] = useState(false);
+  
 
   // Scheduler state
   type Step = 0 | 1 | 2; // 0 choose counselor, 1 choose date, 2 choose time
@@ -49,6 +54,7 @@ export default function AppointmentsScreen() {
   const [time, setTime] = useState<string | null>(null);
   const [openCounselorList, setOpenCounselorList] = useState(false);
   const [openTimeList, setOpenTimeList] = useState(false);
+  const [openDatePicker, setOpenDatePicker] = useState(false);
   const [isBooking, setIsBooking] = useState(false);
   const [confirmVisible, setConfirmVisible] = useState(false);
   const [lastBooked, setLastBooked] = useState<{ counselor: string; date: string; time: string } | null>(null);
@@ -76,6 +82,32 @@ export default function AppointmentsScreen() {
     });
   };
 
+  // Removed magnet auto-scroll for now
+
+  // Dropdown open animations
+  const calOpenAnim = useRef(new Animated.Value(0)).current;
+  const timeOpenAnim = useRef(new Animated.Value(0)).current;
+  const counselorOpenAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (openDatePicker) {
+      calOpenAnim.setValue(0);
+      Animated.timing(calOpenAnim, { toValue: 1, duration: 180, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+    }
+  }, [openDatePicker]);
+  useEffect(() => {
+    if (openTimeList) {
+      timeOpenAnim.setValue(0);
+      Animated.timing(timeOpenAnim, { toValue: 1, duration: 160, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+    }
+  }, [openTimeList]);
+  useEffect(() => {
+    if (openCounselorList) {
+      counselorOpenAnim.setValue(0);
+      Animated.timing(counselorOpenAnim, { toValue: 1, duration: 160, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+    }
+  }, [openCounselorList]);
+
   const doHaptic = async (kind: 'light' | 'selection' | 'success' = 'light') => {
     if (Platform.OS === 'web') return;
     try {
@@ -85,7 +117,7 @@ export default function AppointmentsScreen() {
     } catch {}
   };
 
-  const canBook = !!(counselor && date && time);
+  const canDownload = !!(fullName && studentId && email && reason);
 
   // Simple local upcoming item for demo
   const [upcoming, setUpcoming] = useState(
@@ -103,22 +135,18 @@ export default function AppointmentsScreen() {
     setOpenTimeList(false);
   };
 
-  const book = async () => {
-    if (!canBook || !counselor || !date || !time) return;
-    setIsBooking(true);
-    await new Promise((r) => setTimeout(r, 1200)); // simulated booking API
-    const pretty = date.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' });
-    setUpcoming((prev) => [
-      { id: String(Date.now()), counselor: counselor.name, date: pretty, time, mode: 'Virtual Meeting' },
-      ...prev,
-    ]);
-    setLastBooked({ counselor: counselor.name, date: pretty, time });
-    onTabChange(0);
-    setIsBooking(false);
-    setConfirmVisible(true);
-    await doHaptic('success');
-    showToast('Appointment booked');
-    resetSchedule();
+  const onDownloadPdf = async () => {
+    await doHaptic('selection');
+    if (!canDownload) {
+      showToast('Please complete required fields');
+      return;
+    }
+    try {
+      const summary = `Appointment Request\n\nStudent Information\n- Full Name: ${fullName}\n- Student ID: ${studentId}\n- Email: ${email}\n- Phone: ${phone || '-'}\n\nMeeting Preferences\n- Preferred Date: ${preferredDate || '-'}\n- Preferred Time: ${preferredTime || '-'}\n- Preferred Counselor: ${preferredCounselor || '-'}\n- Urgency: ${urgency}\n\nMeeting Details\n- Reason: ${reason}\n- Previous Sessions: ${previous}\n- Additional Info: ${additional || '-'}`;
+      await Share.share({ message: summary });
+      await doHaptic('success');
+      showToast('PDF generated');
+    } catch {}
   };
 
   const next = async () => {
@@ -157,204 +185,318 @@ export default function AppointmentsScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: 160 }} scrollEnabled={!(tab === 0 && upcoming.length === 0)}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={Platform.OS === 'ios' ? 72 : 0} style={{ flex: 1 }}>
+      <ScrollView
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+        contentContainerStyle={{ padding: 24, paddingBottom: 60 }}
+      >
         <View style={styles.page}>
-          <View style={{ height: 16 }} />
-          <ThemedText type="title">Appointments</ThemedText>
-          <ThemedText style={{ color: palette.muted }}>Schedule sessions with counselors and manage your appointments</ThemedText>
-
-        {/* Segmented control */}
-        <View
-          style={[styles.segment, { backgroundColor: '#EEF2F7', borderColor: palette.border, marginTop: 20 }]}
-          onLayout={(e) => {
-            setSegW(e.nativeEvent.layout.width);
-            const y = e.nativeEvent.layout.y;
-            const h = e.nativeEvent.layout.height;
-            setOverlayTop(y + h + 16); // overlay starts below the segment with spacing
-          }}
-        >
-          <Animated.View style={[styles.segmentIndicator, { backgroundColor: '#ffffff' }, indicatorStyle]} />
-          <Pressable style={styles.segmentItem} onPress={() => onTabChange(0)} accessibilityRole="button" accessibilityState={tab === 0 ? { selected: true } : {}}>
-            <Icon name="clock" size={16} color={palette.text} />
-            <ThemedText style={styles.segmentText}>Upcoming</ThemedText>
-          </Pressable>
-          <Pressable style={styles.segmentItem} onPress={() => onTabChange(1)} accessibilityRole="button" accessibilityState={tab === 1 ? { selected: true } : {}}>
-            <Icon name="calendar" size={16} color={palette.text} />
-            <ThemedText style={styles.segmentText}>Schedule New</ThemedText>
-          </Pressable>
-        </View>
-
-        {tab === 0 ? (
-          <View style={{ gap: 14, marginTop: 20, alignSelf: 'stretch' }}>
-            {upcoming.map((u) => (
-              <Card key={u.id}>
-                <CardContent>
-                  <ThemedText style={{ fontFamily: 'Inter_700Bold', fontSize: 16 }}>{u.counselor}</ThemedText>
-                  <ThemedText style={{ color: palette.muted }}>{u.date} at {u.time}</ThemedText>
-                  <ThemedText style={{ color: palette.icon }}>{u.mode}</ThemedText>
-                  <View style={{ flexDirection: 'row', gap: 10, marginTop: 8 }}>
-                    <Button title="Cancel" variant="outline" onPress={() => setUpcoming((prev) => prev.filter((it) => it.id !== u.id))} />
-                    <Button title="Join" onPress={() => showToast('Joining...')} />
-                  </View>
-                </CardContent>
-              </Card>
-            ))}
+          <View style={{ height: 8 }} />
+          <View style={{ alignItems: 'center', justifyContent: 'center', marginTop: 4, marginBottom: 10 }}>
+            <Image
+              source={{ uri: 'https://cdn-icons-png.flaticon.com/512/668/668278.png' }}
+              style={{ width: 56, height: 56, marginBottom: 6 }}
+              resizeMode="contain"
+              accessible
+              accessibilityLabel="Calendar icon"
+            />
+            <ThemedText type="title" style={{ textAlign: 'center' }}>Appointment Request Form</ThemedText>
           </View>
-        ) : (
-          <Card style={{ marginTop: 20, alignSelf: 'stretch' }}>
-            <CardContent>
-              <ThemedText type="subtitle">Schedule New Appointment</ThemedText>
-              <ThemedText style={{ color: palette.muted }}>Book a session with one of our qualified counselors</ThemedText>
+          <ThemedText style={{ color: palette.muted, textAlign: 'center', marginBottom: 14 }}>
+            Fill out this form to request a face-to-face meeting with a counselor. You can download a PDF copy to bring to the guidance office.
+          </ThemedText>
 
-              {step === 0 && (
-                <View style={{ marginTop: 8 }}>
-                  <ThemedText style={{ fontFamily: 'Inter_600SemiBold' }}>Select a Counselor</ThemedText>
-                  {/* Field */}
-                  <Pressable
-                    onPress={() => { LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); setOpenCounselorList((o) => !o); doHaptic(); }}
-                    style={StyleSheet.flatten([styles.field, { borderColor: palette.border }])}
-                  >
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                      <Icon name="user" size={18} color={palette.icon} />
-                      <ThemedText style={{ color: counselor ? palette.text : '#9BA1A6' }}>{counselor ? counselor.name : 'Choose a counselor'}</ThemedText>
-                    </View>
-                    <Icon name="arrow-right" size={18} color={palette.icon} />
-                  </Pressable>
+          <View style={styles.infoCard}>
+            <ThemedText style={styles.infoTitle}>How to use this form:</ThemedText>
+            <ThemedText style={styles.infoItem}>1. Fill out all required fields marked with an asterisk (*)</ThemedText>
+            <ThemedText style={styles.infoItem}>2. Click "Download PDF" to generate a printable copy</ThemedText>
+            <ThemedText style={styles.infoItem}>3. Bring the printed form to the Guidance Office (Building A, 2nd Floor)</ThemedText>
+            <ThemedText style={styles.infoItem}>4. A counselor will review your request and contact you within 24-48 hours</ThemedText>
+          </View>
+          <View style={{ height: 12 }} />
 
-                  {openCounselorList && (
-                    <View style={StyleSheet.flatten([styles.dropdown, { borderColor: palette.border, backgroundColor: '#FFFFFF' }])}>
-                      {COUNSELORS.map((c) => (
-                        <Pressable
-                          key={c.id}
-                          onPress={() => { setCounselor(c); LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); setOpenCounselorList(false); doHaptic(); showToast('Counselor selected'); }}
-                          style={({ pressed }) => [styles.option, { backgroundColor: pressed ? '#F3F4F6' : 'transparent' }]}
-                        >
-                          <ThemedText>{c.name}</ThemedText>
-                          <ThemedText style={{ color: palette.muted }}>{c.title}</ThemedText>
-                        </Pressable>
-                      ))}
-                    </View>
-                  )}
+          <Card>
+            <CardContent style={{ paddingVertical: 8, gap: 8 }}>
+              <View style={{ height: 8 }} />
+              <ThemedText type="subtitle">Student Counseling Services</ThemedText>
+              <ThemedText style={{ color: palette.muted, marginBottom: 8 }}>Complete all required fields. Download the PDF to bring to the guidance office.</ThemedText>
+
+              {/* Student Information */}
+              <View style={styles.sectionHeader}><ThemedText style={styles.sectionHeaderText}>STUDENT INFORMATION</ThemedText></View>
+
+              <ThemedText style={styles.label}>Full Name *</ThemedText>
+              <TextInput
+                value={fullName}
+                onChangeText={setFullName}
+                placeholder="Enter your full name"
+                placeholderTextColor="#9CA3AF"
+                selectionColor={focusBlue}
+                onFocus={() => { setFocusFullName(true); doHaptic('selection'); }}
+                onBlur={() => setFocusFullName(false)}
+                style={[styles.input, { borderColor: focusFullName ? focusBlue : palette.border }]}
+              />
+
+              <ThemedText style={styles.label}>Student ID *</ThemedText>
+              <TextInput
+                value={studentId}
+                onChangeText={setStudentId}
+                placeholder="Enter your student ID"
+                placeholderTextColor="#9CA3AF"
+                selectionColor={focusBlue}
+                onFocus={() => { setFocusStudentId(true); doHaptic('selection'); }}
+                onBlur={() => setFocusStudentId(false)}
+                style={[styles.input, { borderColor: focusStudentId ? focusBlue : palette.border }]}
+              />
+
+              <ThemedText style={styles.label}>Email Address *</ThemedText>
+              <TextInput
+                value={email}
+                onChangeText={setEmail}
+                placeholder="Enter your email"
+                keyboardType="email-address"
+                placeholderTextColor="#9CA3AF"
+                selectionColor={focusBlue}
+                onFocus={() => { setFocusEmail(true); doHaptic('selection'); }}
+                onBlur={() => setFocusEmail(false)}
+                style={[styles.input, { borderColor: focusEmail ? focusBlue : palette.border }]}
+                autoCapitalize="none"
+              />
+
+              <ThemedText style={styles.label}>Phone Number</ThemedText>
+              <TextInput
+                value={phone}
+                onChangeText={setPhone}
+                placeholder="Enter your phone number"
+                keyboardType="phone-pad"
+                placeholderTextColor="#9CA3AF"
+                selectionColor={focusBlue}
+                onFocus={() => { setFocusPhone(true); doHaptic('selection'); }}
+                onBlur={() => setFocusPhone(false)}
+                style={[styles.input, { borderColor: focusPhone ? focusBlue : palette.border }]}
+              />
+
+              {/* Meeting Preferences */}
+              <View style={styles.sectionHeader}><ThemedText style={styles.sectionHeaderText}>MEETING PREFERENCES</ThemedText></View>
+
+              <ThemedText style={styles.label}>Preferred Date</ThemedText>
+              <Pressable
+                onPress={() => { LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); setOpenDatePicker((o) => !o); doHaptic('selection'); }}
+                style={StyleSheet.flatten([styles.field, { borderColor: openDatePicker ? focusBlue : palette.border }])}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <Icon name="calendar" size={18} color={palette.icon} />
+                  <ThemedText style={{ color: preferredDate ? palette.text : '#9CA3AF' }}>{preferredDate || 'Pick a date'}</ThemedText>
                 </View>
-              )}
-
-              {step === 1 && (
-                <View style={{ marginTop: 8 }}>
-                  <ThemedText style={{ fontFamily: 'Inter_600SemiBold' }}>Select a Date</ThemedText>
-                  <View style={StyleSheet.flatten([styles.calendar, { borderColor: frostedBorder, backgroundColor: frostedBg }, frostedWeb])}>
-                    {/* Calendar header */}
-                    <View style={styles.calHeader}>
-                      <Pressable
-                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                        onPress={() => { setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() - 1, 1)); doHaptic('selection'); }}
-                        style={StyleSheet.flatten([styles.calHeaderBtn, { backgroundColor: frostedBg, borderWidth: 1, borderColor: frostedBorder }, frostedWeb])}
-                      >
-                        <ThemedText style={{ fontSize: 20 }}>{'‹'}</ThemedText>
-                      </Pressable>
-                      <ThemedText style={{ fontFamily: 'Inter_600SemiBold', fontSize: 20 }}>{monthLabel}</ThemedText>
-                      <Pressable
-                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                        onPress={() => { setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1)); doHaptic('selection'); }}
-                        style={StyleSheet.flatten([styles.calHeaderBtn, { backgroundColor: frostedBg, borderWidth: 1, borderColor: frostedBorder }, frostedWeb])}
-                      >
-                        <ThemedText style={{ fontSize: 20 }}>{'›'}</ThemedText>
-                      </Pressable>
-                    </View>
-                    {/* Weekdays */}
-                    <View style={styles.weekRow}>
-                      {['Su','Mo','Tu','We','Th','Fr','Sa'].map((w) => (
-                        <ThemedText key={w} style={[styles.weekdayText, { color: palette.muted }]}>{w}</ThemedText>
-                      ))}
-                    </View>
-                    {/* Grid */}
-                    <View style={styles.grid}> 
-                      {days.map((d) => {
-                        if (!d.day) return <View key={d.key} style={{ width: '14.2857%', aspectRatio: 1 }} />;
-                        const isSelected = !!(date && d.date && date.toDateString() === d.date.toDateString());
-                        const isToday = !!(d.date && d.date.toDateString() === new Date().toDateString());
-                        return (
-                          <Pressable
-                            key={d.key}
-                            disabled={d.disabled}
-                            hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
-                            onPress={() => { setDate(d.date!); doHaptic(); showToast('Date selected'); }}
-                            style={({ pressed }) => [
-                              styles.day,
-                              isSelected && { backgroundColor: 'rgba(17,24,39,0.9)' },
-                              isToday && !isSelected && { borderWidth: 1, borderColor: '#10B981' },
-                              d.disabled && { opacity: 0.35 },
-                              { transform: [{ scale: pressed ? 0.96 : 1 }] },
-                            ]}
+                <Icon name="arrow-right" size={18} color={palette.icon} />
+              </Pressable>
+              {openDatePicker && (
+                <Animated.View
+                  style={StyleSheet.flatten([
+                    styles.calendar,
+                    {
+                      borderColor: '#E5E7EB',
+                      backgroundColor: '#FFFFFF',
+                      opacity: calOpenAnim,
+                      transform: [{ translateY: calOpenAnim.interpolate({ inputRange: [0, 1], outputRange: [-4, 0] }) }],
+                    },
+                  ])}
+                >
+                  {/* Calendar header */}
+                  <View style={styles.calHeader}>
+                    <Pressable
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      onPress={() => { setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() - 1, 1)); doHaptic('selection'); }}
+                      style={StyleSheet.flatten([styles.calHeaderBtn, { backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#E5E7EB' }])}
+                    >
+                      <ThemedText style={{ fontSize: 20 }}>{'‹'}</ThemedText>
+                    </Pressable>
+                    <ThemedText style={{ fontFamily: 'Inter_600SemiBold', fontSize: 20 }}>{monthLabel}</ThemedText>
+                    <Pressable
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      onPress={() => { setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1)); doHaptic('selection'); }}
+                      style={StyleSheet.flatten([styles.calHeaderBtn, { backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#E5E7EB' }])}
+                    >
+                      <ThemedText style={{ fontSize: 20 }}>{'›'}</ThemedText>
+                    </Pressable>
+                  </View>
+                  {/* Weekdays */}
+                  <View style={styles.weekRow}>
+                    {['Su','Mo','Tu','We','Th','Fr','Sa'].map((w) => (
+                      <ThemedText key={w} style={[styles.weekdayText, { color: palette.muted }]}>{w}</ThemedText>
+                    ))}
+                  </View>
+                  {/* Grid */}
+                  <View style={styles.grid}>
+                    {days.map((d) => {
+                      if (!d.day) return <View key={d.key} style={{ width: '14.2857%', aspectRatio: 1 }} />;
+                      const isSelected = !!(date && d.date && date.toDateString() === d.date.toDateString());
+                      const isToday = !!(d.date && d.date.toDateString() === new Date().toDateString());
+                      return (
+                        <Pressable
+                          key={d.key}
+                          disabled={d.disabled}
+                          hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+                          onPress={() => {
+                            const picked = d.date!;
+                            setDate(picked);
+                            const pretty = picked.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' });
+                            setPreferredDate(pretty);
+                            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                            setOpenDatePicker(false);
+                            doHaptic('selection');
+                          }}
+                          style={({ pressed }) => [
+                            styles.day,
+                            d.disabled && { opacity: 0.35 },
+                            { transform: [{ scale: pressed ? 0.96 : 1 }] },
+                          ]}
+                        >
+                          <View
+                            style={StyleSheet.flatten([
+                              styles.dayInner,
+                              isSelected
+                                ? { backgroundColor: 'rgba(17,24,39,0.92)' }
+                                : isToday
+                                ? { borderWidth: 2, borderColor: '#10B981' }
+                                : null,
+                            ])}
                           >
                             <ThemedText style={[styles.dayText, { color: isSelected ? '#FFFFFF' : palette.text }]}>{d.day}</ThemedText>
-                            {isToday && !isSelected ? <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: '#10B981', marginTop: 2 }} /> : null}
-                          </Pressable>
-                        );
-                      })}
-                    </View>
-                  </View>
-                </View>
-              )}
-
-              {step === 2 && (
-                <View style={{ marginTop: 8 }}>
-                  <ThemedText style={{ fontFamily: 'Inter_600SemiBold' }}>Select a Time Slot</ThemedText>
-                  {/* Field */}
-                  <Pressable
-                    onPress={() => { LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); setOpenTimeList((o) => !o); doHaptic(); }}
-                    style={StyleSheet.flatten([styles.field, { borderColor: palette.border }])}
-                  >
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                      <Icon name="clock" size={18} color={palette.icon} />
-                      <ThemedText style={{ color: time ? palette.text : '#9BA1A6' }}>{time ?? 'Choose a time'}</ThemedText>
-                    </View>
-                    <Icon name="arrow-right" size={18} color={palette.icon} />
-                  </Pressable>
-
-                  {openTimeList && (
-                    <View style={StyleSheet.flatten([styles.dropdown, { borderColor: palette.border, backgroundColor: '#FFFFFF' }])}>
-                      {TIME_SLOTS.map((t) => (
-                        <Pressable
-                          key={t}
-                          onPress={() => { setTime(t); LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); setOpenTimeList(false); doHaptic(); showToast('Time slot selected'); }}
-                          style={({ pressed }) => [styles.option, { backgroundColor: pressed ? '#F3F4F6' : 'transparent' }]}
-                        >
-                          <ThemedText>{t}</ThemedText>
+                          </View>
                         </Pressable>
-                      ))}
-                    </View>
-                  )}
-                </View>
+                      );
+                    })}
+                  </View>
+                </Animated.View>
               )}
 
-              {/* Footer actions */}
-              <View style={{ flexDirection: 'row', gap: 10, marginTop: 12, justifyContent: 'space-between' }}>
-                {step > 0 ? <Button title="Back" variant="outline" onPress={back} /> : <View style={{ width: 0 }} />}
-                {step < 2 ? (
-                  <Button title="Next" onPress={next} disabled={(step === 0 && !counselor) || (step === 1 && !date)} />
-                ) : (
-                  <Button title="Book Appointment" onPress={book} disabled={!canBook} loading={isBooking} />
-                )}
+              <ThemedText style={styles.label}>Preferred Time</ThemedText>
+              <Pressable
+                onPress={() => { LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); setOpenTimeList((o) => !o); doHaptic('selection'); }}
+                style={StyleSheet.flatten([styles.field, { borderColor: openTimeList ? focusBlue : palette.border }])}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <Icon name="clock" size={18} color={palette.icon} />
+                  <ThemedText style={{ color: preferredTime ? palette.text : '#9CA3AF' }}>{preferredTime || 'Select preferred time'}</ThemedText>
+                </View>
+                <Icon name="arrow-right" size={18} color={palette.icon} />
+              </Pressable>
+              {openTimeList && (
+                <Animated.View
+                  style={StyleSheet.flatten([
+                    styles.dropdown,
+                    {
+                      borderColor: palette.border,
+                      backgroundColor: '#FFFFFF',
+                      opacity: timeOpenAnim,
+                      transform: [{ translateY: timeOpenAnim.interpolate({ inputRange: [0, 1], outputRange: [-4, 0] }) }],
+                    },
+                  ])}
+                >
+                  {TIME_SLOTS.map((t) => (
+                    <Pressable
+                      key={t}
+                      onPress={() => { setPreferredTime(t); LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); setOpenTimeList(false); doHaptic('selection'); showToast('Time selected'); }}
+                      style={({ pressed }) => [styles.option, { backgroundColor: pressed ? '#F3F4F6' : 'transparent' }]}
+                    >
+                      <ThemedText>{t}</ThemedText>
+                    </Pressable>
+                  ))}
+                </Animated.View>
+              )}
+
+              <ThemedText style={styles.label}>Preferred Counselor</ThemedText>
+              <Pressable
+                onPress={() => { LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); setOpenCounselorList((o) => !o); doHaptic('selection'); }}
+                style={StyleSheet.flatten([styles.field, { borderColor: openCounselorList ? focusBlue : palette.border }])}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <Icon name="user" size={18} color={palette.icon} />
+                  <ThemedText style={{ color: preferredCounselor ? palette.text : '#9CA3AF' }}>{preferredCounselor || 'Select a counselor'}</ThemedText>
+                </View>
+                <Icon name="arrow-right" size={18} color={palette.icon} />
+              </Pressable>
+              {openCounselorList && (
+                <Animated.View
+                  style={StyleSheet.flatten([
+                    styles.dropdown,
+                    {
+                      borderColor: palette.border,
+                      backgroundColor: '#FFFFFF',
+                      opacity: counselorOpenAnim,
+                      transform: [{ translateY: counselorOpenAnim.interpolate({ inputRange: [0, 1], outputRange: [-4, 0] }) }],
+                    },
+                  ])}
+                >
+                  {COUNSELORS.map((c) => (
+                    <Pressable
+                      key={c.id}
+                      onPress={() => { setCounselor(c); setPreferredCounselor(c.name); LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); setOpenCounselorList(false); doHaptic('selection'); showToast('Counselor selected'); }}
+                      style={({ pressed }) => [styles.option, { backgroundColor: pressed ? '#F3F4F6' : 'transparent' }]}
+                    >
+                      <ThemedText>{c.name}</ThemedText>
+                      <ThemedText style={{ color: palette.muted }}>{c.title}</ThemedText>
+                    </Pressable>
+                  ))}
+                </Animated.View>
+              )}
+
+              <ThemedText style={styles.label}>Urgency Level</ThemedText>
+              {([
+                { key: 'low', label: 'Low - Can wait 1-2 weeks' },
+                { key: 'medium', label: 'Medium - Within this week' },
+                { key: 'high', label: 'High - Within 1-2 days' },
+                { key: 'urgent', label: 'Urgent - Same day if possible' },
+              ] as const).map((u) => (
+                <Pressable key={u.key} onPress={() => { setUrgency(u.key as any); doHaptic('selection'); }} style={styles.radioRow}>
+                  <View style={[styles.radioOuter, { borderColor: palette.border }]}>
+                    {urgency === u.key && <View style={styles.radioInner} />}
+                  </View>
+                  <ThemedText>{u.label}</ThemedText>
+                </Pressable>
+              ))}
+
+              {/* Meeting Details */}
+              <View style={styles.sectionHeader}><ThemedText style={styles.sectionHeaderText}>MEETING DETAILS</ThemedText></View>
+
+              <ThemedText style={styles.label}>Reason for Meeting *</ThemedText>
+              <Textarea value={reason} onChangeText={setReason} placeholder="Please describe the reason for your meeting request..." style={{ height: 110 }} onFocus={() => { doHaptic('selection'); }} />
+
+              <ThemedText style={styles.label}>Have you had previous counseling sessions?</ThemedText>
+              {([
+                { key: 'none', label: 'No, this is my first time' },
+                { key: 'institution', label: 'Yes, at this institution' },
+                { key: 'other', label: 'Yes, at another institution' },
+              ] as const).map((o) => (
+                <Pressable key={o.key} onPress={() => { setPrevious(o.key as any); doHaptic('selection'); }} style={styles.radioRow}>
+                  <View style={[styles.radioOuter, { borderColor: palette.border }]}>
+                    {previous === o.key && <View style={styles.radioInner} />}
+                  </View>
+                  <ThemedText>{o.label}</ThemedText>
+                </Pressable>
+              ))}
+
+              <ThemedText style={styles.label}>Additional Information</ThemedText>
+              <Textarea value={additional} onChangeText={setAdditional} placeholder="Any additional information you'd like to share..." style={{ height: 100 }} onFocus={() => { doHaptic('selection'); }} />
+              <View style={[styles.noticeBox, { borderColor: palette.text, marginTop: 8 }]}>
+                <ThemedText style={{ fontFamily: 'Inter_700Bold' }}>MEETING TYPE: FACE-TO-FACE ONLY</ThemedText>
+                <ThemedText style={{ color: palette.muted }}>
+                  All meetings will be conducted in person at the Student Counseling Center, Building A, 2nd Floor. Please arrive 10 minutes early for your appointment.
+                </ThemedText>
               </View>
+
+              <Button title="Download PDF" onPress={onDownloadPdf} disabled={!canDownload} />
+              <ThemedText style={styles.footnote}>
+                * Fill in all required fields (Name, Student ID, Email, and Reason), then download the PDF to bring to the Student Counseling Center.
+              </ThemedText>
             </CardContent>
           </Card>
-        )}
         </View>
       </ScrollView>
+      </KeyboardAvoidingView>
 
-      {/* Empty state when no upcoming - centered message */}
-      {tab === 0 && upcoming.length === 0 && (
-        <View style={[styles.emptyWrap, { top: overlayTop }]} pointerEvents="box-none">
-          <View style={[styles.page, { alignItems: 'center' }]}> 
-            <Icon name="calendar" size={40} color={palette.icon} />
-            <ThemedText type="subtitle" style={{ marginTop: 8, textAlign: 'center' }}>No upcoming appointments</ThemedText>
-            <ThemedText style={{ color: palette.muted, textAlign: 'center' }}>You don’t have any sessions scheduled. Book your next session to stay on track.</ThemedText>
-            <View style={{ marginTop: 12 }}>
-              <Button title="Schedule New" onPress={() => onTabChange(1)} />
-            </View>
-          </View>
-        </View>
-      )}
+      
 
       {/* Toast */}
       <Animated.View
@@ -417,6 +559,33 @@ const styles = StyleSheet.create({
     maxWidth: 720,
     alignSelf: 'center',
   },
+  infoCard: {
+    backgroundColor: '#F3F4F6',
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    marginTop: 12,
+    gap: 4,
+  },
+  infoTitle: { fontFamily: 'Inter_600SemiBold' },
+  infoItem: { fontSize: 13 },
+  sectionHeader: { marginTop: 16, marginBottom: 8, paddingTop: 6, borderBottomWidth: 2, borderBottomColor: '#E5E7EB' },
+  sectionHeaderText: { fontFamily: 'Inter_700Bold', fontSize: 14, color: '#111827', marginBottom: 6 },
+  label: { fontSize: 13, marginTop: 8, marginBottom: 6, color: '#111827', fontFamily: 'Inter_600SemiBold' },
+  input: {
+    borderWidth: 1,
+    borderRadius: 10,
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    marginBottom: 6,
+  },
+  radioRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 },
+  radioOuter: { width: 18, height: 18, borderRadius: 9, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  radioInner: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#111827' },
+  noticeBox: { borderWidth: 1, borderRadius: 12, padding: 14, gap: 6, marginBottom: 10 },
+  footnote: { color: '#6B7280', fontSize: 12, marginTop: 8 },
   segment: {
     flexDirection: 'row',
     borderRadius: 999,
@@ -491,6 +660,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 999,
+  },
+  dayInner: {
+    width: '84%',
+    aspectRatio: 1,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   weekdayText: {
     width: '14.2857%',

@@ -1,8 +1,9 @@
 import React, { useRef, useState } from 'react';
-import { Pressable, StyleSheet, ViewStyle, TextStyle, Animated, Easing, ActivityIndicator } from 'react-native';
+import { Pressable, StyleSheet, ViewStyle, TextStyle, Animated, Easing, ActivityIndicator, Platform } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors } from '@/constants/theme';
+import * as Haptics from 'expo-haptics';
 
 export type ButtonProps = {
   title: string;
@@ -91,7 +92,7 @@ export function Button({ title, onPress, variant = 'primary', style, textStyle, 
       onPress={onPress}
       onHoverIn={() => { setHovered(true); animateTo(1.03, 150); }}
       onHoverOut={() => { setHovered(false); animateTo(1, 150); }}
-      onPressIn={() => { setPressed(true); animateTo(0.98, 90); }}
+      onPressIn={() => { setPressed(true); animateTo(0.98, 90); if (Platform.OS !== 'web') { try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {} } }}
       onPressOut={() => { setPressed(false); animateTo(hovered ? 1.03 : 1, 130); }}
       style={combinedBase}
     >

@@ -11,6 +11,7 @@ import { useColorScheme } from "@/hooks/use-color-scheme"
 import { Colors } from "@/constants/theme"
 import { Icon } from "@/components/ui/icon"
 import { LinearGradient } from "expo-linear-gradient"
+import * as Haptics from "expo-haptics"
 
 const { width } = Dimensions.get("window")
 const GRID_PADDING = 16 // matches scrollContent padding
@@ -303,10 +304,10 @@ export default function EnhancedDashboardScreen() {
                 </Animated.View>
                 {/* Inspiration actions */}
                 <View style={styles.inspirationActions}>
-                  <Pressable accessibilityLabel="Refresh quote" onPress={refreshQuote} style={({ pressed }) => [styles.inspirationActionBtn, pressed && { opacity: 0.85 }]} hitSlop={8}>
+                  <Pressable accessibilityLabel="Refresh quote" onPress={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} } refreshQuote() }} style={({ pressed }) => [styles.inspirationActionBtn, pressed && { opacity: 0.85 }]} hitSlop={8}>
                     <Icon name="refresh-ccw" size={16} color="#6B7280" />
                   </Pressable>
-                  <Pressable accessibilityLabel="Share quote" onPress={shareQuote} style={({ pressed }) => [styles.inspirationActionBtn, pressed && { opacity: 0.85 }]} hitSlop={8}>
+                  <Pressable accessibilityLabel="Share quote" onPress={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} } shareQuote() }} style={({ pressed }) => [styles.inspirationActionBtn, pressed && { opacity: 0.85 }]} hitSlop={8}>
                     <Icon name="share-2" size={16} color="#6B7280" />
                   </Pressable>
                 </View>
@@ -374,7 +375,7 @@ export default function EnhancedDashboardScreen() {
                 <Pressable
                   onHoverIn={qa1.onHoverIn}
                   onHoverOut={qa1.onHoverOut}
-                  onPressIn={qa1.onPressIn}
+                  onPressIn={() => { qa1.onPressIn(); if (Platform.OS !== 'web') { try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light) } catch {} } }}
                   onPressOut={qa1.onPressOut}
                   style={({ hovered, pressed }) =>
                     StyleSheet.flatten([
@@ -412,7 +413,7 @@ export default function EnhancedDashboardScreen() {
                 <Pressable
                   onHoverIn={qa2.onHoverIn}
                   onHoverOut={qa2.onHoverOut}
-                  onPressIn={qa2.onPressIn}
+                  onPressIn={() => { qa2.onPressIn(); if (Platform.OS !== 'web') { try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light) } catch {} } }}
                   onPressOut={qa2.onPressOut}
                   style={({ hovered, pressed }) =>
                     StyleSheet.flatten([
@@ -450,7 +451,7 @@ export default function EnhancedDashboardScreen() {
                 <Pressable
                   onHoverIn={qa3.onHoverIn}
                   onHoverOut={qa3.onHoverOut}
-                  onPressIn={qa3.onPressIn}
+                  onPressIn={() => { qa3.onPressIn(); if (Platform.OS !== 'web') { try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light) } catch {} } }}
                   onPressOut={qa3.onPressOut}
                   style={({ hovered, pressed }) =>
                     StyleSheet.flatten([
@@ -488,7 +489,7 @@ export default function EnhancedDashboardScreen() {
                 <Pressable
                   onHoverIn={qa4.onHoverIn}
                   onHoverOut={qa4.onHoverOut}
-                  onPressIn={qa4.onPressIn}
+                  onPressIn={() => { qa4.onPressIn(); if (Platform.OS !== 'web') { try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light) } catch {} } }}
                   onPressOut={qa4.onPressOut}
                   style={({ hovered, pressed }) =>
                     StyleSheet.flatten([
@@ -542,7 +543,7 @@ export default function EnhancedDashboardScreen() {
                   <Pressable
                     onHoverIn={() => onActHoverIn(i)}
                     onHoverOut={() => onActHoverOut(i)}
-                    onPressIn={() => onActPressIn(i)}
+                    onPressIn={() => { onActPressIn(i); if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} } }}
                     onPressOut={() => onActPressOut(i)}
                     style={({ hovered, pressed }) =>
                       StyleSheet.flatten([
@@ -689,7 +690,7 @@ export default function EnhancedDashboardScreen() {
                 <ThemedText type="subtitle" style={styles.sectionTitle}>Your Insights</ThemedText>
               </View>
               <Link href="/(student)/analytics" asChild>
-                <Pressable>
+                <Pressable onPressIn={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} } }}>
                   <Icon name="arrow-right" size={16} color={palette.muted} />
                 </Pressable>
               </Link>

@@ -6,6 +6,7 @@ import { View, Pressable, StyleSheet, Platform, Animated, Easing } from 'react-n
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useEffect, useRef, useState } from 'react';
+import * as Haptics from 'expo-haptics';
 
 function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const scheme = useColorScheme() ?? 'light';
@@ -14,7 +15,7 @@ function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const [barWidth, setBarWidth] = useState(0);
 
   // Filter out routes explicitly hidden via href: null (expo-router)
-  const hiddenNames = new Set(['chat/index', 'journal/new', 'journal/[id]']);
+  const hiddenNames = new Set(['chat/index', 'chat/[id]', 'journal/new', 'journal/[id]']);
   const visibleRoutes = state.routes.filter((route) => {
     const opts = descriptors[route.key]?.options as any;
     if (opts?.href === null) return false;
@@ -137,6 +138,7 @@ function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
               key={route.key}
               onPress={onPress}
               onLongPress={onLongPress}
+              onPressIn={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} } }}
               accessibilityRole="button"
               accessibilityState={isFocused ? { selected: true } : {}}
               style={styles.tabItem}
@@ -248,7 +250,8 @@ export default function StudentTabsLayout() {
         }}
       />
       {/* Hide pages from appearing as tabs; keep them routable */}
-      <Tabs.Screen name="chat/index" options={{ href: null }} />
+      <Tabs.Screen name="chat/index" options={{ href: null, headerShown: false }} />
+      <Tabs.Screen name="chat/[id]" options={{ href: null, headerShown: false }} />
       <Tabs.Screen name="journal/new" options={{ href: null }} />
       <Tabs.Screen name="journal/[id]" options={{ href: null }} />
     </Tabs>
