@@ -162,9 +162,11 @@ def get_conversations(user_id: int = Query(...)):
             c.subject,
             c.status,
             c.created_at,
-            c.last_activity_at
+            c.last_activity_at,
+            u.nickname AS initiator_nickname
         FROM conversations c
         LEFT JOIN messages m ON c.conversation_id = m.conversation_id
+        JOIN user u ON c.initiator_user_id = u.user_id
         WHERE c.initiator_user_id = :uid   -- student initiated
            OR m.sender_id = :uid           -- counselor/admin/student sent messages
         ORDER BY c.last_activity_at DESC, c.created_at DESC
@@ -336,6 +338,24 @@ def get_participation():
         participation = round((submitted / total) * 100, 1) if total > 0 else 0
     return {"total": total, "submitted": submitted, "participation": participation}
 
+@app.get("/api/users/{user_id}")
+def get_user(user_id: int):
+    query = """
+        SELECT user_id, name, nickname, role
+        FROM user
+        WHERE user_id = :uid
+        LIMIT 1
+    """
+    with engine.connect() as conn:
+        row = conn.execute(text(query), {"uid": user_id}).mappings().first()
+        if not row:
+            raise HTTPException(status_code=404, detail="User not found")
+        return {
+            "user_id": row["user_id"],
+            "name": row["name"],
+            "nickname": row["nickname"],
+            "role": row["role"],
+        }
 
 # Run with: 
 # venv\Scripts\activate 
