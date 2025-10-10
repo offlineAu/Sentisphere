@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight, TrendingUp, AlertTriangle, UserRound, CalendarDays, Activity, Download, Filter } from "lucide-react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip } from "recharts";
-import DashboardLayout from "../layouts/DashboardLayout";
 import { useSidebar } from "../components/SidebarContext";
 import styles from "./Reports.module.css";
 
@@ -211,7 +210,8 @@ function Reports() {
 
   return (
     <main
-      className={`transition-all duration-200 bg-[#f9fafb] min-h-screen space-y-6 ${open ? "pl-[17rem]" : "pl-[4.5rem]"} pt-6 pr-6 pb-6`}
+      className={`transition-all duration-200 bg-[#f9fafb] min-h-screen space-y-6 ${open ? "pl-[18.5rem]" : "pl-[6rem]"} pt-6 pr-6 pb-6`}
+      style={{ minHeight: "100vh" }}
     >
       {/* Header */}
       <div>
@@ -420,5 +420,4 @@ function Reports() {
   );
 }
 
-Reports.layout = (page: React.ReactNode) => <DashboardLayout>{page}</DashboardLayout>;
 export default Reports;

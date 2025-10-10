@@ -22,7 +22,7 @@ export default function Sidebar() {
         style={{ cursor: "pointer" }}
         title={open ? "Collapse sidebar" : "Expand sidebar"}
       >
-        <div className={styles.logo}>
+        <div className={styles.logoWrap}>
           <img src="/logo.png" alt="Logo" className={styles.logoIcon} />
           {open && <span className={styles.logoText}>Sentisphere</span>}
         </div>
