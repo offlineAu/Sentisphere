@@ -5,6 +5,7 @@ import { useSidebar } from "../components/SidebarContext";
 import Sidebar from "../components/Sidebar";
 import styles from "./Chat.module.css";
 import axios from "axios";
+const API_BASE = (import.meta as any).env?.VITE_API_URL || "";
 
 // -----------------------------
 // Types
@@ -45,7 +46,7 @@ export default function Chat() {
   // Fetch conversations
   useEffect(() => {
     axios
-      .get<Conversation[]>(`http://localhost:8001/api/conversations`, {
+      .get<Conversation[]>(`${API_BASE}/api/conversations`, {
         params: { user_id: userId },
       })
       .then((res) => {
@@ -62,7 +63,7 @@ export default function Chat() {
     if (!activeConversation) return;
     axios
       .get<ChatMessage[]>(
-        `http://localhost:8001/api/conversations/${activeConversation}/messages`
+        `${API_BASE}/api/conversations/${activeConversation}/messages`
       )
       .then((res) => setMessages(res.data))
       .catch((err) => console.error("Error fetching messages:", err));
@@ -79,7 +80,7 @@ export default function Chat() {
       return;
     }
     axios
-      .get<{ nickname: string }>(`http://localhost:8001/api/users/${currentConversation.initiator_user_id}`)
+      .get<{ nickname: string }>(`${API_BASE}/api/users/${currentConversation.initiator_user_id}`)
       .then((res) => setParticipantNickname(res.data.nickname || ""))
       .catch(() => setParticipantNickname(""));
   }, [currentConversation]);
@@ -95,7 +96,7 @@ export default function Chat() {
       return;
     axios
       .post<ChatMessage>(
-        `http://localhost:8001/api/conversations/${activeConversation}/messages`,
+        `${API_BASE}/api/conversations/${activeConversation}/messages`,
         {
           sender_id: userId,
           content: newMessage,

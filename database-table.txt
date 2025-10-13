@@ -1,10 +1,9 @@
 -- USER
 CREATE TABLE user (
     user_id INT PRIMARY KEY AUTO_INCREMENT,
-    email VARCHAR(100) UNIQUE NOT NULL,
+    email VARCHAR(100) UNIQUE,
     name VARCHAR(100),
-    role ENUM('student', 'counselor', 'admin') NOT NULL,
-    azure_oid VARCHAR(255),
+    role ENUM('student', 'counselor') NOT NULL,
     nickname VARCHAR(50),
     last_login DATETIME,
     is_active BOOLEAN DEFAULT TRUE,
@@ -14,6 +13,7 @@ CREATE TABLE user (
 -- COUNSELOR PROFILE
 CREATE TABLE counselor_profile (
     user_id INT PRIMARY KEY,
+    password VARCHAR(100),
     department VARCHAR(100),
     contact_number VARCHAR(20),
     availability VARCHAR(100),

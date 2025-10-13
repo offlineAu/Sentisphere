@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, TrendingUp, AlertTriangle, UserRound, Calend
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip } from "recharts";
 import { useSidebar } from "../components/SidebarContext";
 import styles from "./Reports.module.css";
+const API_BASE = (import.meta as any).env?.VITE_API_URL || "";
 
 type TopStat = {
   label: string;
@@ -98,7 +99,7 @@ function Reports() {
 
   // --- Fetch mood trend ---
   useEffect(() => {
-    fetch("http://localhost:8001/api/mood-trend")
+    fetch(`${API_BASE}/api/mood-trend`)
       .then(res => res.json())
       .then(data => {
         setMoodTrendData(data);
@@ -116,7 +117,7 @@ function Reports() {
 
   // --- Fetch participation ---
   useEffect(() => {
-    fetch("http://localhost:8001/api/reports/participation")
+    fetch(`${API_BASE}/api/reports/participation`)
       .then(res => res.json())
       .then(data => setParticipation(data.participation))
       .catch(err => console.error(err));
@@ -126,7 +127,7 @@ function Reports() {
   useEffect(() => {
     const fetchReports = async () => {
       try {
-        const topRes = await fetch("http://localhost:8001/api/reports/top-stats");
+        const topRes = await fetch(`${API_BASE}/api/reports/top-stats`);
         const topData = await topRes.json();
 
         const calcDelta = (current: number, previous: number) => {
@@ -146,7 +147,7 @@ function Reports() {
           { label: "Avg. Wellness Score", value: topData.avg_wellness_score, ...calcDelta(topData.avg_wellness_score, prevStats.avg_wellness_score) },
         ]);
 
-        const alertsRes = await fetch("http://localhost:8001/api/recent-alerts");
+        const alertsRes = await fetch(`${API_BASE}/api/recent-alerts`);
         const alertsData = await alertsRes.json();
         const riskCount: Record<string, number> = { High: 0, Medium: 0, Low: 0 };
         alertsData.forEach((a: any) => { riskCount[a.severity] = (riskCount[a.severity] || 0) + 1; });
@@ -164,7 +165,7 @@ function Reports() {
           time: a.created_at,
         })));
 
-        const moodRes = await fetch("http://localhost:8001/api/mood-trend");
+        const moodRes = await fetch(`${API_BASE}/api/mood-trend`);
         const moodData = await moodRes.json();
         const latestMood = moodData[moodData.length - 1]?.avgMood || 0;
         const previousMood = moodData[moodData.length - 2]?.avgMood || 0;
@@ -174,15 +175,15 @@ function Reports() {
           { label: "Overall Mood", value: `${latestMood}/10`, delta: `${moodDelta >= 0 ? "+" : ""}${moodDelta.toFixed(1)}`, deltaColor: moodDelta >= 0 ? "text-green-600" : "text-red-600" },
         ]);
 
-        const concernsRes = await fetch("http://localhost:8001/api/reports/concerns");
+        const concernsRes = await fetch(`${API_BASE}/api/reports/concerns`);
         const concernsData = await concernsRes.json();
         setConcerns(concernsData.map((c: any) => ({ ...c, barColor: "#2563eb" })));
 
-        const interventionsRes = await fetch("http://localhost:8001/api/reports/interventions");
+        const interventionsRes = await fetch(`${API_BASE}/api/reports/interventions`);
         const interventionsData = await interventionsRes.json();
         setInterventions(interventionsData.map((i: any) => ({ ...i, barColor: "#0d8c4f" })));
 
-        const attentionRes = await fetch("http://localhost:8001/api/reports/attention");
+        const attentionRes = await fetch(`${API_BASE}/api/reports/attention`);
         const attentionData = await attentionRes.json();
         setAttentionStudents(
           attentionData.map((s: any) => ({

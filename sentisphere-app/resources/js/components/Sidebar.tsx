@@ -1,13 +1,23 @@
 import { useSidebar } from "./SidebarContext";
-import { Home, MessageCircle, CalendarDays, FileText, User, LogOut, ChevronLeft, ChevronRight } from "lucide-react";
-import styles from './Sidebar.module.css';
+import {
+  Home,
+  MessageCircle,
+  CalendarDays,
+  FileText,
+  User,
+  LogOut,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import styles from "./Sidebar.module.css";
 
-const navLinks = [
-  { href: "/", label: "Dashboard", icon: <Home className={styles.icon} /> },
-  { href: "/chat", label: "Chat", icon: <MessageCircle className={styles.icon} /> },
-  { href: "/appointments", label: "Appointments", icon: <CalendarDays className={styles.icon} /> },
-  { href: "/reports", label: "Reports", icon: <FileText className={styles.icon} /> },
-  { href: "/profile", label: "Profile", icon: <User className={styles.icon} /> },
+const mainNavLinks = [
+  { href: "/", label: "Dashboard", icon: <Home /> },
+  { href: "/chat", label: "Chat", icon: <MessageCircle /> },
+  { href: "/appointments", label: "Appointments", icon: <CalendarDays /> },
+  { href: "/reports", label: "Reports", icon: <FileText /> },
+  { href: "/profile", label: "Profile", icon: <User /> },
 ];
 
 export default function Sidebar() {
@@ -15,41 +25,104 @@ export default function Sidebar() {
   const currentPath = window.location.pathname;
 
   return (
-    <aside className={`${styles.sidebar} ${open ? styles.open : styles.closed}`}>
-      <div
-        className={styles.logoRow}
-        onClick={() => setOpen(!open)}
-        style={{ cursor: "pointer" }}
-        title={open ? "Collapse sidebar" : "Expand sidebar"}
-      >
+    <motion.aside
+      className={styles.sidebar}
+      animate={{ width: open ? "17rem" : "5rem" }}
+      transition={{ duration: 0.35, ease: "easeInOut" }}
+    >
+      {/* Logo Row */}
+      <div className={styles.logoRow}>
         <div className={styles.logoWrap}>
-          <img src="/logo.png" alt="Logo" className={styles.logoIcon} />
-          {open && <span className={styles.logoText}>Sentisphere</span>}
+          <div className={styles.logoCircle}>
+            <img
+              src="/logo.png"
+              alt="Sentisphere Logo"
+              className={styles.logoImage}
+            />
+          </div>
+          <AnimatePresence>
+            {open && (
+              <motion.span
+                className={styles.logoText}
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -10 }}
+                transition={{ duration: 0.25 }}
+              >
+                Sentisphere
+              </motion.span>
+            )}
+          </AnimatePresence>
         </div>
-        <span className={styles.chevron}>
-          {open ? <ChevronLeft /> : <ChevronRight />}
-        </span>
+        <button
+          className={styles.chevron}
+          onClick={() => setOpen(!open)}
+          title={open ? "Collapse sidebar" : "Expand sidebar"}
+        >
+          {open ? <ChevronLeft size={18} /> : <ChevronRight size={18} />}
+        </button>
       </div>
+
       <div className={styles.divider} />
+
+      {/* Menu Section */}
+      <div className={styles.menuTitle}>MENU</div>
       <nav className={styles.nav}>
-        {navLinks.map((link) => (
-          <a
-            key={link.href}
-            href={link.href}
-            className={`${styles.navLink} ${currentPath === link.href ? styles.active : ""}`}
-            tabIndex={open ? 0 : -1}
-            title={link.label}
-          >
-            {link.icon}
-            {open && <span>{link.label}</span>}
-          </a>
-        ))}
+        {mainNavLinks.map((link) => {
+          const isActive = currentPath === link.href;
+
+          return (
+            <motion.a
+              key={link.href}
+              href={link.href}
+              className={`${styles.navLink} ${isActive ? styles.active : ""}`}
+              whileHover={{ scale: 1.03 }}
+              transition={{ duration: 0.15 }}
+              tabIndex={open ? 0 : -1}
+            >
+              <div
+                className={`${styles.iconWrap} ${
+                  isActive ? styles.iconActive : ""
+                }`}
+              >
+                {link.icon}
+              </div>
+              <AnimatePresence>
+                {open && (
+                  <motion.span
+                    initial={{ opacity: 0, x: -10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -10 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    {link.label}
+                  </motion.span>
+                )}
+              </AnimatePresence>
+            </motion.a>
+          );
+        })}
       </nav>
+
       <div className={styles.spacer} />
+
+      {/* General Section */}
+      <div className={styles.menuTitle}>GENERAL</div>
       <button className={styles.signoutBtn} tabIndex={open ? 0 : -1}>
-        <LogOut className={styles.icon} />
-        {open && <span>Sign Out</span>}
+        <LogOut />
+        <AnimatePresence>
+          {open && (
+            <motion.span
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -10 }}
+              transition={{ duration: 0.25 }}
+            >
+              Logout
+            </motion.span>
+          )}
+        </AnimatePresence>
       </button>
-    </aside>
+    </motion.aside>
   );
 }
