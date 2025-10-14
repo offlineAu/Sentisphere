@@ -110,7 +110,6 @@ export function Icon({ name, size = 20, color, fill }: IconProps) {
     home: 'home',
     heart: 'heart',
     'book-open': 'book-open',
-    'message-square': 'message-square',
     'message-circle': 'message-circle',
     'graduation-cap': 'book',
     book: 'book',

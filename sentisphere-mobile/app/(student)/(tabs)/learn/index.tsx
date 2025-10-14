@@ -338,6 +338,8 @@ export default function LearnScreen() {
         </Animated.View>
 
 
+
+        
       </ScrollView>
 
       {/* Saved confirmation dialog */}
@@ -360,7 +362,7 @@ export default function LearnScreen() {
             <View style={styles.savedDialogTextWrap}>
               <ThemedText style={styles.savedDialogTitle}>Saved</ThemedText>
               <ThemedText style={[styles.savedDialogSubtitle, { color: palette.muted }]} numberOfLines={1}>
-                {savedDialog.title}
+                {savedDialog?.title}
               </ThemedText>
             </View>
             <View style={styles.savedDialogAction}>
@@ -504,3 +506,4 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_600SemiBold',
   },
 });
+
