@@ -1,4 +1,4 @@
-import { StyleSheet, View, ScrollView, Pressable, Animated, Easing } from 'react-native';
+import { StyleSheet, View, ScrollView, Pressable, Animated, Easing, Platform } from 'react-native';
 import { useState, useRef } from 'react';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
@@ -72,6 +72,29 @@ export default function LearnScreen() {
   const scheme = useColorScheme() ?? 'light';
   const palette = Colors[scheme] as any;
 
+  // TODO: Integrate with real user progress store
+  const hasInProgress = false; // set based on whether the student has any in-progress learning
+  const continueProgress = 75; // replace with actual progress value when integrating
+
+  // Saved topics state (per-session for now)
+  const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
+  const toggleSave = (id: string) => {
+    setSavedIds((prev) => {
+      const next = new Set(prev);
+      let added = false;
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+        added = true;
+      }
+      if (Platform.OS !== 'web') {
+        try { if (added) { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } } catch {}
+      }
+      return next;
+    });
+  };
+
   // Segmented control state (match Journal behavior)
   const [tabIndex, setTabIndex] = useState(0);
   const [segW, setSegW] = useState(0);
@@ -80,7 +103,7 @@ export default function LearnScreen() {
     if (nextIndex === tabIndex) return;
     setTabIndex(nextIndex);
     setActiveTab(tabs[nextIndex]);
-    try { Haptics.selectionAsync(); } catch {}
+    if (Platform.OS !== 'web') { try { Haptics.selectionAsync(); } catch {} }
     Animated.timing(animTab, {
       toValue: nextIndex,
       duration: 260,
@@ -101,42 +124,69 @@ export default function LearnScreen() {
 
   const ProgressBar = ({ value }: { value: number }) => (
     <View style={styles.progressBar}>
-      <View style={[styles.progressFill, { width: `${Math.max(0, Math.min(100, value))}%` }]}> 
-        <LinearGradient colors={["#A78BFA", "#7C3AED"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFillObject as any} />
+      <View style={[
+        styles.progressFill,
+        { width: `${Math.max(0, Math.min(100, value))}%`, backgroundColor: palette.learningAccent }
+      ]}>
+        <LinearGradient
+          colors={[palette.learningAccent, palette.learningAccent]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={StyleSheet.absoluteFillObject as any}
+        />
       </View>
     </View>
   );
 
-  const CourseCard = ({ item }: { item: Course }) => (
-    <Card>
-      <CardContent style={styles.courseContent}>
-        <View style={styles.courseHeader}>
-          <View style={styles.badgeRow}>
-            {item.tags.map((t) => (
-              <Badge key={t} style={StyleSheet.flatten([styles.badge, styles.badgeGray])}>{t}</Badge>
-            ))}
+  const CourseCard = ({ item, saved, onToggle }: { item: Course; saved: boolean; onToggle: (id: string) => void }) => {
+    const scale = useRef(new Animated.Value(1)).current;
+    const to = (v: number, d = 120) => Animated.timing(scale, { toValue: v, duration: d, easing: Easing.out(Easing.quad), useNativeDriver: true }).start();
+    const springTo = (v: number) => Animated.spring(scale, { toValue: v, stiffness: 260, damping: 20, mass: 0.6, useNativeDriver: true }).start();
+    return (
+      <Card>
+        <CardContent style={styles.courseContent}>
+          <View style={styles.courseHeader}>
+            <View style={styles.badgeRow}>
+              {item.tags.map((t) => (
+                <Badge key={t} style={StyleSheet.flatten([styles.badge, styles.badgeGray])}>{t}</Badge>
+              ))}
+            </View>
+            <Pressable
+              accessibilityLabel={saved ? 'Unsave topic' : 'Save topic'}
+              hitSlop={8}
+              onPress={() => { onToggle(item.id); }}
+              onPressIn={() => { if (Platform.OS !== 'web') { try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light) } catch {} } to(1.1, 90); }}
+              onPressOut={() => { springTo(1); }}
+              style={({ pressed }) => [{ opacity: pressed ? 0.9 : 1 }]}
+            >
+              <Animated.View style={{ transform: [{ scale }] }}>
+                <Icon
+                  name="bookmark"
+                  size={20}
+                  color={saved ? palette.learningAccent : palette.muted}
+                  fill={saved ? (palette.learningAccent as string) : 'transparent'}
+                />
+              </Animated.View>
+            </Pressable>
           </View>
-          <Pressable hitSlop={8}>
-            <Icon name="star" size={18} color={palette.muted} />
-          </Pressable>
-        </View>
-        <ThemedText type="subtitle" style={styles.courseTitle}>{item.title}</ThemedText>
-        <ThemedText style={[styles.courseDesc, { color: palette.muted }]} numberOfLines={2}>{item.description}</ThemedText>
-        <View style={styles.courseMeta}>
-          <View style={styles.avatarsRow}>
-            <View style={[styles.avatar, { backgroundColor: '#111827' }]}><ThemedText style={styles.avatarText}>A</ThemedText></View>
-            <View style={[styles.avatar, { backgroundColor: '#4B5563' }]}><ThemedText style={styles.avatarText}>B</ThemedText></View>
-            <View style={[styles.avatar, { backgroundColor: '#9CA3AF' }]}><ThemedText style={styles.avatarText}>+</ThemedText></View>
+          <ThemedText type="subtitle" style={styles.courseTitle}>{item.title}</ThemedText>
+          <ThemedText style={[styles.courseDesc, { color: palette.muted }]} numberOfLines={2}>{item.description}</ThemedText>
+          <View style={styles.courseMeta}>
+            <View style={styles.avatarsRow}>
+              <View style={[styles.avatar, { backgroundColor: '#111827' }]}><ThemedText style={styles.avatarText}>A</ThemedText></View>
+              <View style={[styles.avatar, { backgroundColor: '#4B5563' }]}><ThemedText style={styles.avatarText}>B</ThemedText></View>
+              <View style={[styles.avatar, { backgroundColor: '#9CA3AF' }]}><ThemedText style={styles.avatarText}>+</ThemedText></View>
+            </View>
+            <View style={styles.metaRight}>
+              <View style={styles.metaItem}><Icon name="message-circle" size={16} color={palette.muted} /><ThemedText style={[styles.metaText, { color: palette.muted }]}>{item.comments}</ThemedText></View>
+              <View style={styles.metaItem}><Icon name="book-open" size={16} color={palette.muted} /><ThemedText style={[styles.metaText, { color: palette.muted }]}>{item.lessons}</ThemedText></View>
+            </View>
           </View>
-          <View style={styles.metaRight}>
-            <View style={styles.metaItem}><Icon name="message-circle" size={16} color={palette.muted} /><ThemedText style={[styles.metaText, { color: palette.muted }]}>{item.comments}</ThemedText></View>
-            <View style={styles.metaItem}><Icon name="book-open" size={16} color={palette.muted} /><ThemedText style={[styles.metaText, { color: palette.muted }]}>{item.lessons}</ThemedText></View>
-          </View>
-        </View>
-        <Button title="Start Learning" />
-      </CardContent>
-    </Card>
-  );
+          <Button title="Start Learning" />
+        </CardContent>
+      </Card>
+    );
+  };
 
   return (
     <ThemedView style={styles.container}>
@@ -166,6 +216,34 @@ export default function LearnScreen() {
           ))}
         </View>
 
+        {/* Continue Learning */}
+        {hasInProgress && (
+          <>
+            <View style={styles.sectionSpacer} />
+            <View style={styles.continueHeaderRow}>
+              <Icon name="clock" size={18} color={palette.muted} />
+              <ThemedText type="subtitle" style={styles.sectionTitle}>Continue Learning</ThemedText>
+            </View>
+            <ThemedText style={[styles.sectionSub, { color: palette.muted }]}>Pick up where you left off</ThemedText>
+            <Card>
+              <View>
+                <Image source={require('@/assets/images/peaceful-mindfulness-meditation.png')} style={styles.heroImage} contentFit="cover" />
+                <View style={styles.progressOverlay}><ProgressBar value={continueProgress} /></View>
+              </View>
+              <CardContent style={styles.courseContent}>
+                <ThemedText type="subtitle" style={styles.courseTitle}>Introduction to Mindfulness Meditation</ThemedText>
+                <ThemedText style={[styles.courseDesc, { color: palette.muted }]} numberOfLines={2}>Learn the basics of mindfulness and how it can help reduce stress and anxiety in your daily life.</ThemedText>
+                <View style={styles.metaRowWrap}>
+                  <View style={styles.metaItem}><Icon name="clock" size={16} color={palette.muted} /><ThemedText style={[styles.metaText, { color: palette.muted }]}>10 min read</ThemedText></View>
+                  <View style={styles.metaItem}><Icon name="users" size={16} color={palette.muted} /><ThemedText style={[styles.metaText, { color: palette.muted }]}>1,247 enrolled</ThemedText></View>
+                  <View style={styles.metaItem}><Icon name="award" size={16} color={palette.muted} /><ThemedText style={[styles.metaText, { color: palette.muted }]}>Beginner</ThemedText></View>
+                </View>
+                <Button title="Continue Reading" />
+              </CardContent>
+            </Card>
+          </>
+        )}
+
         {/* Search */}
         <View style={styles.searchRow}>
           <Input placeholder="Search topics, articles, or keywords..." style={styles.searchInput} />
@@ -179,7 +257,7 @@ export default function LearnScreen() {
           style={[styles.segment, { backgroundColor: '#EEF2F7', borderColor: palette.border, marginTop: 6 }]}
           onLayout={(e) => setSegW(e.nativeEvent.layout.width)}
         >
-          <Animated.View style={[styles.segmentIndicator, { backgroundColor: '#ffffff' }, indicatorStyle]} />
+          <Animated.View pointerEvents="none" style={[styles.segmentIndicator, { backgroundColor: '#ffffff' }, indicatorStyle]} />
           {tabs.map((t, idx) => (
             <Pressable
               key={t}
@@ -193,36 +271,26 @@ export default function LearnScreen() {
           ))}
         </View>
 
-        {/* Course list */}
+        {/* Course list (segmented) */}
         <View style={{ gap: 12 }}>
-          {courses.map((c) => (
-            <CourseCard key={c.id} item={c} />
-          ))}
+          {(
+            activeTab === 'Saved'
+              ? courses.filter((c) => savedIds.has(c.id))
+              : courses
+            ).length === 0 && activeTab === 'Saved' ? (
+              <View style={{ alignItems: 'center', paddingVertical: 16, gap: 6 }}>
+                <Icon name="book-open" size={22} color={palette.muted} />
+                <ThemedText style={[styles.emptyText, { color: palette.muted }]}>No saved topics yet</ThemedText>
+              </View>
+            ) : (
+              (activeTab === 'Saved' ? courses.filter((c) => savedIds.has(c.id)) : courses).map((c) => (
+                <CourseCard key={c.id} item={c} saved={savedIds.has(c.id)} onToggle={toggleSave} />
+              ))
+            )
+          }
         </View>
 
-        {/* Continue Learning */}
-        <View style={styles.sectionSpacer} />
-        <View style={styles.continueHeaderRow}>
-          <Icon name="clock" size={18} color={palette.muted} />
-          <ThemedText type="subtitle" style={styles.sectionTitle}>Continue Learning</ThemedText>
-        </View>
-        <ThemedText style={[styles.sectionSub, { color: palette.muted }]}>Pick up where you left off</ThemedText>
-        <Card>
-          <View>
-            <Image source={require('@/assets/images/peaceful-mindfulness-meditation.png')} style={styles.heroImage} contentFit="cover" />
-            <View style={styles.progressOverlay}><ProgressBar value={75} /></View>
-          </View>
-          <CardContent style={styles.courseContent}>
-            <ThemedText type="subtitle" style={styles.courseTitle}>Introduction to Mindfulness Meditation</ThemedText>
-            <ThemedText style={[styles.courseDesc, { color: palette.muted }]} numberOfLines={2}>Learn the basics of mindfulness and how it can help reduce stress and anxiety in your daily life.</ThemedText>
-            <View style={styles.metaRowWrap}>
-              <View style={styles.metaItem}><Icon name="clock" size={16} color={palette.muted} /><ThemedText style={[styles.metaText, { color: palette.muted }]}>10 min read</ThemedText></View>
-              <View style={styles.metaItem}><Icon name="users" size={16} color={palette.muted} /><ThemedText style={[styles.metaText, { color: palette.muted }]}>1,247 enrolled</ThemedText></View>
-              <View style={styles.metaItem}><Icon name="award" size={16} color={palette.muted} /><ThemedText style={[styles.metaText, { color: palette.muted }]}>Beginner</ThemedText></View>
-            </View>
-            <Button title="Continue Reading" />
-          </CardContent>
-        </Card>
+        
       </ScrollView>
     </ThemedView>
   );
@@ -280,6 +348,8 @@ const styles = StyleSheet.create({
   badgeRow: { flexDirection: 'row', gap: 8 },
   badge: { paddingVertical: 4, paddingHorizontal: 8 },
   badgeGray: { backgroundColor: '#F3F4F6', borderColor: '#E5E7EB' },
+  saveBtn: { paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8 },
+  saveBtnText: { fontSize: 12 },
   courseTitle: { color: '#111827' },
   courseDesc: { fontSize: 13 },
   courseMeta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
@@ -300,5 +370,6 @@ const styles = StyleSheet.create({
   progressBar: { height: 10, backgroundColor: '#E5E7EB', borderRadius: 6, overflow: 'hidden' },
   progressFill: { height: 10, backgroundColor: '#7C3AED', borderRadius: 6 },
   metaRowWrap: { flexDirection: 'row', alignItems: 'center', gap: 16 },
+  emptyText: { fontSize: 13 },
 });
 

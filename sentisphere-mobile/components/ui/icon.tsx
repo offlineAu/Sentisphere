@@ -28,6 +28,7 @@ import {
   Share2,
   Bell,
   Send,
+  Bookmark,
 } from 'lucide-react-native';
 
 type IconProps = {
@@ -58,9 +59,11 @@ type IconProps = {
     | 'refresh-ccw'
     | 'share-2'
     | 'bell'
-    | 'send';
+    | 'send'
+    | 'bookmark';
   size?: number;
   color?: string;
+  fill?: string;
 };
 
 // Static icon map (case-sensitive string keys) -> Lucide component
@@ -92,11 +95,12 @@ const icons: Record<string, any> = {
   'share-2': Share2,
   'bell': Bell,
   'send': Send,
+  'bookmark': Bookmark,
 };
 
-export function Icon({ name, size = 20, color }: IconProps) {
+export function Icon({ name, size = 20, color, fill }: IconProps) {
   const Cmp = icons[name];
-  if (Cmp) return <Cmp size={size} color={color as string} />;
+  if (Cmp) return <Cmp size={size} color={color as string} fill={fill} />;
   // Feather fallback
   const featherNameMap: Record<string, any> = {
     home: 'home',
@@ -126,6 +130,7 @@ export function Icon({ name, size = 20, color }: IconProps) {
     'share-2': 'share-2',
     bell: 'bell',
     send: 'send',
+    bookmark: 'bookmark',
   };
   const featherName = featherNameMap[name] ?? 'circle';
   return <Feather name={featherName} size={size} color={color} />;

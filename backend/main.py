@@ -338,5 +338,6 @@ def get_participation():
 
 
 # Run with: 
-# venv\Scripts\activate 
+# For Windows: venv\Scripts\activate 
+# For Mac: source .venv/bin/activate
 # uvicorn main:app --reload --port 8001
