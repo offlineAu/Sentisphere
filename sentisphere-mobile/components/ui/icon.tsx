@@ -60,7 +60,8 @@ type IconProps = {
     | 'refresh-ccw'
     | 'share-2'
     | 'bell'
-    | 'send';
+    | 'send'
+    | 'bookmark';
   size?: number;
   color?: string;
   fill?: string;
@@ -100,16 +101,13 @@ const icons: Record<string, any> = {
 
 export function Icon({ name, size = 20, color, fill }: IconProps) {
   const Cmp = icons[name];
-  if (Cmp) {
-    const props: any = { size, color };
-    if (typeof fill !== 'undefined') props.fill = fill;
-    return <Cmp {...props} />;
-  }
+  if (Cmp) return <Cmp size={size} color={color as string} />;
   // Feather fallback
   const featherNameMap: Record<string, any> = {
     home: 'home',
     heart: 'heart',
     'book-open': 'book-open',
+    'message-square': 'message-square',
     'message-circle': 'message-circle',
     'graduation-cap': 'book',
     book: 'book',
