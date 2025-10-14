@@ -1,5 +1,5 @@
 import { StyleSheet, View, ScrollView, Pressable, Animated, Easing, Platform } from 'react-native';
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
 import { Card, CardContent } from '@/components/ui/card';
@@ -78,21 +78,55 @@ export default function LearnScreen() {
 
   // Saved topics state (per-session for now)
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
+
+  // Saved dialog state + animations
+  const [savedDialog, setSavedDialog] = useState<{ title: string } | null>(null);
+  const dlgOpacity = useRef(new Animated.Value(0)).current;
+  const dlgScale = useRef(new Animated.Value(0.98)).current;
+  const dlgTranslateY = useRef(new Animated.Value(8)).current;
+  const dlgTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showSavedDialog = (title: string) => {
+    setSavedDialog({ title });
+    dlgOpacity.setValue(0);
+    dlgScale.setValue(0.98);
+    dlgTranslateY.setValue(8);
+    Animated.parallel([
+      Animated.timing(dlgOpacity, { toValue: 1, duration: 200, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(dlgScale, { toValue: 1, duration: 200, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(dlgTranslateY, { toValue: 0, duration: 200, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+    ]).start();
+    if (dlgTimer.current) clearTimeout(dlgTimer.current);
+    dlgTimer.current = setTimeout(() => hideSavedDialog(), 1800);
+  };
+  const hideSavedDialog = () => {
+    Animated.parallel([
+      Animated.timing(dlgOpacity, { toValue: 0, duration: 160, easing: Easing.in(Easing.quad), useNativeDriver: true }),
+      Animated.timing(dlgScale, { toValue: 0.98, duration: 160, easing: Easing.in(Easing.quad), useNativeDriver: true }),
+      Animated.timing(dlgTranslateY, { toValue: 6, duration: 160, easing: Easing.in(Easing.quad), useNativeDriver: true }),
+    ]).start(() => setSavedDialog(null));
+  };
+  const onViewSaved = () => {
+    hideSavedDialog();
+    const savedIdx = tabs.indexOf('Saved');
+    if (savedIdx >= 0) onTabChange(savedIdx);
+  };
+
   const toggleSave = (id: string) => {
-    setSavedIds((prev) => {
-      const next = new Set(prev);
-      let added = false;
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-        added = true;
-      }
-      if (Platform.OS !== 'web') {
-        try { if (added) { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } } catch {}
-      }
-      return next;
-    });
+    const wasSaved = savedIds.has(id);
+    const next = new Set(savedIds);
+    let added = false;
+    if (wasSaved) {
+      next.delete(id);
+    } else {
+      next.add(id);
+      added = true;
+    }
+    setSavedIds(next);
+    if (added) {
+      if (Platform.OS !== 'web') { try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {} }
+      const c = courses.find((x) => x.id === id);
+      showSavedDialog(c?.title ?? 'Saved to your list');
+    }
   };
 
   // Segmented control state (match Journal behavior)
@@ -121,6 +155,19 @@ export default function LearnScreen() {
     const opacity = segW > 0 ? 1 : 0; // hide until measured
     return { width: Math.max(0, itemW - 0.5), transform: [{ translateX: tx }], opacity } as const;
   })();
+
+  // Animate course list on segmented tab change
+  const listOpacity = useRef(new Animated.Value(1)).current;
+  const listTranslateY = useRef(new Animated.Value(0)).current;
+  
+  useEffect(() => {
+    listOpacity.setValue(0);
+    listTranslateY.setValue(8);
+    Animated.parallel([
+      Animated.timing(listOpacity, { toValue: 1, duration: 220, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(listTranslateY, { toValue: 0, duration: 220, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+    ]).start();
+  }, [tabIndex]);
 
   const ProgressBar = ({ value }: { value: number }) => (
     <View style={styles.progressBar}>
@@ -272,7 +319,7 @@ export default function LearnScreen() {
         </View>
 
         {/* Course list (segmented) */}
-        <View style={{ gap: 12 }}>
+        <Animated.View style={[styles.listWrap, { opacity: listOpacity, transform: [{ translateY: listTranslateY }] }]}>
           {(
             activeTab === 'Saved'
               ? courses.filter((c) => savedIds.has(c.id))
@@ -288,10 +335,41 @@ export default function LearnScreen() {
               ))
             )
           }
-        </View>
+        </Animated.View>
 
         
       </ScrollView>
+
+      {/* Saved confirmation dialog */}
+      {savedDialog && (
+        <Animated.View
+          pointerEvents="auto"
+          style={[
+            styles.savedDialogWrap,
+            { opacity: dlgOpacity, transform: [{ translateY: dlgTranslateY }, { scale: dlgScale }] },
+          ]}
+        >
+          <Pressable
+            accessibilityLabel="View saved topics"
+            onPress={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync(); } catch {} } onViewSaved(); }}
+            style={styles.savedDialogCard}
+          >
+            <View style={[styles.savedDialogIcon, { backgroundColor: palette.learningAccent }]}>
+              <Icon name="bookmark" size={16} color="#ffffff" fill="#ffffff" />
+            </View>
+            <View style={styles.savedDialogTextWrap}>
+              <ThemedText style={styles.savedDialogTitle}>Saved</ThemedText>
+              <ThemedText style={[styles.savedDialogSubtitle, { color: palette.muted }]} numberOfLines={1}>
+                {savedDialog.title}
+              </ThemedText>
+            </View>
+            <View style={styles.savedDialogAction}>
+              <ThemedText style={[styles.savedDialogActionText, { color: palette.learningAccent }]}>View</ThemedText>
+              <Icon name="arrow-right" size={14} color={palette.learningAccent} />
+            </View>
+          </Pressable>
+        </Animated.View>
+      )}
     </ThemedView>
   );
 }
@@ -371,5 +449,59 @@ const styles = StyleSheet.create({
   progressFill: { height: 10, backgroundColor: '#7C3AED', borderRadius: 6 },
   metaRowWrap: { flexDirection: 'row', alignItems: 'center', gap: 16 },
   emptyText: { fontSize: 13 },
+  listWrap: { gap: 12 },
+  // Saved dialog styles
+  savedDialogWrap: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 24,
+    zIndex: 50,
+  },
+  savedDialogCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    // subtle shadow
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+  },
+  savedDialogIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  savedDialogTextWrap: {
+    flex: 1,
+    gap: 2,
+  },
+  savedDialogTitle: {
+    fontSize: 14,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#111827',
+  },
+  savedDialogSubtitle: {
+    fontSize: 12,
+  },
+  savedDialogAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginLeft: 8,
+  },
+  savedDialogActionText: {
+    fontSize: 13,
+    fontFamily: 'Inter_600SemiBold',
+  },
 });
 

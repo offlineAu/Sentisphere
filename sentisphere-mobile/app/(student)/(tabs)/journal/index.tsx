@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState, useEffect } from 'react';
 import { Animated, Easing, Pressable, StyleSheet, TextInput, View, Keyboard, Alert, TouchableWithoutFeedback, KeyboardAvoidingView, ScrollView, Platform } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import Swipeable from 'react-native-gesture-handler/Swipeable';
@@ -27,6 +27,9 @@ export default function JournalListScreen() {
   const openSwipeRef = useRef<Swipeable | null>(null);
   const onTabChange = (next: 0 | 1) => {
     setTab(next);
+    if (Platform.OS !== 'web') {
+      try { Haptics.selectionAsync(); } catch {}
+    }
     Animated.timing(animTab, {
       toValue: next,
       duration: 260,
@@ -132,6 +135,18 @@ export default function JournalListScreen() {
     return { width: Math.max(0, itemW - 0.5), transform: [{ translateX: tx }], opacity };
   })();
 
+  // Subtle entrance animation on tab change (for both Write and Entries content)
+  const contentOpacity = useRef(new Animated.Value(1)).current;
+  const contentTranslateY = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    contentOpacity.setValue(0);
+    contentTranslateY.setValue(8);
+    Animated.parallel([
+      Animated.timing(contentOpacity, { toValue: 1, duration: 220, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(contentTranslateY, { toValue: 0, duration: 220, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+    ]).start();
+  }, [tab]);
+
   // Active border color per-field
   const focusBlue = '#3B82F6';
 
@@ -184,7 +199,7 @@ export default function JournalListScreen() {
         style={[styles.segment, { backgroundColor: '#EEF2F7', borderColor: palette.border, marginTop: 16 }]}
         onLayout={(e) => setSegW(e.nativeEvent.layout.width)}
       >
-        <Animated.View style={[styles.segmentIndicator, { backgroundColor: '#ffffff' }, indicatorStyle]} />
+        <Animated.View pointerEvents="none" style={[styles.segmentIndicator, { backgroundColor: '#ffffff' }, indicatorStyle]} />
         <Pressable style={styles.segmentItem} onPress={() => onTabChange(0)} accessibilityRole="button" accessibilityState={tab === 0 ? { selected: true } : {}}>
           <Feather name="edit-3" size={16} color={palette.text} />
           <ThemedText style={styles.segmentText}>Write Entry</ThemedText>
@@ -197,7 +212,7 @@ export default function JournalListScreen() {
 
       {tab === 0 ? (
         <TouchableWithoutFeedback accessibilityRole="none" onPress={Keyboard.dismiss}>
-          <View>
+          <Animated.View style={{ opacity: contentOpacity, transform: [{ translateY: contentTranslateY }] }}>
             <Card style={{ marginTop: 16 }}>
               <CardContent>
                 <ThemedText type="subtitle" style={{ marginTop: 12 }}>New Journal Entry</ThemedText>
@@ -241,10 +256,10 @@ export default function JournalListScreen() {
                 </View>
               </CardContent>
             </Card>
-          </View>
+          </Animated.View>
         </TouchableWithoutFeedback>
       ) : (
-        <View style={{ gap: 8, marginTop: 12 }}>
+        <Animated.View style={{ gap: 8, marginTop: 12, opacity: contentOpacity, transform: [{ translateY: contentTranslateY }] }}>
           {entries.map((e) => (
             <EntryRow
               key={e.id}
@@ -254,7 +269,7 @@ export default function JournalListScreen() {
               setOpenRef={(inst) => (openSwipeRef.current = inst)}
             />
           ))}
-        </View>
+        </Animated.View>
       )}
         </ScrollView>
       </KeyboardAvoidingView>
