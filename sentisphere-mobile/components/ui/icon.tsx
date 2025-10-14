@@ -24,6 +24,7 @@ import {
   CheckCircle,
   Star,
   Brain,
+  Bookmark,
   RefreshCcw,
   Share2,
   Bell,
@@ -55,12 +56,14 @@ type IconProps = {
     | 'check-circle'
     | 'star'
     | 'brain'
+    | 'bookmark'
     | 'refresh-ccw'
     | 'share-2'
     | 'bell'
     | 'send';
   size?: number;
   color?: string;
+  fill?: string;
 };
 
 // Static icon map (case-sensitive string keys) -> Lucide component
@@ -88,15 +91,20 @@ const icons: Record<string, any> = {
   'check-circle': CheckCircle,
   'star': Star,
   'brain': Brain,
+  'bookmark': Bookmark,
   'refresh-ccw': RefreshCcw,
   'share-2': Share2,
   'bell': Bell,
   'send': Send,
 };
 
-export function Icon({ name, size = 20, color }: IconProps) {
+export function Icon({ name, size = 20, color, fill }: IconProps) {
   const Cmp = icons[name];
-  if (Cmp) return <Cmp size={size} color={color as string} />;
+  if (Cmp) {
+    const props: any = { size, color };
+    if (typeof fill !== 'undefined') props.fill = fill;
+    return <Cmp {...props} />;
+  }
   // Feather fallback
   const featherNameMap: Record<string, any> = {
     home: 'home',
@@ -122,6 +130,7 @@ export function Icon({ name, size = 20, color }: IconProps) {
     'check-circle': 'check-circle',
     star: 'star',
     brain: 'cpu',
+    bookmark: 'bookmark',
     'refresh-ccw': 'refresh-ccw',
     'share-2': 'share-2',
     bell: 'bell',

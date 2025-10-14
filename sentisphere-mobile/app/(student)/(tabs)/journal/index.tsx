@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
-import { Animated, Easing, Pressable, StyleSheet, TextInput, View, Keyboard, Alert, TouchableWithoutFeedback, KeyboardAvoidingView, ScrollView, Platform } from 'react-native';
+import { useCallback, useMemo, useRef, useState, useEffect } from 'react';
+import { Animated, Easing, Pressable, StyleSheet, TextInput, View, Keyboard, Alert, TouchableWithoutFeedback, KeyboardAvoidingView, ScrollView, Platform, Modal } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import Swipeable from 'react-native-gesture-handler/Swipeable';
 import { Feather } from '@expo/vector-icons';
@@ -7,11 +7,14 @@ import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Icon } from '@/components/ui/icon';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Link, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
+
+import { analyzeSentiment, makeCoachIntro, coachReply, Analysis } from '@/utils/sentiment';
 
 type Entry = { id: string; title: string; body: string; date: string };
 
@@ -27,6 +30,9 @@ export default function JournalListScreen() {
   const openSwipeRef = useRef<Swipeable | null>(null);
   const onTabChange = (next: 0 | 1) => {
     setTab(next);
+    if (Platform.OS !== 'web') {
+      try { Haptics.selectionAsync(); } catch {}
+    }
     Animated.timing(animTab, {
       toValue: next,
       duration: 260,
@@ -35,8 +41,41 @@ export default function JournalListScreen() {
     }).start();
   };
 
-  const handleAnalyzePress = () => {
-    Alert.alert('Analyze', 'AI analyze feature is coming soon.');
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const brainSpin = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (isAnalyzing) {
+      brainSpin.setValue(0);
+      Animated.loop(
+        Animated.timing(brainSpin, { toValue: 1, duration: 1200, easing: Easing.linear, useNativeDriver: true })
+      ).start();
+    } else {
+      // stop gracefully
+      brainSpin.stopAnimation();
+    }
+  }, [isAnalyzing]);
+
+  const handleAnalyzePress = async () => {
+    const text = body.trim();
+    if (!text) {
+      Alert.alert('Write your entry', 'Please write something first so I can analyze it.');
+      return;
+    }
+    // Haptic nudge
+    if (Platform.OS !== 'web') { try { await Haptics.selectionAsync(); } catch {} }
+    setAnalysisText(text);
+    setAnalysisResult(null);
+    setAnalysisVisible(true);
+    setIsAnalyzing(true);
+    // Simulate a slightly longer analysis time for UX pacing
+    setTimeout(() => {
+      const a = analyzeSentiment(text);
+      setAnalysisResult(a);
+      setCoachMessages([{ role: 'coach', text: makeCoachIntro(text, a) }]);
+      setIsAnalyzing(false);
+      if (Platform.OS !== 'web') { try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {} }
+    }, 1500);
   };
 
   // Voice dictation (web) via Web Speech API. Mobile: placeholder alert.
@@ -115,6 +154,34 @@ export default function JournalListScreen() {
     });
   };
 
+  // Analysis & coach chat state
+  const [analysisVisible, setAnalysisVisible] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState<Analysis | null>(null);
+  const [coachMessages, setCoachMessages] = useState<Array<{ role: 'coach' | 'user'; text: string }>>([]);
+  const [coachInput, setCoachInput] = useState('');
+  const [analysisText, setAnalysisText] = useState('');
+
+  const refreshAnalysis = () => {
+    const text = body.trim();
+    if (!text) return;
+    const a = analyzeSentiment(text);
+    setAnalysisResult(a);
+    setAnalysisText(text);
+  };
+
+  const handleSendCoach = () => {
+    const input = coachInput.trim();
+    if (!input) return;
+    setCoachMessages((prev) => {
+      const reply = coachReply(input, {
+        analysis: analysisResult ?? analyzeSentiment(body),
+        transcript: prev.map((m) => m.text).join(' '),
+        turn: prev.length,
+      });
+      return [...prev, { role: 'user', text: input }, { role: 'coach', text: reply }];
+    });
+    setCoachInput('');
+  };
   // Sample entries (replace with data source later)
   const [entries, setEntries] = useState<Entry[]>([
     { id: '1', title: 'Grateful for small wins', body: 'Today I felt more present and calm after a short walk.', date: '2025-09-22' },
@@ -131,6 +198,18 @@ export default function JournalListScreen() {
     const opacity = segW > 0 ? 1 : 0;
     return { width: Math.max(0, itemW - 0.5), transform: [{ translateX: tx }], opacity };
   })();
+
+  // Subtle entrance animation on tab change (for both Write and Entries content)
+  const contentOpacity = useRef(new Animated.Value(1)).current;
+  const contentTranslateY = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    contentOpacity.setValue(0);
+    contentTranslateY.setValue(8);
+    Animated.parallel([
+      Animated.timing(contentOpacity, { toValue: 1, duration: 220, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(contentTranslateY, { toValue: 0, duration: 220, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+    ]).start();
+  }, [tab]);
 
   // Active border color per-field
   const focusBlue = '#3B82F6';
@@ -184,7 +263,7 @@ export default function JournalListScreen() {
         style={[styles.segment, { backgroundColor: '#EEF2F7', borderColor: palette.border, marginTop: 16 }]}
         onLayout={(e) => setSegW(e.nativeEvent.layout.width)}
       >
-        <Animated.View style={[styles.segmentIndicator, { backgroundColor: '#ffffff' }, indicatorStyle]} />
+        <Animated.View pointerEvents="none" style={[styles.segmentIndicator, { backgroundColor: '#ffffff' }, indicatorStyle]} />
         <Pressable style={styles.segmentItem} onPress={() => onTabChange(0)} accessibilityRole="button" accessibilityState={tab === 0 ? { selected: true } : {}}>
           <Feather name="edit-3" size={16} color={palette.text} />
           <ThemedText style={styles.segmentText}>Write Entry</ThemedText>
@@ -197,7 +276,7 @@ export default function JournalListScreen() {
 
       {tab === 0 ? (
         <TouchableWithoutFeedback accessibilityRole="none" onPress={Keyboard.dismiss}>
-          <View>
+          <Animated.View style={{ opacity: contentOpacity, transform: [{ translateY: contentTranslateY }] }}>
             <Card style={{ marginTop: 16 }}>
               <CardContent>
                 <ThemedText type="subtitle" style={{ marginTop: 12 }}>New Journal Entry</ThemedText>
@@ -241,10 +320,10 @@ export default function JournalListScreen() {
                 </View>
               </CardContent>
             </Card>
-          </View>
+          </Animated.View>
         </TouchableWithoutFeedback>
       ) : (
-        <View style={{ gap: 8, marginTop: 12 }}>
+        <Animated.View style={{ gap: 8, marginTop: 12, opacity: contentOpacity, transform: [{ translateY: contentTranslateY }] }}>
           {entries.map((e) => (
             <EntryRow
               key={e.id}
@@ -254,7 +333,7 @@ export default function JournalListScreen() {
               setOpenRef={(inst) => (openSwipeRef.current = inst)}
             />
           ))}
-        </View>
+        </Animated.View>
       )}
         </ScrollView>
       </KeyboardAvoidingView>
@@ -293,6 +372,113 @@ export default function JournalListScreen() {
           <ThemedText style={{ color: '#FFFFFF' }}>Saved</ThemedText>
         </View>
       </Animated.View>
+      {/* Analysis Modal */}
+      <Modal visible={analysisVisible} transparent animationType="fade" onRequestClose={() => setAnalysisVisible(false)}>
+        <View style={styles.overlay}>
+          <View style={styles.modalCard}>
+            {/* Close button */}
+            <Pressable onPress={() => setAnalysisVisible(false)} style={styles.closeBtn} accessibilityRole="button" accessibilityLabel="Close">
+              <Feather name="x" size={18} color={palette.icon} />
+            </Pressable>
+
+            {/* Header (hidden during loading for clean look) */}
+            {!isAnalyzing && (
+              <>
+                <View style={styles.sheetHeaderRow}>
+                  <View style={styles.sectionIconWrap}><Icon name="brain" size={20} color={palette.text} /></View>
+                  <ThemedText type="subtitle">Sentiment Analysis</ThemedText>
+                </View>
+                <ThemedText style={styles.subtle}>Here's what we learned about your entry</ThemedText>
+              </>
+            )}
+
+            {/* Loading state */}
+            {isAnalyzing ? (
+              <View style={styles.loadingOnly}>
+                <Animated.View style={[styles.loadingBrain, { transform: [{ rotate: brainSpin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] }) }] }]}>
+                  <Icon name="brain" size={28} color="#10B981" />
+                </Animated.View>
+              </View>
+            ) : null}
+
+            {/* Overall Mood card */}
+            {!isAnalyzing && analysisResult ? (
+              <View style={StyleSheet.flatten([styles.moodCard, moodCardTint(analysisResult.label)])}>
+                <View style={styles.moodRow}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <ThemedText style={{ fontSize: 20 }}>{moodEmoji(analysisResult.label)}</ThemedText>
+                    <View>
+                      <ThemedText style={{ fontFamily: 'Inter_600SemiBold' }}>Overall Mood</ThemedText>
+                      <ThemedText style={{ color: moodTextColor(analysisResult.label) }}>{titleCase(analysisResult.label)}</ThemedText>
+                    </View>
+                  </View>
+                  <View>
+                    <ThemedText style={{ color: palette.muted }}>Sentiment Score</ThemedText>
+                    <ThemedText style={{ fontFamily: 'Inter_700Bold', textAlign: 'right' }}>{intensityPercent(analysisResult)}%</ThemedText>
+                  </View>
+                </View>
+                <View style={styles.progressTrack}>
+                  <View style={StyleSheet.flatten([styles.progressFill, { width: `${intensityPercent(analysisResult)}%` }])} />
+                </View>
+              </View>
+            ) : null}
+
+            {/* Detected Emotions */}
+            {!isAnalyzing && analysisResult ? (
+              <View>
+                <View style={styles.sectionHeaderRow}>
+                  <Icon name="heart" size={18} color={palette.icon} />
+                  <ThemedText style={{ fontFamily: 'Inter_600SemiBold' }}>Detected Emotions</ThemedText>
+                </View>
+                {(() => {
+                  const sorted = Object.entries(analysisResult.emotions).sort((a,b) => (b[1] as number) - (a[1] as number));
+                  const [k, v] = sorted[0] || ['neutral', 0];
+                  return (
+                    <View style={styles.emojiSquare}>
+                      <ThemedText style={{ fontSize: 24 }}>{emotionEmoji(k as any)}</ThemedText>
+                      <ThemedText style={{ color: palette.muted, marginTop: 4 }}>{k}</ThemedText>
+                    </View>
+                  );
+                })()}
+              </View>
+            ) : null}
+
+            {/* Suggestions */}
+            {!isAnalyzing && analysisResult ? (
+              <View>
+                <View style={styles.sectionHeaderRow}>
+                  <Icon name="sparkles" size={18} color={palette.icon} />
+                  <ThemedText style={{ fontFamily: 'Inter_600SemiBold' }}>Suggestions</ThemedText>
+                </View>
+                <View style={{ gap: 8, marginTop: 8 }}>
+                  <View style={styles.suggestCard}>
+                    <View style={styles.numBadge}><ThemedText style={{ color: '#111827' }}>1</ThemedText></View>
+                    <ThemedText>{primarySuggestion(analysisResult)}</ThemedText>
+                  </View>
+                  <View style={styles.suggestCard}>
+                    <View style={styles.numBadge}><ThemedText style={{ color: '#111827' }}>2</ThemedText></View>
+                    <ThemedText>Reach out to a friend or counselor if you need support</ThemedText>
+                  </View>
+                </View>
+              </View>
+            ) : null}
+
+            {/* Actions (hidden while loading) */}
+            {!isAnalyzing && (
+              <>
+                <View style={{ flexDirection: 'row', gap: 10, alignSelf: 'stretch', marginTop: 10 }}>
+                  <Button title="Re-analyze" variant="outline" onPress={refreshAnalysis} />
+                  <View style={{ flex: 1 }} />
+                  <Button title="Close" onPress={() => setAnalysisVisible(false)} />
+                </View>
+                <ThemedText style={{ color: palette.muted, fontSize: 11, marginTop: 6, textAlign: 'center' }}>
+                  This is not medical advice. For emergencies, contact local services.
+                </ThemedText>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
     </ThemedView>
   );
 }
@@ -471,6 +657,70 @@ function ToolbarButton({ icon, label, disabled, onPress, active, bgColor, fgColo
   );
 }
 
+// ---------- Helpers for analysis UI (module scope) ----------
+function titleCase(s: string) {
+  if (!s) return s;
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function moodEmoji(label: 'positive' | 'neutral' | 'negative') {
+  if (label === 'positive') return '😊';
+  if (label === 'negative') return '😞';
+  return '😐';
+}
+
+function moodTextColor(label: 'positive' | 'neutral' | 'negative') {
+  switch (label) {
+    case 'positive': return '#166534';
+    case 'negative': return '#991B1B';
+    default: return '#111827';
+  }
+}
+
+function intensityPercent(a: Analysis) {
+  const v = Math.min(1, Math.max(0, Math.abs(a.comparative)));
+  return Math.max(5, Math.round(v * 100));
+}
+
+function moodCardTint(label: 'positive' | 'neutral' | 'negative') {
+  if (label === 'positive') return { backgroundColor: '#ECFDF5', borderColor: '#A7F3D0' };
+  if (label === 'negative') return { backgroundColor: '#FEF2F2', borderColor: '#FECACA' };
+  return { backgroundColor: '#F3F4F6', borderColor: '#E5E7EB' };
+}
+
+function emotionEmoji(k: keyof Analysis['emotions'] | string) {
+  switch (k) {
+    case 'joy': return '😊';
+    case 'sadness': return '😢';
+    case 'anger': return '😡';
+    case 'anxiety': return '😟';
+    case 'stress': return '😣';
+    case 'calm': return '😌';
+    default: return '🙂';
+  }
+}
+
+function primarySuggestion(a: Analysis): string {
+  if (a.risk.crisis) return 'If you are in danger or thinking about harm, please contact emergency services or a crisis hotline immediately.';
+  const top = Object.entries(a.emotions).sort((x, y) => (y[1] as number) - (x[1] as number))[0]?.[0];
+  switch (top) {
+    case 'anxiety':
+      return 'Consider practicing mindfulness or meditation to help manage difficult emotions';
+    case 'sadness':
+      return 'Try a gentle act of self-care — a short walk, hydration, or a few kind words to yourself';
+    case 'stress':
+      return 'Break a task into a small step and take a brief breathing break to reset';
+    case 'anger':
+      return 'Try a quick grounding exercise (name 5 things you see, 4 you feel) to lower intensity';
+    case 'calm':
+      return 'Notice what supported this calm so you can return to it later';
+    case 'joy':
+      return 'Celebrate a small win and consider repeating what worked for you';
+    default:
+      return 'Take a slow breath and jot one small next step you can do today';
+  }
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1 },
   segment: {
@@ -531,4 +781,110 @@ const styles = StyleSheet.create({
     marginTop: 10,
     color: '#000000',
   },
+  // Analysis modal additions
+  closeBtn: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sheetHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  sectionIconWrap: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center' },
+  subtle: { color: '#6B7280', marginTop: 2 },
+  moodCard: { borderWidth: 1, borderRadius: 12, padding: 12, marginTop: 12 },
+  moodRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  progressTrack: { height: 8, backgroundColor: '#E5E7EB', borderRadius: 999, overflow: 'hidden' },
+  progressFill: { height: '100%', backgroundColor: '#111827', width: '100%', alignSelf: 'flex-start' },
+  sectionHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 14, marginBottom: 8 },
+  emojiSquare: { width: 64, height: 64, borderRadius: 12, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center', marginTop: 6 },
+  themeChip: { paddingVertical: 6, paddingHorizontal: 10, borderRadius: 999, backgroundColor: '#EEF2F7', borderWidth: 1, borderColor: '#E5E7EB' },
+  suggestCard: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 12, backgroundColor: '#F9FAFB', borderWidth: 1, borderColor: '#E5E7EB' },
+  numBadge: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: '#E5E7EB' },
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.25)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  modalCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 20,
+    alignItems: 'stretch',
+    justifyContent: 'flex-start',
+    gap: 12,
+    width: '100%',
+    maxWidth: 420,
+  },
+  loadingOnly: { minHeight: 160, alignItems: 'center', justifyContent: 'center', alignSelf: 'stretch' },
+  loadingBrain: { width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center', backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0' },
+  loadingCard: { borderWidth: 1, borderRadius: 12, padding: 12, backgroundColor: '#F9FAFB', borderColor: '#E5E7EB', marginTop: 12 },
+  chip: {
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  emotionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 4,
+  },
+  meterTrack: {
+    flex: 1,
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: '#EEF2F7',
+    overflow: 'hidden',
+  },
+  meterFill: {
+    height: '100%',
+    backgroundColor: '#111827',
+  },
+  chatBubbleCoach: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#F3F4F6',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    maxWidth: '90%',
+  },
+  chatBubbleUser: {
+    alignSelf: 'flex-end',
+    backgroundColor: '#111827',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    maxWidth: '90%',
+  },
+  chatInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 6,
+  },
+  chatInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: '#FFFFFF',
+  },
+  sendBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#111827',
+  },
+  noticeBox: { borderWidth: 1, borderRadius: 12, padding: 12, gap: 4, marginTop: 6 },
 });
