@@ -22,20 +22,28 @@ export type Analysis = {
     harmToOthers: boolean;
     crisis: boolean; // selfHarm || harmToOthers || severe alarm words
     flags: string[];
+    terms?: string[];
+    score?: number;
   };
+  sentences?: Array<{ text: string; score: number; comparative: number; label: SentimentLabel }>;
+  intensity?: number;
+  shift?: number;
+  phraseMatches?: string[];
+  maskingPossible?: boolean;
 };
 
 const LEXICON: Record<string, number> = {
   // positive
   'good': 2, 'great': 3, 'awesome': 3, 'amazing': 3, 'fantastic': 3, 'happy': 2, 'glad': 2, 'joy': 3, 'joyful': 3,
   'proud': 2, 'love': 3, 'loved': 3, 'like': 1, 'calm': 2, 'peaceful': 2, 'relaxed': 2, 'grateful': 2, 'hopeful': 2,
-  'confident': 2, 'excited': 2, 'relief': 2, 'relieved': 2,
+  'confident': 2, 'excited': 2, 'relief': 2, 'relieved': 2, 'content': 2, 'satisfied': 2, 'motivated': 2, 'hope': 1.5,
   // negative
   'bad': -2, 'terrible': -3, 'awful': -3, 'horrible': -3, 'sad': -2, 'depressed': -3, 'hopeless': -3,
   'anxious': -2, 'anxiety': -2, 'worried': -2, 'afraid': -2, 'scared': -2, 'nervous': -2, 'panic': -3,
-  'angry': -2, 'furious': -3, 'mad': -2, 'annoyed': -2, 'irritated': -2, 'frustrated': -2,
+  'angry': -2, 'furious': -3, 'mad': -2, 'annoyed': -2, 'irritated': -2, 'frustrated': -2, 'resentful': -2,
   'stressed': -2, 'overwhelmed': -2, 'burnt': -2, 'burned': -2, 'exhausted': -2, 'tired': -1,
-  'lonely': -2, 'cry': -2, 'crying': -2, 'guilty': -2, 'ashamed': -2, 'worthless': -3,
+  'lonely': -2, 'cry': -2, 'crying': -2, 'guilty': -2, 'ashamed': -2, 'worthless': -4, 'helpless': -3, 'misunderstood': -2,
+  'isolated': -3, 'trapped': -3, 'numb': -2, 'empty': -2,
   'sick': -1, 'pain': -2, 'hurt': -2, 'failed': -2, 'failure': -2,
   // stronger risk-related tokens
   'die': -3, 'dying': -3, 'died': -3, 'dead': -3, 'death': -3,
@@ -43,9 +51,9 @@ const LEXICON: Record<string, number> = {
 };
 
 const EMOTION_SETS: Record<keyof Analysis['emotions'], string[]> = {
-  joy: ['happy','joy','joyful','glad','grateful','excited','proud','love','loved','content','relief','relieved'],
-  sadness: ['sad','down','lonely','depressed','cry','crying','grief','hopeless','worthless','guilty','ashamed'],
-  anger: ['angry','mad','furious','annoyed','irritated','rage','resent','frustrated'],
+  joy: ['happy','joy','joyful','glad','grateful','excited','proud','love','loved','content','relief','relieved','satisfied','motivated','hope','hopeful'],
+  sadness: ['sad','down','lonely','depressed','cry','crying','grief','hopeless','worthless','guilty','ashamed','isolated','trapped','helpless','misunderstood','numb','empty','disappointed','discouraged'],
+  anger: ['angry','mad','furious','annoyed','irritated','rage','resent','frustrated','resentful'],
   anxiety: ['anxious','anxiety','worried','afraid','fear','nervous','panic','scared','overthinking'],
   stress: ['stressed','overwhelmed','pressure','burnt','burned','exhausted','tired'],
   calm: ['calm','peaceful','relaxed','okay','fine','content'],
@@ -66,6 +74,21 @@ const INTENSIFIERS: Record<string, number> = {
 // Humor markers to help disambiguate slang like "I'm dead" used jokingly
 const HUMOR_MARKERS = ['lol', 'lmao', 'rofl', 'haha', 'lqtm', '😂', '🤣'];
 
+const PHRASES: Record<string, number> = {
+  'not good enough': -3,
+  'feel like giving up': -4,
+  "can't handle this": -3,
+  'cant handle this': -3,
+  'no one cares': -3,
+  'tired of living': -4,
+  'over the edge': -3,
+  'i hate myself': -4,
+  'better off dead': -4,
+  'give up on life': -4,
+  'no one would miss me': -4,
+  'nothing matters': -3,
+};
+
 type RiskType = 'self-harm' | 'harm-others' | 'crisis';
 const RISK_PATTERNS: Array<{ re: RegExp; type: RiskType; flag: string }> = [
   { re: /\b(suicide|suicidal)\b/i, type: 'crisis', flag: 'crisis' },
@@ -81,6 +104,14 @@ const RISK_PATTERNS: Array<{ re: RegExp; type: RiskType; flag: string }> = [
   { re: /\bkms\b/i, type: 'self-harm', flag: 'self-harm' },
   { re: /\blife\s+is\s+meaningless\b/i, type: 'crisis', flag: 'crisis' },
   { re: /\bi\s+can'?t\s+(?:go\s+on|take\s+it)\b/i, type: 'crisis', flag: 'crisis' },
+  { re: /\bnothing\s+matters\b/i, type: 'crisis', flag: 'crisis' },
+  { re: /\bfeel\s+empty\b/i, type: 'crisis', flag: 'crisis' },
+  { re: /\bno\s+one\s+would\s+miss\s+me\b/i, type: 'crisis', flag: 'crisis' },
+  { re: /\bbetter\s+off\s+dead\b/i, type: 'self-harm', flag: 'self-harm' },
+  { re: /\btired\s+of\s+(?:everything|living)\b/i, type: 'crisis', flag: 'crisis' },
+  { re: /\bgive\s+up\s+on\s+life\b/i, type: 'self-harm', flag: 'self-harm' },
+  { re: /\bi\s+can'?t\s+handle\s+this\b/i, type: 'crisis', flag: 'crisis' },
+  { re: /\bover\s+the\s+edge\b/i, type: 'crisis', flag: 'crisis' },
 ];
 
 function normalize(text: string): string {
@@ -99,13 +130,41 @@ function tokenize(text: string): string[] {
   return tokens.filter(Boolean);
 }
 
+function splitSentences(text: string): string[] {
+  const cleaned = (text || '').replace(/[\r\n]+/g, ' ');
+  return cleaned.split(/[.!?]+\s*/).map((s) => s.trim()).filter(Boolean);
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function countMatches(haystack: string, needlePhrase: string): number {
+  if (!haystack || !needlePhrase) return 0;
+  const re = new RegExp(`\\b${escapeRegExp(needlePhrase)}\\b`, 'gi');
+  const m = haystack.match(re);
+  return m ? m.length : 0;
+}
+
 export function analyzeSentiment(text: string): Analysis {
   const tokens = tokenize(text);
   let score = 0;
   const signals: string[] = [];
+  const phraseMatches: string[] = [];
 
   let negateWindow = 0; // if > 0, invert next tokens
   let boost = 1;
+  let lastSentiment: string | null = null;
+  let repeatCount = 0;
+
+  const normalizedAll = normalize(text);
+  for (const [ph, val] of Object.entries(PHRASES)) {
+    const c = countMatches(normalizedAll, ph);
+    if (c > 0) {
+      for (let i = 0; i < c; i++) phraseMatches.push(ph);
+      score += val * c * 1.2;
+    }
+  }
 
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i];
@@ -124,7 +183,9 @@ export function analyzeSentiment(text: string): Analysis {
 
     const base = LEXICON[t];
     if (typeof base === 'number') {
-      let s = base * boost;
+      if (lastSentiment === t) repeatCount += 1; else { repeatCount = 0; lastSentiment = t; }
+      const repeatBoost = 1 + Math.min(2, repeatCount) * 0.25;
+      let s = base * boost * repeatBoost;
       if (negateWindow > 0) s = -s;
       score += s;
       signals.push(t);
@@ -157,6 +218,43 @@ export function analyzeSentiment(text: string): Analysis {
     (Object.keys(emotionsCounts) as Array<keyof Analysis['emotions']>).map((k) => [k, +(emotionsCounts[k] / maxCount).toFixed(2)])
   ) as Analysis['emotions'];
 
+  const sentencesRaw = splitSentences(text);
+  const sentences = sentencesRaw.map((s) => {
+    const toks = tokenize(s);
+    let sc = 0;
+    let ng = 0;
+    let bs = 1;
+    let last: string | null = null;
+    let rep = 0;
+    for (let i = 0; i < toks.length; i++) {
+      const tk = toks[i];
+      if (INTENSIFIERS[tk]) { bs = Math.max(bs, INTENSIFIERS[tk]); continue; }
+      if ([...NEGATIONS].some((n) => tk === n || (n === "n't" && tk.endsWith("n't")))) { ng = 3; continue; }
+      const b = LEXICON[tk];
+      if (typeof b === 'number') {
+        if (last === tk) rep += 1; else { rep = 0; last = tk; }
+        const rBoost = 1 + Math.min(2, rep) * 0.25;
+        let v = b * bs * rBoost;
+        if (ng > 0) v = -v;
+        sc += v;
+        bs = 1;
+        if (ng > 0) ng--;
+      } else {
+        bs = Math.max(1, bs * 0.9);
+        if (ng > 0) ng--;
+      }
+    }
+    const cmp = toks.length ? sc / Math.sqrt(toks.length) : 0;
+    const lab: SentimentLabel = cmp > 0.8 ? 'positive' : cmp < -0.8 ? 'negative' : 'neutral';
+    return { text: s, score: sc, comparative: cmp, label: lab };
+  });
+
+  const firstCmp = sentences[0]?.comparative ?? comparative;
+  const lastCmp = sentences[sentences.length - 1]?.comparative ?? comparative;
+  const earlierAvg = sentences.length > 1 ? sentences.slice(0, -1).reduce((acc, it) => acc + it.comparative, 0) / Math.max(1, sentences.length - 1) : comparative;
+  const shift = +(lastCmp - firstCmp).toFixed(2);
+  const maskingPossible = lastCmp > 0.2 && earlierAvg < -0.5;
+
   // risk flags
   const flags: string[] = [];
   const raw = text;
@@ -183,7 +281,33 @@ export function analyzeSentiment(text: string): Analysis {
     }
   }
 
-  return { score, comparative, label, tokens, signals, emotions, risk: { selfHarm, harmToOthers, crisis: selfHarm || harmToOthers || crisisWord, flags } };
+  const RISK_PRECURSORS = new Set(['hopeless','trapped','numb','empty','tired','worthless','helpless','isolated','exhausted','meaningless','pointless']);
+  const precursorCounts: Record<string, number> = {};
+  for (const t of tokens) {
+    if (RISK_PRECURSORS.has(t)) precursorCounts[t] = (precursorCounts[t] || 0) + 1;
+  }
+  const precursorTotal = Object.values(precursorCounts).reduce((a, b) => a + b, 0);
+  const riskTerms = Object.keys(precursorCounts);
+  const riskScore = +(Math.min(1, precursorTotal / Math.max(5, tokens.length / 5))).toFixed(2);
+  if (riskScore > 0.4 && (label === 'negative' || comparative < -0.8)) {
+    if (!flags.includes('risk-trend')) flags.push('risk-trend');
+  }
+
+  const intensity = Math.min(1, Math.max(0, Math.abs(comparative)));
+  return {
+    score,
+    comparative,
+    label,
+    tokens,
+    signals,
+    emotions,
+    risk: { selfHarm, harmToOthers, crisis: selfHarm || harmToOthers || crisisWord, flags, terms: riskTerms, score: riskScore },
+    sentences,
+    intensity,
+    shift,
+    phraseMatches,
+    maskingPossible,
+  };
 }
 
 export function makeCoachIntro(text: string, a: Analysis): string {

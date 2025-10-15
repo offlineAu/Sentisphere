@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState, useEffect } from 'react';
-import { Animated, Easing, Pressable, StyleSheet, TextInput, View, Keyboard, Alert, TouchableWithoutFeedback, KeyboardAvoidingView, ScrollView, Platform, Modal } from 'react-native';
+import { Animated, Easing, Pressable, StyleSheet, TextInput, View, Keyboard, Alert, TouchableWithoutFeedback, KeyboardAvoidingView, ScrollView, Platform, Modal, useWindowDimensions } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import Swipeable from 'react-native-gesture-handler/Swipeable';
 import { Feather } from '@expo/vector-icons';
@@ -21,6 +21,7 @@ type Entry = { id: string; title: string; body: string; date: string };
 export default function JournalListScreen() {
   const scheme = useColorScheme() ?? 'light';
   const palette = Colors[scheme] as any;
+  const { height: winH, width: winW } = useWindowDimensions();
 
   // Tabs: 0 = Write Entry, 1 = My Entries
   const [tab, setTab] = useState<0 | 1>(0);
@@ -275,7 +276,7 @@ export default function JournalListScreen() {
       </View>
 
       {tab === 0 ? (
-        <TouchableWithoutFeedback accessibilityRole="none" onPress={Keyboard.dismiss}>
+        Platform.OS === 'web' ? (
           <Animated.View style={{ opacity: contentOpacity, transform: [{ translateY: contentTranslateY }] }}>
             <Card style={{ marginTop: 16 }}>
               <CardContent>
@@ -321,7 +322,55 @@ export default function JournalListScreen() {
               </CardContent>
             </Card>
           </Animated.View>
-        </TouchableWithoutFeedback>
+        ) : (
+          <TouchableWithoutFeedback accessibilityRole="none" onPress={Keyboard.dismiss}>
+            <Animated.View style={{ opacity: contentOpacity, transform: [{ translateY: contentTranslateY }] }}>
+              <Card style={{ marginTop: 16 }}>
+                <CardContent>
+                  <ThemedText type="subtitle" style={{ marginTop: 12 }}>New Journal Entry</ThemedText>
+                  <ThemedText style={{ color: palette.muted }}>Write about your day, thoughts, or feelings. Your entries are private and secure.</ThemedText>
+
+                  {/* Title input */}
+                  <TextInput
+                    placeholder="Title"
+                    placeholderTextColor="#9BA1A6"
+                    value={title}
+                    onChangeText={setTitle}
+                    style={StyleSheet.flatten([styles.titleInput, { borderColor: titleFocused ? focusBlue : palette.border }])}
+                    onFocus={() => setTitleFocused(true)}
+                    onBlur={() => setTitleFocused(false)}
+                  />
+
+                  <View style={StyleSheet.flatten([styles.editorWrap, { borderColor: bodyFocused ? focusBlue : palette.border, backgroundColor: '#FFFFFF' }])}> 
+                    <TextInput
+                      placeholder="What's on your mind today? Write about your thoughts, feelings, or experiences..."
+                      placeholderTextColor="#9BA1A6"
+                      multiline
+                      scrollEnabled
+                      value={body}
+                      onChangeText={setBody}
+                      onFocus={() => setBodyFocused(true)}
+                      onBlur={() => setBodyFocused(false)}
+                      style={styles.textarea}
+                    />
+                  </View>
+
+                  <View style={styles.counterRow}>
+                    <ThemedText style={{ color: palette.icon }}>{wordCount} words • {charCount} characters</ThemedText>
+                  </View>
+
+                  {/* Toolbar */}
+                  <View style={styles.toolbar}>
+                    <ToolbarButton icon="mic" label="Voice" onPress={handleVoicePress} active={isListening} bgColor="#FEE2E2" fgColor="#B91C1C" />
+                    <ToolbarButton icon="activity" label="Analyze" onPress={handleAnalyzePress} bgColor="#EDE9FE" fgColor="#6D28D9" />
+                    <View style={{ flex: 1 }} />
+                    <Button title="Save" onPress={handleSave} disabled={!body.trim() || isSaving} loading={isSaving} />
+                  </View>
+                </CardContent>
+              </Card>
+            </Animated.View>
+          </TouchableWithoutFeedback>
+        )
       ) : (
         <Animated.View style={{ gap: 8, marginTop: 12, opacity: contentOpacity, transform: [{ translateY: contentTranslateY }] }}>
           {entries.map((e) => (
@@ -375,7 +424,7 @@ export default function JournalListScreen() {
       {/* Analysis Modal */}
       <Modal visible={analysisVisible} transparent animationType="fade" onRequestClose={() => setAnalysisVisible(false)}>
         <View style={styles.overlay}>
-          <View style={styles.modalCard}>
+          <View style={[styles.modalCard, { maxHeight: Math.min(winH - 96, 640), maxWidth: Math.min(winW - 32, 560), width: '100%' }]}>
             {/* Close button */}
             <Pressable onPress={() => setAnalysisVisible(false)} style={styles.closeBtn} accessibilityRole="button" accessibilityLabel="Close">
               <Feather name="x" size={18} color={palette.icon} />
@@ -401,8 +450,11 @@ export default function JournalListScreen() {
               </View>
             ) : null}
 
-            {/* Overall Mood card */}
-            {!isAnalyzing && analysisResult ? (
+            {!isAnalyzing ? (
+              <ScrollView style={{ alignSelf: 'stretch' }} contentContainerStyle={{ paddingBottom: 12 }}>
+
+                {/* Overall Mood card */}
+                {!isAnalyzing && analysisResult ? (
               <View style={StyleSheet.flatten([styles.moodCard, moodCardTint(analysisResult.label)])}>
                 <View style={styles.moodRow}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -423,8 +475,8 @@ export default function JournalListScreen() {
               </View>
             ) : null}
 
-            {/* Detected Emotions */}
-            {!isAnalyzing && analysisResult ? (
+                {/* Detected Emotions */}
+                {!isAnalyzing && analysisResult ? (
               <View>
                 <View style={styles.sectionHeaderRow}>
                   <Icon name="heart" size={18} color={palette.icon} />
@@ -443,29 +495,77 @@ export default function JournalListScreen() {
               </View>
             ) : null}
 
-            {/* Suggestions */}
-            {!isAnalyzing && analysisResult ? (
+                {!isAnalyzing && analysisResult ? (
               <View>
                 <View style={styles.sectionHeaderRow}>
-                  <Icon name="sparkles" size={18} color={palette.icon} />
-                  <ThemedText style={{ fontFamily: 'Inter_600SemiBold' }}>Suggestions</ThemedText>
+                  <Icon name="activity" size={18} color={palette.icon} />
+                  <ThemedText style={{ fontFamily: 'Inter_600SemiBold' }}>Mood Shift</ThemedText>
                 </View>
-                <View style={{ gap: 8, marginTop: 8 }}>
-                  <View style={styles.suggestCard}>
-                    <View style={styles.numBadge}><ThemedText style={{ color: '#111827' }}>1</ThemedText></View>
-                    <ThemedText>{primarySuggestion(analysisResult)}</ThemedText>
-                  </View>
-                  <View style={styles.suggestCard}>
-                    <View style={styles.numBadge}><ThemedText style={{ color: '#111827' }}>2</ThemedText></View>
-                    <ThemedText>Reach out to a friend or counselor if you need support</ThemedText>
-                  </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <ThemedText>Shift: {formatDelta(analysisResult.shift)}</ThemedText>
+                  {analysisResult.maskingPossible ? (
+                    <View style={styles.themeChip}><ThemedText>Possible masking</ThemedText></View>
+                  ) : null}
                 </View>
               </View>
             ) : null}
 
-            {/* Actions (hidden while loading) */}
-            {!isAnalyzing && (
-              <>
+                {!isAnalyzing && analysisResult && analysisResult.phraseMatches && analysisResult.phraseMatches.length > 0 ? (
+              <View>
+                <View style={styles.sectionHeaderRow}>
+                  <Icon name="message-square" size={18} color={palette.icon} />
+                  <ThemedText style={{ fontFamily: 'Inter_600SemiBold' }}>Key Phrases</ThemedText>
+                </View>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                  {uniqueStrings(analysisResult.phraseMatches).slice(0, 5).map((p) => (
+                    <View key={p} style={styles.themeChip}><ThemedText>“{p}”</ThemedText></View>
+                  ))}
+                </View>
+              </View>
+            ) : null}
+
+                {!isAnalyzing && analysisResult ? (
+              <View>
+                <View style={styles.sectionHeaderRow}>
+                  <Icon name="target" size={18} color={palette.icon} />
+                  <ThemedText style={{ fontFamily: 'Inter_600SemiBold' }}>Risk Indicators</ThemedText>
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <ThemedText>Score: {Math.round(((analysisResult.risk.score ?? 0) * 100))}%</ThemedText>
+                  {analysisResult.risk.crisis ? (<View style={styles.themeChip}><ThemedText>CRISIS</ThemedText></View>) : null}
+                </View>
+                {(() => {
+                  const terms = uniqueStrings(analysisResult.risk.terms || []).slice(0, 6);
+                  const flags = uniqueStrings(analysisResult.risk.flags || []).slice(0, 6);
+                  if (terms.length === 0 && flags.length === 0) return null;
+                  return (
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
+                      {flags.map((f) => (<View key={`f-${f}`} style={styles.themeChip}><ThemedText>{f}</ThemedText></View>))}
+                      {terms.map((t) => (<View key={`t-${t}`} style={styles.themeChip}><ThemedText>{t}</ThemedText></View>))}
+                    </View>
+                  );
+                })()}
+              </View>
+            ) : null}
+
+                {!isAnalyzing && analysisResult && analysisResult.sentences && analysisResult.sentences.length > 0 ? (
+              <View>
+                <View style={styles.sectionHeaderRow}>
+                  <Icon name="book-open" size={18} color={palette.icon} />
+                  <ThemedText style={{ fontFamily: 'Inter_600SemiBold' }}>Sentence Insights</ThemedText>
+                </View>
+                <View style={{ gap: 6 }}>
+                  {analysisResult.sentences.slice(0, 3).map((s, idx) => (
+                    <View key={idx} style={styles.suggestCard}>
+                      <ThemedText style={{ marginRight: 6 }}>{moodEmoji(s.label as any)}</ThemedText>
+                      <ThemedText numberOfLines={2} style={{ flex: 1 }}>{s.text}</ThemedText>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            ) : null}
+
+                {/* Actions */}
                 <View style={{ flexDirection: 'row', gap: 10, alignSelf: 'stretch', marginTop: 10 }}>
                   <Button title="Re-analyze" variant="outline" onPress={refreshAnalysis} />
                   <View style={{ flex: 1 }} />
@@ -474,8 +574,9 @@ export default function JournalListScreen() {
                 <ThemedText style={{ color: palette.muted, fontSize: 11, marginTop: 6, textAlign: 'center' }}>
                   This is not medical advice. For emergencies, contact local services.
                 </ThemedText>
-              </>
-            )}
+
+              </ScrollView>
+            ) : null}
           </View>
         </View>
       </Modal>
@@ -678,7 +779,7 @@ function moodTextColor(label: 'positive' | 'neutral' | 'negative') {
 }
 
 function intensityPercent(a: Analysis) {
-  const v = Math.min(1, Math.max(0, Math.abs(a.comparative)));
+  const v = a.intensity !== undefined ? Math.min(1, Math.max(0, a.intensity as number)) : Math.min(1, Math.max(0, Math.abs(a.comparative)));
   return Math.max(5, Math.round(v * 100));
 }
 
@@ -698,6 +799,19 @@ function emotionEmoji(k: keyof Analysis['emotions'] | string) {
     case 'calm': return '😌';
     default: return '🙂';
   }
+}
+
+function formatDelta(n?: number) {
+  if (typeof n !== 'number' || isNaN(n)) return '0.00';
+  const sign = n > 0 ? '+' : '';
+  return `${sign}${n.toFixed(2)}`;
+}
+
+function uniqueStrings(arr: string[] = []) {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const s of arr) { if (!seen.has(s)) { seen.add(s); out.push(s); } }
+  return out;
 }
 
 function primarySuggestion(a: Analysis): string {
