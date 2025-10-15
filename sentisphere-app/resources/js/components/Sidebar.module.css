@@ -10,6 +10,7 @@
   border-right: 1px solid #e5e7eb;
   transition: width 0.3s ease;
   box-shadow: 0 0 8px rgba(0, 0, 0, 0.03);
+  overflow: hidden; /* avoid overlap when collapsed */
 }
 
 .open {
@@ -23,8 +24,17 @@
 .logoRow {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 0.75rem;
-  padding: 1.5rem 1rem 1rem 1.25rem;
+  padding: 1rem 0.75rem 1rem 1rem;
+}
+
+/* aligns logo circle and brand text horizontally */
+.logoWrap {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0; /* allow text to truncate if needed */
 }
 
 .logoIcon {
@@ -41,6 +51,7 @@
   font-size: 1.4rem;
   font-weight: 700;
   color: #0d8c4f;
+  white-space: nowrap;
 }
 
 .divider {
@@ -147,12 +158,17 @@
   justify-content: center;
   box-shadow: 0 2px 8px rgba(13, 140, 79, 0.15);
   flex-shrink: 0;
+  overflow: hidden; /* crop any image whitespace when scaled */
 }
 
 .logoImage {
-  width: 1.5rem;
-  height: 1.5rem;
-  object-fit: contain;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  border-radius: 50%;
+  display: block; /* remove inline-gap */
+  transform: scale(1.12); /* compensate for inner padding inside PNG */
 }
 
 /* --- ACTIVE ICON BG --- */
@@ -173,6 +189,68 @@
 }
 
 /* prevent overlap when closed */
-.closed .menuTitle:last-of-type {
-  margin-top: 0.5rem;
+.closed .menuTitle {
+  display: none;
+}
+
+/* tighten chevron button spacing */
+.chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.5rem;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  color: #0f172a;
+  cursor: pointer;
+  margin-left: auto; /* push to far right */
+}
+
+.chevron:hover {
+  background: #f3f4f6;
+}
+
+/* Closed state adjustments: keep chevron visible */
+.closed .logoRow {
+  padding: 0.5rem; /* tighter padding to fit logo */
+  justify-content: center; /* center logo horizontally */
+}
+
+.closed .logoCircle {
+  width: 2.2rem;
+  height: 2.2rem; /* shrink logo when closed */
+}
+
+.closed .chevron {
+  width: 1.75rem;
+  height: 1.75rem; /* slightly smaller in closed state */
+}
+
+/* Clickable logo when sidebar is closed */
+.closed .logoWrap {
+  cursor: pointer;
+  border-radius: 0.5rem;
+  margin: 0 auto; /* ensure centered container */
+}
+
+.closed .logoWrap:focus {
+  outline: 2px solid #0d8c4f;
+  outline-offset: 2px;
+}
+
+/* Center nav links and signout when closed */
+.closed .nav {
+  align-items: center;
+}
+
+.closed .navLink {
+  justify-content: center;
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+}
+
+.closed .signoutBtn {
+  justify-content: center;
 }

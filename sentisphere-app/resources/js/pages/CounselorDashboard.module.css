@@ -57,3 +57,113 @@
 .periodButton {
   transition: background 0.2s, color 0.2s;
 }
+
+/* --- Dashboard Design System --- */
+.card {
+  background: #ffffff;
+  border: 1px solid #eef2f7;
+  border-radius: 1.25rem;
+  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.04);
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.875rem;
+  border-radius: 9999px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  color: #111827;
+}
+
+.pillPrimary {
+  background: linear-gradient(180deg, #0ea768 0%, #0d8c4f 100%);
+  color: #ffffff;
+  border-color: #0d8c4f;
+}
+
+.pillSecondary {
+  background: #f8fafc;
+  color: #0d8c4f;
+}
+
+.tileRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  background: #f7fafd;
+  border: 1px solid #e9eff6;
+  border-radius: 1rem;
+  padding: 0.5rem 0.75rem;
+}
+
+/* --- Dashboard Header --- */
+.searchBar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 9999px;
+  padding: 0.5rem 0.75rem;
+  min-width: 340px;
+  flex: 1 1 480px;
+  box-shadow: 0 4px 14px rgba(16, 24, 40, 0.04);
+}
+
+.searchIcon {
+  width: 18px;
+  height: 18px;
+  color: #6b7280;
+}
+
+.searchInput {
+  border: none;
+  outline: none;
+  width: 100%;
+  font-size: 0.9rem;
+  color: #111827;
+}
+
+.profileChip {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 9999px;
+  padding: 0.35rem 0.6rem 0.35rem 0.35rem;
+}
+
+.avatarCircle {
+  width: 34px;
+  height: 34px;
+  border-radius: 9999px;
+  background: #fde68a; /* amber-200 */
+  color: #0f172a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+}
+
+.profileName {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #111827;
+}
+
+.profileEmail {
+  font-size: 0.75rem;
+  color: #6b7280;
+}

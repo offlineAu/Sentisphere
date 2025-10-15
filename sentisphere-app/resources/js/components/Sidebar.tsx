@@ -26,13 +26,20 @@ export default function Sidebar() {
 
   return (
     <motion.aside
-      className={styles.sidebar}
+      className={`${styles.sidebar} ${open ? styles.open : styles.closed}`}
       animate={{ width: open ? "17rem" : "5rem" }}
       transition={{ duration: 0.35, ease: "easeInOut" }}
     >
       {/* Logo Row */}
       <div className={styles.logoRow}>
-        <div className={styles.logoWrap}>
+        <div
+          className={styles.logoWrap}
+          role={open ? undefined : "button"}
+          tabIndex={open ? -1 : 0}
+          aria-label={open ? undefined : "Open sidebar"}
+          onClick={() => { if (!open) setOpen(true); }}
+          onKeyDown={(e) => { if (!open && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setOpen(true); } }}
+        >
           <div className={styles.logoCircle}>
             <img
               src="/logo.png"
@@ -54,13 +61,15 @@ export default function Sidebar() {
             )}
           </AnimatePresence>
         </div>
-        <button
-          className={styles.chevron}
-          onClick={() => setOpen(!open)}
-          title={open ? "Collapse sidebar" : "Expand sidebar"}
-        >
-          {open ? <ChevronLeft size={18} /> : <ChevronRight size={18} />}
-        </button>
+        {open && (
+          <button
+            className={styles.chevron}
+            onClick={() => setOpen(false)}
+            title="Collapse sidebar"
+          >
+            <ChevronLeft size={18} />
+          </button>
+        )}
       </div>
 
       <div className={styles.divider} />
@@ -109,7 +118,9 @@ export default function Sidebar() {
       {/* General Section */}
       <div className={styles.menuTitle}>GENERAL</div>
       <button className={styles.signoutBtn} tabIndex={open ? 0 : -1}>
-        <LogOut />
+        <div className={styles.iconWrap}>
+          <LogOut />
+        </div>
         <AnimatePresence>
           {open && (
             <motion.span
