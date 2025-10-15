@@ -129,6 +129,36 @@ def recent_alerts():
         ]
     return data
 
+@app.get("/api/all-alerts")
+def all_alerts():
+    query = """
+        SELECT
+            a.alert_id AS id,
+            u.name AS name,
+            a.reason,
+            a.severity,
+            a.status,
+            a.created_at
+        FROM alert a
+        JOIN user u ON a.user_id = u.user_id
+        WHERE a.status IN ('open', 'in_progress', 'resolved')
+        ORDER BY a.created_at DESC
+    """
+    with engine.connect() as conn:
+        result = conn.execute(text(query)).mappings()
+        data = [
+            {
+                "id": row["id"],
+                "name": row["name"],
+                "reason": row["reason"],
+                "severity": row["severity"],
+                "status": row["status"],
+                "created_at": row["created_at"].strftime("%Y-%m-%d %H:%M:%S") if row["created_at"] else "",
+            }
+            for row in result
+        ]
+    return data
+
 @app.get("/api/students-monitored")
 def students_monitored():
     query = """
@@ -140,16 +170,59 @@ def students_monitored():
         result = conn.execute(text(query)).mappings().first()
         return {"count": result["count"]}
 
-@app.get("/api/open-appointments")
-def open_appointments():
+# --- This Week Check-ins ---
+@app.get("/api/this-week-checkins")
+def this_week_checkins():
     query = """
         SELECT COUNT(*) AS count
-        FROM appointment_log
-        WHERE form_type = 'scheduled'
+        FROM emotional_checkin
+        WHERE YEARWEEK(created_at, 3) = YEARWEEK(CURDATE(), 3);
     """
     with engine.connect() as conn:
         result = conn.execute(text(query)).mappings().first()
         return {"count": result["count"]}
+
+# --- Open Appointments (User Activities) ---
+@app.get("/api/open-appointments")
+def open_appointments():
+    query = """
+        SELECT COUNT(DISTINCT user_id) AS count
+        FROM user_activities
+        WHERE action IN ('downloaded_form')
+          AND target_type = 'form'
+          AND created_at >= DATE_SUB(NOW(), INTERVAL 1 WEEK)
+    """
+    with engine.connect() as conn:
+        result = conn.execute(text(query)).mappings().first()
+        return {"count": result["count"]}
+
+# --- High-Risk Flags (Alerts + Sentiments) ---
+@app.get("/api/high-risk-flags")
+def high_risk_flags():
+    query_alert = """
+        SELECT COUNT(*) AS count
+        FROM alert
+        WHERE severity IN ('high', 'critical')
+            AND status IN ('open', 'in_progress');
+    """
+    query_journal = """
+        SELECT COUNT(*) AS count
+        FROM journal_sentiment
+        WHERE sentiment = 'negative'
+          AND analyzed_at >= DATE_SUB(NOW(), INTERVAL 1 WEEK)
+    """
+    query_checkin = """
+        SELECT COUNT(*) AS count
+        FROM checkin_sentiment
+        WHERE sentiment = 'negative'
+          AND analyzed_at >= DATE_SUB(NOW(), INTERVAL 1 WEEK)
+    """
+    with engine.connect() as conn:
+        alert_count = conn.execute(text(query_alert)).mappings().first()["count"]
+        journal_count = conn.execute(text(query_journal)).mappings().first()["count"]
+        checkin_count = conn.execute(text(query_checkin)).mappings().first()["count"]
+        total = alert_count + journal_count + checkin_count
+        return {"count": total}
 
 # --- Conversations list ---
 @app.get("/api/conversations")
@@ -356,6 +429,8 @@ def get_user(user_id: int):
             "nickname": row["nickname"],
             "role": row["role"],
         }
+    
+
 
 # Run with: 
 # For Windows: venv\Scripts\activate 

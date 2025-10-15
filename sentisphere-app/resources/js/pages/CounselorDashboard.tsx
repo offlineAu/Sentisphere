@@ -15,6 +15,7 @@ import {
 } from "recharts";
 import { useSidebar } from "../components/SidebarContext";
 import styles from './CounselorDashboard.module.css';
+const API_BASE = (import.meta as any).env?.VITE_API_URL || "";
 
 // -----------------------------
 // Types
@@ -119,37 +120,56 @@ export default function CounselorDashboard() {
   const [sentimentBreakdown, setSentimentBreakdown] = useState<any[]>([]);
   const [appointments, setAppointments] = useState<any[]>([]);
   const [recentAlerts, setRecentAlerts] = useState<any[]>([]);
+  const [allAlerts, setAllAlerts] = useState<any[]>([]);
+  const [showAllAlerts, setShowAllAlerts] = useState(false);
   const [studentsMonitored, setStudentsMonitored] = useState(0);
   const [openAppointments, setOpenAppointments] = useState(0);
   const [sentimentPeriod, setSentimentPeriod] = useState<"week" | "month" | "year">("month");
   const [page, setPage] = useState(0);
   const [showMoodInfo, setShowMoodInfo] = useState(false);
+  const [highRiskFlags, setHighRiskFlags] = useState(0);
+  const [thisWeekCheckins, setThisWeekCheckins] = useState(0);
 
   // Fetch from backend
   useEffect(() => {
-    fetch("http://localhost:8001/api/mood-trend")
+    fetch(`${API_BASE}/api/mood-trend`)
       .then((res) => res.json())
       .then(setMoodTrend)
       .catch(console.error);
 
-    fetch("http://localhost:8001/api/appointments")
+    fetch(`${API_BASE}/api/appointments`)
       .then((res) => res.json())
       .then(setAppointments)
       .catch(console.error);
 
-    fetch("http://localhost:8001/api/recent-alerts")
+    fetch(`${API_BASE}/api/recent-alerts`)
       .then((res) => res.json())
-      .then(setRecentAlerts)
+      .then(data => setRecentAlerts(data))
       .catch(console.error);
 
-    fetch("http://localhost:8001/api/students-monitored")
+    fetch(`${API_BASE}/api/all-alerts`)
+      .then((res) => res.json())
+      .then(data => setAllAlerts(data))
+      .catch(console.error);
+
+    fetch(`${API_BASE}/api/students-monitored`)
       .then((res) => res.json())
       .then(data => setStudentsMonitored(data.count))
       .catch(console.error);
 
-    fetch("http://localhost:8001/api/open-appointments")
+    fetch(`${API_BASE}/api/open-appointments`)
       .then((res) => res.json())
       .then(data => setOpenAppointments(data.count))
+      .catch(console.error);
+
+    fetch(`${API_BASE}/api/this-week-checkins`)
+      .then(res => res.json())
+      .then(data => setThisWeekCheckins(data.count))
+      .catch(console.error);
+
+    fetch(`${API_BASE}/api/high-risk-flags`)
+      .then(res => res.json())
+      .then(data => setHighRiskFlags(data.count))
       .catch(console.error);
   }, []);
 
@@ -164,7 +184,7 @@ export default function CounselorDashboard() {
 
   // Fetch sentiment breakdown when sentimentPeriod changes
   useEffect(() => {
-    fetch(`http://localhost:8001/api/sentiments?period=${sentimentPeriod}`)
+    fetch(`${API_BASE}/api/sentiments?period=${sentimentPeriod}`)
       .then((res) => res.json())
       .then(setSentimentBreakdown)
       .catch(console.error);
@@ -201,7 +221,7 @@ export default function CounselorDashboard() {
   };
 
   const currentWeek = getCurrentWeekString();
-  const thisWeekCheckins = moodTrend.filter(m => m.week === currentWeek).length;
+
 
   // Paginate (3 per page)
   const itemsPerPage = 3;
@@ -279,7 +299,7 @@ export default function CounselorDashboard() {
 
   const getFirstPeriodWithData = async () => {
     for (const period of ["week", "month", "year"] as const) {
-      const res = await fetch(`http://localhost:8001/api/sentiments?period=${period}`);
+      const res = await fetch(`${API_BASE}/api/sentiments?period=${period}`);
       const data = await res.json();
       if (data.length > 0) return period;
     }
@@ -336,7 +356,7 @@ export default function CounselorDashboard() {
           />
           <StatCard
             title="High-Risk Flags"
-            value={recentAlerts.filter((a) => a.severity === "high" || a.severity === "critical").length}
+            value={highRiskFlags}
             icon={<Info className="h-4 w-4 text-red-500" />}
           />
         </div>
@@ -443,7 +463,7 @@ export default function CounselorDashboard() {
               <h3 className="font-semibold text-[#0d8c4f] text-lg mb-1">Recent Alerts</h3>
               <p className="text-[#6b7280] text-sm mb-3">Students who may need attention</p>
               <div className="space-y-3">
-                {recentAlerts.map((alert, idx) => (
+                {recentAlerts.slice(0, 3).map((alert, idx) => (
                   <div
                     key={alert.id}
                     className="flex items-center justify-between bg-[#f7fafd] rounded-xl px-3 py-2"
@@ -470,12 +490,63 @@ export default function CounselorDashboard() {
                   </div>
                 ))}
               </div>
-              <button className="w-full mt-4 py-2 rounded-xl border text-[#0d8c4f] font-medium hover:bg-[#f5faff] text-sm">
+              <button
+                className="w-full mt-4 py-2 rounded-xl border-2 border-[#0d8c4f] text-[#0d8c4f] font-semibold bg-gradient-to-r from-[#e0f7ef] to-[#f5faff] hover:scale-105 hover:shadow-lg transition-all duration-150 text-base flex items-center justify-center gap-2"
+                onClick={() => setShowAllAlerts(true)}
+              >
+                <Info className="h-5 w-5 text-[#0d8c4f]" />
                 View All Alerts
               </button>
             </div>
           </div>
         </div>
+
+        {showAllAlerts && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-transparent bg-opacity-30">
+            <div className="bg-white rounded-2xl shadow-lg p-6 max-w-lg w-full relative">
+              <button
+                className="absolute top-2 right-2 text-[#0d8c4f] text-xl"
+                onClick={() => setShowAllAlerts(false)}
+                aria-label="Close"
+              >
+                &times;
+              </button>
+              <h2 className="text-lg font-semibold mb-4 text-[#0d8c4f]">All Alerts</h2>
+              <div className="max-h-[60vh] overflow-y-auto space-y-3">
+                {recentAlerts.length === 0 ? (
+                  <div className="text-gray-500 text-sm">No alerts available.</div>
+                ) : (
+                  allAlerts.map((alert, idx) => (
+                    <div
+                      key={alert.id}
+                      className="flex items-center justify-between bg-[#f7fafd] rounded-xl px-3 py-2"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Info className={
+                          alert.severity === "high" || alert.severity === "critical"
+                            ? "h-4 w-4 text-red-500"
+                            : alert.severity === "medium"
+                            ? "h-4 w-4 text-yellow-500"
+                            : "h-4 w-4 text-blue-500"
+                        } />
+                        <div>
+                          <div className="font-semibold text-[#333] flex items-center gap-2">
+                            {alert.name}
+                            {severityBadge(alert.severity)}
+                          </div>
+                          <div className="text-xs text-[#6b7280]">
+                            {alert.reason} • {new Date(alert.created_at).toLocaleDateString()}
+                          </div>
+                        </div>
+                      </div>
+                      <span className="text-[#bdbdbd] text-xl">&rarr;</span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4">
           {/* Sentiment Breakdown (2/3 width on desktop) */}

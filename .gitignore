@@ -28,3 +28,7 @@ Thumbs.db
 # Expo / React Native specific (optional)
 .expo/
 .expo-shared/
+
+# Ignore Python compiled files
+*.pyc
+__pycache__/
