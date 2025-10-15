@@ -186,6 +186,7 @@ export default function EnhancedDashboardScreen() {
   // Entrance animations for major sections
   const entrance = useRef({
     greet: new Animated.Value(0),
+    mood: new Animated.Value(0),
     inspire: new Animated.Value(0),
     stat: new Animated.Value(0),
     quick: new Animated.Value(0),
@@ -195,12 +196,13 @@ export default function EnhancedDashboardScreen() {
   const runEntrance = () => {
     // reset
     entrance.greet.setValue(0)
+    entrance.mood.setValue(0)
     entrance.inspire.setValue(0)
     entrance.stat.setValue(0)
     entrance.quick.setValue(0)
     entrance.activity.setValue(0)
     // sequence
-    const seq = [entrance.greet, entrance.inspire, entrance.stat, entrance.quick, entrance.activity].map((v, idx) =>
+    const seq = [entrance.greet, entrance.mood, entrance.inspire, entrance.stat, entrance.quick, entrance.activity].map((v, idx) =>
       Animated.timing(v, {
         toValue: 1,
         duration: 340,
@@ -320,28 +322,47 @@ export default function EnhancedDashboardScreen() {
         </Animated.View>
         <View style={styles.sectionSpacer} />
 
+        <Animated.View style={makeFadeUp(entrance.mood)}>
+          <Card style={styles.cardShadow}>
+            <LinearGradient colors={["#d8b4fe", "#a5b4fc", "#93c5fd"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.moodGradient}>
+              <CardContent style={styles.moodContent}>
+                <View style={styles.moodHeader}>
+                  <ThemedText style={styles.moodTitle}>State of mood</ThemedText>
+                  <View style={styles.moodAvatar}><Icon name="user" size={16} color="rgba(255,255,255,0.95)" /></View>
+                </View>
+                <ThemedText style={styles.moodPrompt}>How are you feeling now?</ThemedText>
+                <Link href="/(student)/(tabs)/mood" asChild>
+                  <Pressable onPressIn={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} } }} style={styles.moodButton}>
+                    <ThemedText style={styles.moodButtonText}>Log Mood</ThemedText>
+                  </Pressable>
+                </Link>
+              </CardContent>
+            </LinearGradient>
+          </Card>
+        </Animated.View>
+
         {/* Enhanced Daily Inspiration with Gradient */}
         <Animated.View style={makeFadeUp(entrance.inspire)}>
           <Card style={[styles.inspirationCard, styles.cardShadow, styles.inspirationShadow]}>
-            <LinearGradient colors={["#CFF2E2", "#0d8c4f"]} style={styles.inspirationGradient}>
+            <LinearGradient colors={[palette.tint, palette.tint]} style={styles.inspirationGradient}>
               <CardContent style={styles.inspirationContent}>
                 {/* Subtle animated glow overlay */}
                 <Animated.View pointerEvents="none" style={[styles.inspirationGlow, { opacity: inspireGlowOpacity, transform: [{ scale: inspireScale }] }]}>
                   <LinearGradient colors={["rgba(255,255,255,0.25)", "rgba(255,255,255,0.05)"]} style={StyleSheet.absoluteFillObject as any} pointerEvents="none" />
                 </Animated.View>
                 {/* Inspiration actions */}
-                <View style={styles.inspirationActions}>
-                  <Pressable accessibilityLabel="Refresh quote" onPress={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} } refreshQuote() }} style={({ pressed }) => [styles.inspirationActionBtn, pressed && { opacity: 0.85 }]} hitSlop={8}>
-                    <Icon name="refresh-ccw" size={16} color="#6B7280" />
-                  </Pressable>
-                  <Pressable accessibilityLabel="Share quote" onPress={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} } shareQuote() }} style={({ pressed }) => [styles.inspirationActionBtn, pressed && { opacity: 0.85 }]} hitSlop={8}>
-                    <Icon name="share-2" size={16} color="#6B7280" />
-                  </Pressable>
+                <View style={styles.inspirationHeader}>
+                  <ThemedText style={styles.inspirationTitle}>Quotes for the day</ThemedText>
+                  <View style={styles.inspirationActions}>
+                    <Pressable accessibilityLabel="Refresh quote" onPress={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} } refreshQuote() }} style={({ pressed }) => [styles.inspirationActionBtn, pressed && { opacity: 0.85 }]} hitSlop={8}>
+                      <Icon name="refresh-ccw" size={16} color="#6B7280" />
+                    </Pressable>
+                    <Pressable accessibilityLabel="Share quote" onPress={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} } shareQuote() }} style={({ pressed }) => [styles.inspirationActionBtn, pressed && { opacity: 0.85 }]} hitSlop={8}>
+                      <Icon name="share-2" size={16} color="#6B7280" />
+                    </Pressable>
+                  </View>
                 </View>
-                <Animated.View style={[styles.inspirationIcon, { transform: [{ scale: inspireIconScale }] }]}> 
-                  <Icon name="sparkles" size={28} color={palette.tint} />
-                </Animated.View>
-                <Animated.View style={{ opacity: quoteFade, transform: [{ translateY: quoteTranslateY }] }}>
+                <Animated.View style={{ width: "100%", opacity: quoteFade, transform: [{ translateY: quoteTranslateY }] }}>
                   <ThemedText style={styles.inspirationQuote}>
                     “{quote?.content ?? 'Loading a little inspiration…'}”
                   </ThemedText>
@@ -352,40 +373,6 @@ export default function EnhancedDashboardScreen() {
           </Card>
         </Animated.View>
 
-        {/* Weekly Summary Cards (optional) */}
-        {showSummaryRow && (
-          <View style={styles.summaryRow}>
-            <Card style={[styles.summaryCard, { backgroundColor: "#ECFDF5" }]}>
-              <CardContent style={styles.summaryContent}>
-                <View style={[styles.summaryIcon, { backgroundColor: "#10B981" }]}>
-                  <Icon name="activity" size={20} color="white" />
-                </View>
-                <ThemedText style={styles.summaryValue}>{weeklyMoodAverage}</ThemedText>
-                <ThemedText style={styles.summaryLabel}>Avg Mood</ThemedText>
-              </CardContent>
-            </Card>
-
-            <Card style={[styles.summaryCard, { backgroundColor: "#FEF3C7" }]}>
-              <CardContent style={styles.summaryContent}>
-                <View style={[styles.summaryIcon, { backgroundColor: "#F59E0B" }]}>
-                  <Icon name="target" size={20} color="white" />
-                </View>
-                <ThemedText style={styles.summaryValue}>{currentStreak}</ThemedText>
-                <ThemedText style={styles.summaryLabel}>Day Streak</ThemedText>
-              </CardContent>
-            </Card>
-
-            <Card style={[styles.summaryCard, { backgroundColor: "#E0F2FE" }]}>
-              <CardContent style={styles.summaryContent}>
-                <View style={[styles.summaryIcon, { backgroundColor: "#0EA5E9" }]}>
-                  <Icon name="book-open" size={20} color="white" />
-                </View>
-                <ThemedText style={styles.summaryValue}>{journalCount}</ThemedText>
-                <ThemedText style={styles.summaryLabel}>Entries</ThemedText>
-              </CardContent>
-            </Card>
-          </View>
-        )}
 
         {/* Enhanced Quick Actions */}
         <Animated.View style={makeFadeUp(entrance.quick)}>
@@ -678,27 +665,7 @@ export default function EnhancedDashboardScreen() {
           </CardContent>
         </Card>
 
-        {/* Analytics Preview */}
-        <Card style={styles.cardShadow}>
-          <CardContent style={styles.cardContent}>
-            <View style={styles.sectionHeader}>
-              <View style={styles.sectionTitleRow}>
-                <View style={styles.sectionTitleIcon}>
-                  <Icon name="target" size={18} color={palette.muted} />
-                </View>
-                <ThemedText type="subtitle" style={styles.sectionTitle}>Your Insights</ThemedText>
-              </View>
-              <Link href="/(student)/analytics" asChild>
-                <Pressable onPressIn={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} } }}>
-                  <Icon name="arrow-right" size={16} color={palette.muted} />
-                </Pressable>
-              </Link>
-            </View>
-            <ThemedText style={[styles.insightsText, { color: palette.muted }]}>
-              View detailed mood trends, journaling patterns, and wellness insights.
-            </ThemedText>
-          </CardContent>
-        </Card>
+        
       </ScrollView>
     </ThemedView>
   )
@@ -773,19 +740,29 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   inspirationGradient: {
-    borderRadius: 12,
+    borderRadius: 20,
   },
   inspirationContent: {
-    padding: 24,
+    paddingHorizontal: 24,
+    paddingVertical: 28,
+    alignItems: "flex-start",
+    minHeight: 180,
+  },
+  inspirationHeader: {
+    width: "100%",
+    flexDirection: "row",
     alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 12,
+  },
+  inspirationTitle: {
+    fontSize: 14,
+    fontFamily: "Inter_600SemiBold",
+    color: "rgba(255,255,255,0.95)",
   },
   inspirationActions: {
-    position: "absolute",
-    top: 12,
-    right: 12,
     flexDirection: "row",
     gap: 8,
-    zIndex: 10,
   },
   inspirationActionBtn: {
     width: 32,
@@ -802,20 +779,72 @@ const styles = StyleSheet.create({
   },
   inspirationGlow: {
     ...StyleSheet.absoluteFillObject,
-    borderRadius: 12,
+    borderRadius: 20,
   },
   inspirationQuote: {
-    fontSize: 18,
+    fontSize: 20,
     // Ensure boldness on iOS with Inter family
     fontFamily: "Inter_600SemiBold",
     color: "#FFFFFF",
-    textAlign: "center",
-    lineHeight: 26,
+    textAlign: "left",
+    lineHeight: 28,
     marginBottom: 8,
+    alignSelf: "stretch",
   },
   inspirationAuthor: {
     fontSize: 14,
     color: "rgba(255,255,255,0.9)",
+    alignSelf: "stretch",
+  },
+  // Mood prompt card styles
+  moodGradient: {
+    borderRadius: 24,
+  },
+  moodContent: {
+    padding: 24,
+    gap: 14,
+  },
+  moodHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  moodTitle: {
+    fontSize: 14,
+    fontFamily: 'Inter_500Medium',
+    color: 'rgba(255,255,255,0.92)',
+  },
+  moodAvatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  moodPrompt: {
+    fontSize: 28,
+    fontFamily: 'Inter_700Bold',
+    color: '#FFFFFF',
+    lineHeight: 34,
+    marginBottom: 14,
+  },
+  moodButton: {
+    width: '100%',
+    alignSelf: 'stretch',
+    borderRadius: 18,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.22)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.35)',
+  },
+  moodButtonText: {
+    fontSize: 16,
+    fontFamily: 'Inter_600SemiBold',
+    color: 'rgba(255,255,255,0.95)',
   },
   statCard: {
     width: "100%",
