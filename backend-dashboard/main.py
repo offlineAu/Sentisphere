@@ -110,9 +110,8 @@ def recent_alerts():
             a.created_at
         FROM alert a
         JOIN user u ON a.user_id = u.user_id
-        WHERE a.status = 'open'
+        WHERE a.status IN ('open', 'in_progress', 'resolved')
         ORDER BY a.created_at DESC
-        LIMIT 5
     """
     with engine.connect() as conn:
         result = conn.execute(text(query)).mappings()
@@ -430,6 +429,147 @@ def get_user(user_id: int):
             "role": row["role"],
         }
     
+# --- Dashboard: Appointment Logs ---
+@app.get("/api/appointment-logs")
+def get_appointment_logs(
+    user_id: Optional[int] = Query(None),
+    days: int = Query(30, ge=1, le=365),
+    limit: int = Query(100, ge=1, le=1000),
+):
+    """Return recent appointment form download logs.
+    - Filters: optional user_id; time window by `days` back from now.
+    - Limited to `limit` rows, newest first.
+    """
+    where = ["downloaded_at >= DATE_SUB(NOW(), INTERVAL :days DAY)"]
+    params = {"days": days, "limit": limit}
+    if user_id is not None:
+        where.append("user_id = :uid")
+        params["uid"] = user_id
+
+    query = f"""
+        SELECT log_id, user_id, form_type, downloaded_at, remarks
+        FROM appointment_log
+        WHERE {' AND '.join(where)}
+        ORDER BY downloaded_at DESC
+        LIMIT :limit
+    """
+    with engine.connect() as conn:
+        rows = conn.execute(text(query), params).mappings()
+        return [
+            {
+                "log_id": r["log_id"],
+                "user_id": r["user_id"],
+                "form_type": r["form_type"],
+                "downloaded_at": r["downloaded_at"].strftime("%Y-%m-%d %H:%M:%S") if r["downloaded_at"] else None,
+                "remarks": r["remarks"],
+            }
+            for r in rows
+        ]
+
+
+# --- Dashboard: User Activities (appointments) ---
+@app.get("/api/user-activities")
+def get_user_activities(
+    target_type: Optional[str] = Query(None, description="Filter by target_type, e.g., 'appointment' or 'form'"),
+    action: Optional[str] = Query(None, description="Filter by action, e.g., 'open', 'downloaded_form'"),
+    user_id: Optional[int] = Query(None),
+    days: int = Query(30, ge=1, le=365),
+    limit: int = Query(100, ge=1, le=1000),
+):
+    """Return recent user activities, optionally filtered.
+    Defaults to the last 30 days and returns up to `limit` records.
+    """
+    where = ["created_at >= DATE_SUB(NOW(), INTERVAL :days DAY)"]
+    params = {"days": days, "limit": limit}
+    if target_type:
+        where.append("target_type = :tt")
+        params["tt"] = target_type
+    if action:
+        where.append("action = :ac")
+        params["ac"] = action
+    if user_id is not None:
+        where.append("user_id = :uid")
+        params["uid"] = user_id
+
+    query = f"""
+        SELECT activity_id, user_id, action, target_type, target_id,
+               started_at, ended_at, duration_seconds, created_at
+        FROM user_activities
+        WHERE {' AND '.join(where)}
+        ORDER BY created_at DESC
+        LIMIT :limit
+    """
+    with engine.connect() as conn:
+        rows = conn.execute(text(query), params).mappings()
+        return [
+            {
+                "activity_id": r["activity_id"],
+                "user_id": r["user_id"],
+                "action": r["action"],
+                "target_type": r["target_type"],
+                "target_id": r["target_id"],
+                "started_at": r["started_at"].strftime("%Y-%m-%d %H:%M:%S") if r["started_at"] else None,
+                "ended_at": r["ended_at"].strftime("%Y-%m-%d %H:%M:%S") if r["ended_at"] else None,
+                "duration_seconds": r["duration_seconds"],
+                "created_at": r["created_at"].strftime("%Y-%m-%d %H:%M:%S") if r["created_at"] else None,
+            }
+            for r in rows
+        ]
+
+
+# --- Counselor profile ---
+@app.get("/api/counselor-profile")
+def get_counselor_profile(user_id: int = Query(...)):
+    """Return counselor profile. If `counselorprofile` table does not exist,
+    fall back to the base `user` table.
+    """
+    with engine.connect() as conn:
+        # Check if counselorprofile exists
+        exists_q = text(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM information_schema.tables
+            WHERE table_schema = DATABASE() AND table_name = 'counselorprofile'
+            """
+        )
+        exists = conn.execute(exists_q).mappings().first()["cnt"] > 0
+
+        if exists:
+            query = text(
+                """
+                SELECT u.user_id, u.name, u.email, u.role,
+                       cp.title, cp.department, cp.avatar_url, cp.initials
+                FROM user u
+                LEFT JOIN counselorprofile cp ON cp.user_id = u.user_id
+                WHERE u.user_id = :uid
+                LIMIT 1
+                """
+            )
+        else:
+            query = text(
+                """
+                SELECT u.user_id, u.name, u.email, u.role,
+                       NULL AS title, NULL AS department, NULL AS avatar_url, NULL AS initials
+                FROM user u
+                WHERE u.user_id = :uid
+                LIMIT 1
+                """
+            )
+
+        row = conn.execute(query, {"uid": user_id}).mappings().first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Counselor not found")
+
+        return {
+            "user_id": row["user_id"],
+            "name": row["name"],
+            "email": row.get("email"),
+            "role": row["role"],
+            "title": row.get("title"),
+            "department": row.get("department"),
+            "avatar_url": row.get("avatar_url"),
+            "initials": row.get("initials"),
+        }
 
 
 # Run with: 

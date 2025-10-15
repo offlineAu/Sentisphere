@@ -1,16 +1,18 @@
 import { useEffect, useState, useRef } from "react";
-import { ChevronLeft, ChevronRight, Info } from "lucide-react";
+import { ChevronLeft, ChevronRight, Info, Users, CalendarCheck, CalendarClock, AlertTriangle, AlertCircle, Bell, Search, Mail } from "lucide-react";
 import { motion } from "framer-motion";
 import {
   ResponsiveContainer,
   LineChart,
   Line,
+  Area,
   CartesianGrid,
   XAxis,
   YAxis,
   Tooltip as RTooltip,
-  PieChart,
-  Pie,
+  BarChart,
+  Bar,
+  LabelList,
   Cell,
 } from "recharts";
 import { useSidebar } from "../components/SidebarContext";
@@ -119,6 +121,8 @@ export default function CounselorDashboard() {
   const [moodTrend, setMoodTrend] = useState<any[]>([]);
   const [sentimentBreakdown, setSentimentBreakdown] = useState<any[]>([]);
   const [appointments, setAppointments] = useState<any[]>([]);
+  const [appointmentLogs, setAppointmentLogs] = useState<any[]>([]);
+  const [userActivities, setUserActivities] = useState<any[]>([]);
   const [recentAlerts, setRecentAlerts] = useState<any[]>([]);
   const [allAlerts, setAllAlerts] = useState<any[]>([]);
   const [showAllAlerts, setShowAllAlerts] = useState(false);
@@ -129,6 +133,7 @@ export default function CounselorDashboard() {
   const [showMoodInfo, setShowMoodInfo] = useState(false);
   const [highRiskFlags, setHighRiskFlags] = useState(0);
   const [thisWeekCheckins, setThisWeekCheckins] = useState(0);
+  const [counselor, setCounselor] = useState<any | null>(null);
 
   // Fetch from backend
   useEffect(() => {
@@ -170,6 +175,24 @@ export default function CounselorDashboard() {
     fetch(`${API_BASE}/api/high-risk-flags`)
       .then(res => res.json())
       .then(data => setHighRiskFlags(data.count))
+      .catch(console.error);
+
+    // New: appointment logs and user activities (mobile appointment page interactions)
+    fetch(`${API_BASE}/api/appointment-logs`)
+      .then(res => res.json())
+      .then(data => setAppointmentLogs(data))
+      .catch(console.error);
+
+    fetch(`${API_BASE}/api/user-activities?target_type=appointment`)
+      .then(res => res.json())
+      .then(data => setUserActivities(data))
+      .catch(console.error);
+
+    // Counselor profile
+    const counselorId = (import.meta as any).env?.VITE_COUNSELOR_USER_ID || 1;
+    fetch(`${API_BASE}/api/counselor-profile?user_id=${counselorId}`)
+      .then(res => res.json())
+      .then(setCounselor)
       .catch(console.error);
   }, []);
 
@@ -219,8 +242,6 @@ export default function CounselorDashboard() {
 
     return `${year}-${month}-W${week}`;
   };
-
-  const currentWeek = getCurrentWeekString();
 
 
   // Paginate (3 per page)
@@ -297,6 +318,34 @@ export default function CounselorDashboard() {
     year: "This Year",
   };
 
+  // Palette for pie that complements the green theme
+  const sentimentColors: Record<string, string> = {
+    positive: "#22c55e", // emerald
+    negative: "#ef4444", // red-500
+    neutral: "#f59e0b",  // amber-500
+    mixed: "#10b981",    // teal/emerald blend
+  };
+
+  // Simple dark tooltip to mimic the sample's small percentage badge
+  const CustomTooltip = ({ active, payload }: any) => {
+    if (active && payload && payload.length) {
+      const percent = payload[0]?.payload?.percent ?? payload[0]?.value;
+      return (
+        <div style={{
+          background: '#111827',
+          color: '#fff',
+          padding: '2px 6px',
+          borderRadius: 4,
+          fontSize: 12,
+          boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
+        }}>
+          {`${percent}%`}
+        </div>
+      );
+    }
+    return null;
+  };
+
   const getFirstPeriodWithData = async () => {
     for (const period of ["week", "month", "year"] as const) {
       const res = await fetch(`${API_BASE}/api/sentiments?period=${period}`);
@@ -309,68 +358,87 @@ export default function CounselorDashboard() {
   return (
     <main
       className={`transition-all duration-200 ${
-        open ? "pl-[17rem] p-6 space-y-6 bg-[#f9fafb] min-h-screen" : "pl-[4.5rem] p-6 space-y-6 bg-[#f9fafb] min-h-screen"
-      } pt-6 pr-6 pb-6 w-full`}
+        open ? "pl-[17rem] p-6 space-y-4 bg-[#f9fafb] min-h-screen" : "pl-[4.5rem] p-6 space-y-5 bg-[#f9fafb] min-h-screen"
+      } pt-1 pr-6 pb-6 w-full`}
       style={{ minHeight: "100vh" }}
     >
       <motion.div
         initial={{ opacity: 0, y: 6 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.35 }}
-        className="p-4 sm:p-6 space-y-6 max-w-full"
+        className="p-4 sm:p-5 space-y-5 max-w-full"
       >
-        {/* Header */}
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        {/* Header with search + message + profile */}
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center justify-between gap-4">
+            <div className={styles.searchBar}>
+              <Search className={styles.searchIcon} />
+              <input className={styles.searchInput} placeholder="Search" />
+            </div>
+            <div className="flex items-center gap-3">
+              <button className={`${styles.pill} ${styles.pillSecondary}`} title="Messages">
+                <Mail className="h-4 w-4 text-[#0d8c4f]" />
+              </button>
+              <div className={styles.profileChip}>
+                <div className={styles.avatarCircle}>
+                  {(counselor?.initials) || (counselor?.name ? counselor.name.split(' ').map((n: string) => n[0]).slice(0,2).join('') : 'C')}
+                </div>
+                <div>
+                  <div className={styles.profileName}>{counselor?.name || 'Counselor'}</div>
+                  <div className={styles.profileEmail}>{counselor?.email || ''}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div>
             <h1 className={styles.headerTitle}>Counselor Dashboard</h1>
             <p className={styles.headerSubtitle}>
               Overview of student well-being, appointments, and risk signals.
             </p>
           </div>
-          <div className="flex gap-2">
-            <button className="flex items-center gap-2 px-3 py-2 border rounded-xl text-sm text-[#333] hover:bg-[#e5e5e5]">
-              <Info className="h-4 w-4 text-[#2563eb]" /> Filters
-            </button>
-            <button className="flex items-center gap-2 px-3 py-2 border rounded-xl text-sm text-[#333] hover:bg-[#e5e5e5]">
-              <ChevronRight className="h-4 w-4 text-[#0d8c4f]" /> Export Report
-            </button>
-          </div>
         </div>
 
         {/* Stats */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatCard
-            title="Students Monitored"
-            value={studentsMonitored}
-            icon={<Info className="h-4 w-4 text-[#0d8c4f]" />}
-          />
+          {/* Gradient card for Students Monitored */}
+          <div className="rounded-2xl shadow p-4 bg-gradient-to-br from-[#0ea768] to-[#0d8c4f] text-white">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-medium opacity-90">Students Monitored</h3>
+              <Users className="h-4 w-4 opacity-90" />
+            </div>
+            <div className="text-3xl font-extrabold mt-1">{studentsMonitored}</div>
+            <div className="text-xs opacity-90 mt-1 flex items-center gap-1">
+              <ChevronRight className="h-3 w-3" /> Updated today
+            </div>
+          </div>
           <StatCard
             title="This Week Check-ins"
             value={thisWeekCheckins}
-            icon={<Info className="h-4 w-4 text-[#2563eb]" />}
+            icon={<CalendarCheck className="h-4 w-4 text-[#2563eb]" />}
           />
           <StatCard
             title="Open Appointments"
             value={openAppointments}
-            icon={<Info className="h-4 w-4 text-[#6b7280]" />}
+            icon={<CalendarClock className="h-4 w-4 text-[#6b7280]" />}
           />
           <StatCard
             title="High-Risk Flags"
             value={highRiskFlags}
-            icon={<Info className="h-4 w-4 text-red-500" />}
+            icon={<AlertTriangle className="h-4 w-4 text-red-500" />}
           />
         </div>
 
-        {/* Weekly Mood Trend - moved up and made more prominent */}
+        {/* Weekly Mood Analytics - moved up and made more prominent */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Weekly Mood Trend (2/3 width on desktop) */}
           <div className="lg:col-span-2">
-            <div className="bg-white rounded-2xl shadow p-4 w-full max-w-full">
-              <div className="flex justify-between items-center mb-2">
+            <div className={`${styles.card} p-4 w-full max-w-full`}>
+              <div className={`${styles.cardHeader}`}>
                 <div className="flex items-center gap-2">
-                  <h2 className={styles.sectionTitle}>Weekly Mood Trend</h2>
+                  <h2 className={styles.sectionTitle}>Weekly Mood Analytics</h2>
                   <button
-                    className="ml-2 p-1 rounded-full hover:bg-gray-100"
+                    className={`${styles.pill} ${styles.pillSecondary}`}
                     onClick={() => setShowMoodInfo((v) => !v)}
                     aria-label="Show mood summary"
                   >
@@ -379,10 +447,10 @@ export default function CounselorDashboard() {
                 </div>
                 <div className="flex items-center gap-2">
                   <button
-                    className={`p-2 rounded-full border ${
+                    className={`${styles.pill} ${styles.pillSecondary} ${
                       page === 0
                         ? "opacity-40 cursor-not-allowed"
-                        : "hover:bg-gray-100"
+                        : ""
                     }`}
                     onClick={() => setPage((p) => Math.max(p - 1, 0))}
                     disabled={page === 0}
@@ -390,10 +458,10 @@ export default function CounselorDashboard() {
                     <ChevronLeft className="h-5 w-5 text-[#0d8c4f]" />
                   </button>
                   <button
-                    className={`p-2 rounded-full border ${
+                    className={`${styles.pill} ${styles.pillSecondary} ${
                       page === maxPage
                         ? "opacity-40 cursor-not-allowed"
-                        : "hover:bg-gray-100"
+                        : ""
                     }`}
                     onClick={() => setPage((p) => Math.min(p + 1, maxPage))}
                     disabled={page === maxPage}
@@ -413,7 +481,13 @@ export default function CounselorDashboard() {
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={paginatedMoodTrend} margin={{ top: 20, right: 35, bottom: 40, left: 20 }}>
-                      <CartesianGrid strokeDasharray="3 3" />
+                      <defs>
+                        <linearGradient id="moodGradient" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#16a34a" stopOpacity={0.85} />
+                          <stop offset="100%" stopColor="#0d8c4f" stopOpacity={0.25} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                       <XAxis
                         dataKey="week"
                         stroke="#0d8c4f"
@@ -441,6 +515,16 @@ export default function CounselorDashboard() {
                       />
                       <YAxis domain={["auto", "auto"]} stroke="#0d8c4f" />
                       <RTooltip />
+                      <Area
+                        type="monotone"
+                        dataKey="avgMood"
+                        baseValue="dataMin"
+                        fill="url(#moodGradient)"
+                        stroke="transparent"
+                        fillOpacity={1}
+                        connectNulls
+                        isAnimationActive={false}
+                      />
                       <Line
                         type="monotone"
                         dataKey="avgMood"
@@ -469,13 +553,13 @@ export default function CounselorDashboard() {
                     className="flex items-center justify-between bg-[#f7fafd] rounded-xl px-3 py-2"
                   >
                     <div className="flex items-center gap-2">
-                      <Info className={
-                        alert.severity === "high" || alert.severity === "critical"
-                          ? "h-4 w-4 text-red-500"
-                          : alert.severity === "medium"
-                          ? "h-4 w-4 text-yellow-500"
-                          : "h-4 w-4 text-blue-500"
-                      } />
+                      {alert.severity === "high" || alert.severity === "critical" ? (
+                        <AlertTriangle className="h-4 w-4 text-red-500" />
+                      ) : alert.severity === "medium" ? (
+                        <AlertCircle className="h-4 w-4 text-yellow-500" />
+                      ) : (
+                        <Bell className="h-4 w-4 text-blue-500" />
+                      )}
                       <div>
                         <div className="font-semibold text-[#333] flex items-center gap-2">
                           {alert.name}
@@ -522,13 +606,13 @@ export default function CounselorDashboard() {
                       className="flex items-center justify-between bg-[#f7fafd] rounded-xl px-3 py-2"
                     >
                       <div className="flex items-center gap-2">
-                        <Info className={
-                          alert.severity === "high" || alert.severity === "critical"
-                            ? "h-4 w-4 text-red-500"
-                            : alert.severity === "medium"
-                            ? "h-4 w-4 text-yellow-500"
-                            : "h-4 w-4 text-blue-500"
-                        } />
+                        {alert.severity === "high" || alert.severity === "critical" ? (
+                          <AlertTriangle className="h-4 w-4 text-red-500" />
+                        ) : alert.severity === "medium" ? (
+                          <AlertCircle className="h-4 w-4 text-yellow-500" />
+                        ) : (
+                          <Bell className="h-4 w-4 text-blue-500" />
+                        )}
                         <div>
                           <div className="font-semibold text-[#333] flex items-center gap-2">
                             {alert.name}
@@ -551,8 +635,8 @@ export default function CounselorDashboard() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4">
           {/* Sentiment Breakdown (2/3 width on desktop) */}
           <div className="lg:col-span-2">
-            <div className="bg-white rounded-2xl shadow p-4 w-full max-w-full">
-              <div className="flex justify-between items-center mb-2">
+            <div className={`${styles.card} p-4 w-full max-w-full`}>
+              <div className={`${styles.cardHeader}`}>
                 <h2 className={styles.sectionTitle}>
                   Sentiment Breakdown
                 </h2>
@@ -560,11 +644,11 @@ export default function CounselorDashboard() {
                   {(["week", "month", "year"] as const).map((p) => (
                     <button
                       key={p}
-                      className={`px-3 py-1 rounded-lg text-sm font-medium border ${
+                      className={`${styles.pill} ${
                         sentimentPeriod === p
-                          ? "bg-[#0d8c4f] text-white border-[#0d8c4f]"
-                          : "bg-[#f5f5f5] text-[#0d8c4f] border-[#e5e5e5]"
-                      } transition`}
+                          ? styles.pillPrimary
+                          : styles.pillSecondary
+                      }`}
                       onClick={() => setSentimentPeriod(p)}
                     >
                       {periodLabels[p]}
@@ -572,60 +656,167 @@ export default function CounselorDashboard() {
                   ))}
                 </div>
               </div>
-              <div className="h-64 flex items-center justify-center">
-                {sentimentBreakdown.length === 0 ? (
-                  <span className="text-[#6b7280] text-sm">No sentiment data available for this period.</span>
-                ) : (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        dataKey="value"
-                        data={sentimentBreakdown}
-                        outerRadius={100}
-                        label={({ name, value }) => `${name}: ${value}`}
-                      >
-                        {sentimentBreakdown.map((entry, i) => (
-                          <Cell key={i} fill={entry.name === "positive" ? "#4ade80" : entry.name === "negative" ? "#f87171" : "#fbbf24"} />
-                        ))}
-                      </Pie>
-                      <RTooltip />
-                    </PieChart>
-                  </ResponsiveContainer>
-                )}
+              <div className="flex items-center justify-center">
+                {(() => {
+                  // Normalize to fixed categories
+                  const order = ["positive", "negative", "neutral", "mixed"] as const;
+                  const map: Record<string, number> = Object.fromEntries(
+                    sentimentBreakdown.map((d: any) => [String(d.name).toLowerCase(), Number(d.value) || 0])
+                  );
+                  const total = Object.values(map).reduce((a: number, b: number) => a + b, 0);
+                  const data = order.map((k) => ({
+                    name: k,
+                    value: map[k] || 0,
+                    percent: total > 0 ? Math.round(((map[k] || 0) / total) * 100) : 0,
+                  }));
+                  if (total === 0) return <span className="text-[#6b7280] text-sm">No sentiment data available for this period.</span>;
+                  // Determine dynamic chart height based on tallest bar percent to avoid clipping labels
+                  const maxPercent = Math.max(...data.map(d => d.percent));
+                  const chartHeight = maxPercent > 85 ? 340 : maxPercent > 65 ? 300 : 280;
+                  return (
+                    <ResponsiveContainer width="100%" height={chartHeight}>
+                      <BarChart data={data} margin={{ top: 30, right: 10, bottom: 10, left: 10 }} barCategoryGap={4} barGap={0}>
+                        <defs>
+                          <linearGradient id="posGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#34d399" />
+                            <stop offset="100%" stopColor="#10b981" />
+                          </linearGradient>
+                          <linearGradient id="negGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#fca5a5" />
+                            <stop offset="100%" stopColor="#ef4444" />
+                          </linearGradient>
+                          <linearGradient id="neuGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#fde68a" />
+                            <stop offset="100%" stopColor="#f59e0b" />
+                          </linearGradient>
+                          <linearGradient id="mixGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#86efac" />
+                            <stop offset="100%" stopColor="#22c55e" />
+                          </linearGradient>
+                          <pattern id="hatch" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
+                            <rect width="6" height="6" fill="#f1f5f9" />
+                            <line x1="0" y1="0" x2="0" y2="6" stroke="#cbd5e1" strokeWidth="2" />
+                          </pattern>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#eef2f7" />
+                        <XAxis
+                          dataKey="name"
+                          tick={{ fill: '#6b7280', fontSize: 12 }}
+                          tickFormatter={(v) => ({positive: 'Positive', negative: 'Negative', neutral: 'Neutral', mixed: 'Mixed'} as Record<string,string>)[v] || v}
+                          axisLine={false}
+                          tickLine={false}
+                        />
+                        <YAxis hide domain={[0, (dataMax: number) => (typeof dataMax === 'number' ? dataMax : 0) * 1.15]} />
+                        <RTooltip content={<CustomTooltip />} />
+                        <Bar
+                          dataKey="value"
+                          radius={[50, 50, 50, 50]}
+                          barSize={72}
+                          background={{ fill: 'url(#hatch)' }}
+                          isAnimationActive
+                          animationDuration={800}
+                          style={{ cursor: 'default' }}
+                        >
+                          <LabelList
+                            dataKey="percent"
+                            position="top"
+                            fill="#6b7280"
+                            offset={6}
+                            formatter={(label: React.ReactNode) => `${typeof label === 'number' ? label : Number(label ?? 0)}%`}
+                          />
+                          {data.map((entry, index) => {
+                            const key = entry.name;
+                            const value = entry.value;
+                            const fill = value <= 0
+                              ? 'url(#hatch)'
+                              : key === 'positive' ? 'url(#posGrad)'
+                              : key === 'negative' ? 'url(#negGrad)'
+                              : key === 'neutral'  ? 'url(#neuGrad)'
+                              : 'url(#mixGrad)';
+                            return <Cell key={`c-${index}`} fill={fill} />;
+                          })}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  );
+                })()}
               </div>
             </div>
           </div>
-          {/* Empty space or another section (1/3 width) */}
-          <div></div>
+          {/* Project-style side rail: Activities Snapshot */}
+          <div className={`${styles.card} p-4 h-full`}>
+            <h3 className="font-semibold text-[#0d8c4f] text-lg mb-2">Appointment Activities</h3>
+            <div className="space-y-3 max-h-[18rem] overflow-y-auto pr-1">
+              {userActivities.length === 0 ? (
+                <div className="text-[#6b7280] text-sm">No recent activities.</div>
+              ) : (
+                userActivities.slice(0, 8).map((act) => (
+                  <div key={act.activity_id} className={`${styles.tileRow}`}>
+                    <div>
+                      <div className="text-sm font-semibold text-[#333]">{act.action}</div>
+                      <div className="text-xs text-[#6b7280]">Target: {act.target_type} #{act.target_id}</div>
+                      <div className="text-[11px] text-[#94a3b8]">{new Date(act.created_at || act.started_at).toLocaleString()}</div>
+                    </div>
+                    <span className="text-[#bdbdbd] text-xl">→</span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         </div>
 
-        {/* 🔹 Appointments */}
-        <div className="bg-white rounded-2xl shadow p-4">
-          <h2 className="text-lg font-semibold mb-4 text-[#0d8c4f]">Appointments</h2>
-          <div className="grid md:grid-cols-3 gap-4">
-            {appointments.map((apt) => (
-              <div key={apt.id} className={styles.appointmentCard}>
-                <div className="flex justify-between items-center">
-                  <span className="font-medium text-[#333]">{apt.student}</span>
-                  <span className={styles.appointmentStatus}>{apt.status}</span>
-                </div>
-                <div className="text-xs text-[#6b7280]">{apt.id}</div>
-                <div className="mt-2 text-sm text-[#333]">
-                  <Info className="h-4 w-4 inline mr-1 text-[#2563eb]" />{" "}
-                  {new Date(apt.date).toLocaleDateString()} • {apt.time}
-                </div>
-                <div className="text-sm mt-1 text-[#333]">
-                  <Info className="h-4 w-4 inline mr-1 text-[#0d8c4f]" /> Counselor:{" "}
-                  {apt.counselor}
-                </div>
-                {apt.notes && (
-                  <div className="text-xs text-[#6b7280] mt-1">
-                    <Info className="h-4 w-4 inline mr-1 text-[#2563eb]" />{" "}
-                    {apt.notes}
+        {/* 🔹 Appointments & Logs */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className={`${styles.card} p-4`}>
+            <h2 className="text-lg font-semibold mb-4 text-[#0d8c4f]">Upcoming Appointments</h2>
+            <div className="grid md:grid-cols-2 gap-4">
+              {appointments.length === 0 ? (
+                <div className="text-[#6b7280] text-sm">No appointments scheduled.</div>
+              ) : (
+                appointments.slice(0, 6).map((apt) => (
+                  <div key={apt.id} className={styles.appointmentCard}>
+                    <div className="flex justify-between items-center">
+                      <span className="font-medium text-[#111827]">{apt.student}</span>
+                      <span className={styles.appointmentStatus}>{apt.status}</span>
+                    </div>
+                    <div className="text-xs text-[#6b7280]">ID: {apt.id}</div>
+                    <div className="mt-2 text-sm text-[#111827]">
+                      <Info className="h-4 w-4 inline mr-1 text-[#2563eb]" />
+                      {new Date(apt.date).toLocaleDateString()} • {apt.time}
+                    </div>
+                    <div className="text-sm mt-1 text-[#111827]">
+                      <Info className="h-4 w-4 inline mr-1 text-[#0d8c4f]" /> Counselor: {apt.counselor}
+                    </div>
+                    {apt.notes && (
+                      <div className="text-xs text-[#6b7280] mt-1">
+                        <Info className="h-4 w-4 inline mr-1 text-[#2563eb]" />
+                        {apt.notes}
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-            ))}
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className={`${styles.card} p-4`}>
+            <h2 className="text-lg font-semibold mb-4 text-[#0d8c4f]">Appointment Logs</h2>
+            <div className="space-y-3 max-h-[24rem] overflow-y-auto pr-1">
+              {appointmentLogs.length === 0 ? (
+                <div className="text-[#6b7280] text-sm">No logs yet.</div>
+              ) : (
+                appointmentLogs.slice(0, 12).map((log) => (
+                  <div key={log.log_id} className={`${styles.tileRow}`}>
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-[#111827]">{log.form_type || 'Form'} downloaded</div>
+                      <div className="text-xs text-[#6b7280]">User #{log.user_id} • {new Date(log.downloaded_at).toLocaleString()}</div>
+                      {log.remarks && <div className="text-[11px] text-[#94a3b8] truncate">{log.remarks}</div>}
+                    </div>
+                    <span className="text-[#bdbdbd] text-xl">↓</span>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         </div>
       </motion.div>
