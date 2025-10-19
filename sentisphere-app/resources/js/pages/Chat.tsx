@@ -43,9 +43,10 @@ export default function Chat() {
   const [unreadCounts, setUnreadCounts] = useState<Record<number, number>>({});
   const [messagesByConversation, setMessagesByConversation] = useState<Record<number, ChatMessage[]>>({});
   const [searchQuery, setSearchQuery] = useState("");
+  const [filter, setFilter] = useState<"all" | "unread" | "read">("all");
 
   // ⚡ Change this for logged-in user (student/counselor)
-  const userId = 3; // put your counselor's user_id from the DB
+  const userId = 1; // put your counselor's user_id from the DB
 
   // Fetch conversations
   useEffect(() => {

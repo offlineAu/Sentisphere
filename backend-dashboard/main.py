@@ -1,16 +1,19 @@
-from fastapi import FastAPI, Query, HTTPException
+from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, text
+from datetime import datetime, timedelta
+import os
+from collections import Counter
+import re
+import typing
 from pydantic import BaseModel
 from typing import List, Optional
-from datetime import datetime, timedelta
-
 
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Adjust for production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -27,7 +30,18 @@ def mood_trend():
             MONTH(created_at) AS month_num,
             MONTHNAME(created_at) AS month_name,
             WEEK(created_at, 3) - WEEK(DATE_SUB(created_at, INTERVAL DAYOFMONTH(created_at)-1 DAY), 3) + 1 AS week_in_month,
-            ROUND(AVG(mood_level), 2) AS avgMood
+            ROUND(AVG(
+                CASE mood_level
+                    WHEN 'Very Sad' THEN 1
+                    WHEN 'Sad' THEN 2
+                    WHEN 'Neutral' THEN 3
+                    WHEN 'Good' THEN 4
+                    WHEN 'Happy' THEN 5
+                    WHEN 'Very Happy' THEN 6
+                    WHEN 'Excellent' THEN 7
+                    ELSE NULL
+                END
+            ), 2) AS avgMood
         FROM emotional_checkin
         GROUP BY year, month_num, month_name, week_in_month
         ORDER BY year, month_num, week_in_month
@@ -68,6 +82,183 @@ def sentiment_breakdown(period: str = Query("month", enum=["week", "month", "yea
         # Ensure data is always an array and chart-friendly
         data = [{"name": row["sentiment"], "value": row["value"]} for row in result]
         return data
+
+@app.get("/api/checkin-breakdown")
+def checkin_breakdown(period: str = Query("month", enum=["week", "month", "year"])):
+    now = datetime.now()
+    if period == "week":
+        start = now - timedelta(days=7)
+    elif period == "year":
+        start = now.replace(month=1, day=1)
+    else:
+        start = now.replace(day=1)
+
+    q_mood = text(
+        """
+        SELECT mood_level AS label, COUNT(*) AS value
+        FROM emotional_checkin
+        WHERE created_at >= :date
+        GROUP BY mood_level
+        """
+    )
+    q_energy = text(
+        """
+        SELECT energy_level AS label, COUNT(*) AS value
+        FROM emotional_checkin
+        WHERE created_at >= :date
+        GROUP BY energy_level
+        """
+    )
+    q_stress = text(
+        """
+        SELECT stress_level AS label, COUNT(*) AS value
+        FROM emotional_checkin
+        WHERE created_at >= :date
+        GROUP BY stress_level
+        """
+    )
+    with engine.connect() as conn:
+        params = {"date": start.strftime('%Y-%m-%d %H:%M:%S')}
+        mood_rows = conn.execute(q_mood, params).mappings()
+        energy_rows = conn.execute(q_energy, params).mappings()
+        stress_rows = conn.execute(q_stress, params).mappings()
+        return {
+            "mood": [{"label": r["label"], "value": r["value"]} for r in mood_rows],
+            "energy": [{"label": r["label"], "value": r["value"]} for r in energy_rows],
+            "stress": [{"label": r["label"], "value": r["value"]} for r in stress_rows],
+        }
+
+# -----------------------------
+# AI Summaries (heuristic fallback)
+# -----------------------------
+
+def _period_start(now: datetime, period: str) -> datetime:
+    if period == "week":
+        return now - timedelta(days=7)
+    if period == "year":
+        return now.replace(month=1, day=1)
+    return now.replace(day=1)
+
+def _top_keywords(texts, k=3):
+    STOP = set("""
+    the a an and or but if while to for from of in on at with by is are was were be been being i you he she it we they them us our your their my mine ours yours theirs this that these those as not no yes do does did have has had can could should would will just very about into over under more most less least than then so because also one two three four five six seven eight nine ten
+    """.split())
+    words = []
+    for t in texts:
+        for w in re.findall(r"[A-Za-z][A-Za-z\-']{2,}", t or ""):
+            wl = w.lower()
+            if wl not in STOP:
+                words.append(wl)
+    common = [w for w,_ in Counter(words).most_common(k)]
+    return common
+
+def _maybe_llm_summary(prompt: str) -> str | None:
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return None
+    try:
+        import openai  # type: ignore
+        openai.api_key = api_key
+        resp = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role":"system","content":"You are a concise school counseling dashboard summarizer."},
+                      {"role":"user","content": prompt}],
+            temperature=0.2,
+            max_tokens=120,
+        )
+        return resp.choices[0].message["content"].strip()
+    except Exception:
+        return None
+
+@app.get("/api/ai/sentiment-summary")
+def ai_sentiment_summary(period: str = Query("month", enum=["week","month","year"])):
+    now = datetime.now()
+    start = _period_start(now, period)
+    # Pull sentiment counts (exclude 'mixed')
+    q = text(
+        """
+        SELECT LOWER(sentiment) AS name, COUNT(*) AS value
+        FROM checkin_sentiment cs
+        JOIN emotional_checkin ec ON ec.checkin_id = cs.checkin_id
+        WHERE ec.created_at >= :date AND sentiment IN ('positive','negative','neutral')
+        GROUP BY sentiment
+        """
+    )
+    # Pull recent journals/comments text
+    q_texts = text(
+        """
+        (
+          SELECT comment AS txt, created_at FROM emotional_checkin
+          WHERE created_at >= :date AND comment IS NOT NULL AND comment <> ''
+          ORDER BY created_at DESC LIMIT 50
+        )
+        UNION ALL
+        (
+          SELECT content AS txt, created_at FROM journal
+          WHERE created_at >= :date AND content IS NOT NULL AND content <> ''
+          ORDER BY created_at DESC LIMIT 50
+        )
+        ORDER BY created_at DESC LIMIT 60
+        """
+    )
+    with engine.connect() as conn:
+        rows = list(conn.execute(q, {"date": start.strftime('%Y-%m-%d %H:%M:%S')}).mappings())
+        totals = {r["name"]: int(r["value"]) for r in rows}
+        texts = [r["txt"] for r in conn.execute(q_texts, {"date": start.strftime('%Y-%m-%d %H:%M:%S')}).mappings()]
+    positive = totals.get("positive", 0)
+    neutral = totals.get("neutral", 0)
+    negative = totals.get("negative", 0)
+    all_total = positive + neutral + negative
+    p = lambda n: round((n / all_total) * 100) if all_total else 0
+    keywords = _top_keywords(texts, 3)
+    heuristic = f"Overall this period: Positive {p(positive)}%, Neutral {p(neutral)}%, Negative {p(negative)}%. Common themes include: {', '.join(keywords) if keywords else 'no clear recurring terms'}."
+    # Optional LLM
+    llm = _maybe_llm_summary(
+        f"Summarize student sentiment this {period}. Positive={positive}, Neutral={neutral}, Negative={negative}."
+        f" Mention the trend and reference common themes from journals/comments: {keywords}. Keep it under 2 sentences."
+    )
+    return {"summary": llm or heuristic}
+
+@app.get("/api/ai/mood-summary")
+def ai_mood_summary(period: str = Query("month", enum=["week","month","year"])):
+    now = datetime.now()
+    start = _period_start(now, period)
+    # Weekly averages via ENUM mapping
+    q = text(
+        """
+        SELECT DATE(ec.created_at) AS d,
+               ROUND(AVG(CASE ec.mood_level
+                    WHEN 'Very Sad' THEN 1 WHEN 'Sad' THEN 2 WHEN 'Neutral' THEN 3
+                    WHEN 'Good' THEN 4 WHEN 'Happy' THEN 5 WHEN 'Very Happy' THEN 6 WHEN 'Excellent' THEN 7 END),2) AS avgMood
+        FROM emotional_checkin ec
+        WHERE ec.created_at >= :date
+        GROUP BY DATE(ec.created_at)
+        ORDER BY d
+        """
+    )
+    q_texts = text(
+        """
+        SELECT comment AS txt FROM emotional_checkin
+        WHERE created_at >= :date AND comment IS NOT NULL AND comment <> ''
+        ORDER BY created_at DESC LIMIT 60
+        """
+    )
+    with engine.connect() as conn:
+        rows = list(conn.execute(q, {"date": start.strftime('%Y-%m-%d %H:%M:%S')}).mappings())
+        texts = [r["txt"] for r in conn.execute(q_texts, {"date": start.strftime('%Y-%m-%d %H:%M:%S')}).mappings()]
+    vals = [float(r["avgMood"] or 0) for r in rows]
+    trend = "stable"
+    if len(vals) >= 2:
+        diff = vals[-1] - vals[0]
+        if diff > 0.4: trend = "improving"
+        elif diff < -0.4: trend = "declining"
+    keywords = _top_keywords(texts, 3)
+    heuristic = f"Weekly mood appears {trend}. Notable themes from comments: {', '.join(keywords) if keywords else 'no clear recurring terms'}."
+    llm = _maybe_llm_summary(
+        f"Given a 1-7 mood scale (1=Very Sad..7=Excellent), summarize the mood trend this {period} as a counselor dashboard note."
+        f" Daily averages: {vals}. Trend should be one word (improving/declining/stable) and cite themes from comments: {keywords}."
+    )
+    return {"summary": llm or heuristic}
 
 @app.get("/api/appointments")
 def appointments():
@@ -329,7 +520,21 @@ def get_top_stats():
             (SELECT COUNT(*) FROM user WHERE role = 'student') AS total_students,
             (SELECT COUNT(*) FROM user WHERE is_active = TRUE) AS active_users,
             (SELECT COUNT(*) FROM alert WHERE severity IN ('high','critical') AND status='open') AS at_risk_students,
-            (SELECT ROUND(AVG(mood_level),2) FROM emotional_checkin) AS avg_wellness_score
+            (
+              SELECT ROUND(AVG(
+                CASE mood_level
+                    WHEN 'Very Sad' THEN 1
+                    WHEN 'Sad' THEN 2
+                    WHEN 'Neutral' THEN 3
+                    WHEN 'Good' THEN 4
+                    WHEN 'Happy' THEN 5
+                    WHEN 'Very Happy' THEN 6
+                    WHEN 'Excellent' THEN 7
+                    ELSE NULL
+                END
+              ),2)
+              FROM emotional_checkin
+            ) AS avg_wellness_score
     """
     with engine.connect() as conn:
         row = conn.execute(text(query)).mappings().first()
@@ -347,7 +552,18 @@ def get_attention_students():
         SELECT 
             u.name,
             COALESCE(a.severity, 'low') AS risk,
-            ROUND(AVG(e.mood_level), 1) AS score,
+            ROUND(AVG(
+                CASE e.mood_level
+                    WHEN 'Very Sad' THEN 1
+                    WHEN 'Sad' THEN 2
+                    WHEN 'Neutral' THEN 3
+                    WHEN 'Good' THEN 4
+                    WHEN 'Happy' THEN 5
+                    WHEN 'Very Happy' THEN 6
+                    WHEN 'Excellent' THEN 7
+                    ELSE NULL
+                END
+            ), 1) AS score,
             (SELECT name FROM user WHERE user_id = a.assigned_to) AS counselor,
             MAX(a.created_at) AS last_contact,
             GROUP_CONCAT(DISTINCT a.reason SEPARATOR ', ') AS concerns
