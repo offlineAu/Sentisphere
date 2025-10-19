@@ -97,6 +97,13 @@
   color: #0d8c4f;
 }
 
+/* Hover state for pills (e.g., messages icon button) */
+.pill:hover {
+  box-shadow: 0 6px 18px rgba(16, 24, 40, 0.08);
+  transform: translateY(-1px);
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+
 .tileRow {
   display: flex;
   align-items: flex-start;
@@ -145,6 +152,12 @@
   padding: 0.35rem 0.6rem 0.35rem 0.35rem;
 }
 
+.profileChip:hover {
+  border-color: #0d8c4f;
+  box-shadow: 0 6px 18px rgba(16, 24, 40, 0.08);
+  cursor: pointer;
+}
+
 .avatarCircle {
   width: 34px;
   height: 34px;
@@ -166,4 +179,32 @@
 .profileEmail {
   font-size: 0.75rem;
   color: #6b7280;
+}
+
+/* Unread badge (used on messages icon) */
+.badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  background: #ef4444;
+  color: #ffffff;
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 9999px;
+  border: 2px solid #ffffff;
+}
+
+/* Summary info icon image */
+.summaryIconImg {
+  width: 18px;
+  height: 18px;
+  display: inline-block;
+  object-fit: contain;
+  cursor: help;
+  /* green tint filter for dark/black glyphs */
+  filter: invert(41%) sepia(91%) saturate(481%) hue-rotate(94deg) brightness(92%) contrast(91%);
+  /* subtle nudge for better visual alignment with text baseline */
+  vertical-align: middle;
+  transform: translateY(-1px);
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { ChevronLeft, ChevronRight, Info, Users, CalendarCheck, CalendarClock, AlertTriangle, AlertCircle, Bell, Search, Mail } from "lucide-react";
+import { ChevronLeft, ChevronRight, Info, Users, CalendarCheck, CalendarClock, AlertTriangle, AlertCircle, Bell, Search, Mail, Percent as PercentIcon, Hash as HashIcon } from "lucide-react";
 import { motion } from "framer-motion";
 import {
   ResponsiveContainer,
@@ -106,9 +106,9 @@ const StatCard: React.FC<{
 const getMoodSummary = (data: any[]) => {
   if (!data.length) return "No mood data available for this period.";
   const avg = data.reduce((sum, d) => sum + d.avgMood, 0) / data.length;
-  if (avg >= 8) return "Overall, students are feeling very positive and motivated this period.";
-  if (avg >= 6) return "Students are generally in a good mood, with some positive trends.";
-  if (avg >= 4) return "Mood is mixed. Some students may be experiencing stress or challenges.";
+  if (avg >= 6.5) return "Overall, students are feeling very positive and motivated this period.";
+  if (avg >= 5.5) return "Students are generally in a good mood, with some positive trends.";
+  if (avg >= 4.5) return "Mood is mixed. Some students may be experiencing stress or challenges.";
   if (avg > 0) return "Many students are struggling emotionally this period.";
   return "No mood data available for this period.";
 };
@@ -120,6 +120,7 @@ export default function CounselorDashboard() {
   const { open } = useSidebar();
   const [moodTrend, setMoodTrend] = useState<any[]>([]);
   const [sentimentBreakdown, setSentimentBreakdown] = useState<any[]>([]);
+  const [checkinBreakdown, setCheckinBreakdown] = useState<{ mood: any[]; energy: any[]; stress: any[] } | null>(null);
   const [appointments, setAppointments] = useState<any[]>([]);
   const [appointmentLogs, setAppointmentLogs] = useState<any[]>([]);
   const [userActivities, setUserActivities] = useState<any[]>([]);
@@ -134,6 +135,34 @@ export default function CounselorDashboard() {
   const [highRiskFlags, setHighRiskFlags] = useState(0);
   const [thisWeekCheckins, setThisWeekCheckins] = useState(0);
   const [counselor, setCounselor] = useState<any | null>(null);
+  // AI summaries (optional: fetched from backend if available)
+  const [aiSentimentSummary, setAiSentimentSummary] = useState<string | null>(null);
+  const [aiMoodSummary, setAiMoodSummary] = useState<string | null>(null);
+  // Persisted label mode for Check-in Breakdown: 'count' | 'percent'
+  const [checkinLabelMode, setCheckinLabelMode] = useState<'count' | 'percent'>(() => {
+    const v = localStorage.getItem('checkinLabelMode');
+    return (v === 'percent' || v === 'count') ? v : 'count';
+  });
+  useEffect(() => {
+    localStorage.setItem('checkinLabelMode', checkinLabelMode);
+  }, [checkinLabelMode]);
+  // Messages unread count (UI badge only; wire up when API is available)
+  const [unreadMessages, setUnreadMessages] = useState<number>(0);
+
+  const moodScale = [
+    { value: 1, label: 'Very Sad' },
+    { value: 2, label: 'Sad' },
+    { value: 3, label: 'Neutral' },
+    { value: 4, label: 'Good' },
+    { value: 5, label: 'Happy' },
+    { value: 6, label: 'Very Happy' },
+    { value: 7, label: 'Excellent' },
+  ];
+
+  const labelForScore = (v: number) => {
+    const found = moodScale.find((m) => m.value === Math.round(v));
+    return found ? found.label : String(v);
+  };
 
   // Fetch from backend
   useEffect(() => {
@@ -194,6 +223,24 @@ export default function CounselorDashboard() {
       .then(res => res.json())
       .then(setCounselor)
       .catch(console.error);
+
+    // Unread messages count (badge)
+    fetch(`${API_BASE}/api/unread-messages`)
+      .then(res => res.ok ? res.json() : Promise.reject())
+      .then(data => {
+        if (typeof data?.count === 'number') setUnreadMessages(data.count);
+      })
+      .catch(() => setUnreadMessages(0));
+
+    // Initial AI summaries (safe to ignore errors)
+    fetch(`${API_BASE}/api/ai/sentiment-summary?period=${sentimentPeriod}`)
+      .then(res => res.ok ? res.json() : Promise.reject())
+      .then(d => setAiSentimentSummary(d?.summary || null))
+      .catch(() => setAiSentimentSummary(null));
+    fetch(`${API_BASE}/api/ai/mood-summary?period=${sentimentPeriod}`)
+      .then(res => res.ok ? res.json() : Promise.reject())
+      .then(d => setAiMoodSummary(d?.summary || null))
+      .catch(() => setAiMoodSummary(null));
   }, []);
 
   // Only run this on initial mount
@@ -211,6 +258,19 @@ export default function CounselorDashboard() {
       .then((res) => res.json())
       .then(setSentimentBreakdown)
       .catch(console.error);
+    fetch(`${API_BASE}/api/checkin-breakdown?period=${sentimentPeriod}`)
+      .then(res => res.json())
+      .then(setCheckinBreakdown)
+      .catch(console.error);
+    // Refresh AI summaries for the selected period
+    fetch(`${API_BASE}/api/ai/sentiment-summary?period=${sentimentPeriod}`)
+      .then(res => res.ok ? res.json() : Promise.reject())
+      .then(d => setAiSentimentSummary(d?.summary || null))
+      .catch(() => setAiSentimentSummary(null));
+    fetch(`${API_BASE}/api/ai/mood-summary?period=${sentimentPeriod}`)
+      .then(res => res.ok ? res.json() : Promise.reject())
+      .then(d => setAiMoodSummary(d?.summary || null))
+      .catch(() => setAiMoodSummary(null));
   }, [sentimentPeriod]);
 
   const parseWeekString = (weekStr: string) => {
@@ -252,8 +312,8 @@ export default function CounselorDashboard() {
 
   const maxPage = Math.ceil(sortedMoodTrend.length / itemsPerPage) - 1;
 
-  // AI summary for current page
-  const moodSummary = getMoodSummary(paginatedMoodTrend);
+  // AI summary for current page (fallback to heuristic if no AI)
+  const moodSummary = aiMoodSummary || getMoodSummary(paginatedMoodTrend);
 
   const DynamicMarginLineChart = ({ data }: any) => {
     const [bottomMargin, setBottomMargin] = useState(30);
@@ -286,6 +346,28 @@ export default function CounselorDashboard() {
           <Line type="monotone" dataKey="mood" stroke="#0d8c4f" />
         </LineChart>
       </ResponsiveContainer>
+    );
+  };
+
+  // Multiline tick for categorical axes to prevent label overlap
+  const MultiLineTick = ({ x, y, payload }: any) => {
+    const words = String(payload.value).split(' ');
+    return (
+      <g transform={`translate(${x},${y})`}>
+        {words.map((w: string, i: number) => (
+          <text
+            key={i}
+            x={0}
+            y={0}
+            dy={12 + i * 12}
+            textAnchor="middle"
+            fill="#6b7280"
+            fontSize={11}
+          >
+            {w}
+          </text>
+        ))}
+      </g>
     );
   };
 
@@ -323,23 +405,27 @@ export default function CounselorDashboard() {
     positive: "#22c55e", // emerald
     negative: "#ef4444", // red-500
     neutral: "#f59e0b",  // amber-500
-    mixed: "#10b981",    // teal/emerald blend
+    mixed: "#10b981",    // teal/emerald blend (not used in chart)
   };
 
   // Simple dark tooltip to mimic the sample's small percentage badge
   const CustomTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length) {
-      const percent = payload[0]?.payload?.percent ?? payload[0]?.value;
+      const p0 = payload[0];
+      const pl = p0?.payload || {};
+      const percent = typeof pl.percent === 'number' ? pl.percent : (typeof p0?.value === 'number' ? p0.value : 0);
+      const label = pl.label || pl.name;
+      const value = typeof pl.value === 'number' ? pl.value : undefined;
       return (
         <div style={{
           background: '#111827',
           color: '#fff',
-          padding: '2px 6px',
+          padding: '1px 4px',
           borderRadius: 4,
           fontSize: 12,
-          boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
+          boxShadow: 'none'
         }}>
-          {`${percent}%`}
+          {label ? `${label}: ${value ?? ''}${value !== undefined ? ' (' + percent + '%)' : percent + '%'}` : `${percent}%`}
         </div>
       );
     }
@@ -376,10 +462,13 @@ export default function CounselorDashboard() {
               <input className={styles.searchInput} placeholder="Search" />
             </div>
             <div className="flex items-center gap-3">
-              <button className={`${styles.pill} ${styles.pillSecondary}`} title="Messages">
+              <button className={`${styles.pill} ${styles.pillSecondary} relative`} title="Messages" onClick={() => (window.location.href = '/chat')}>
                 <Mail className="h-4 w-4 text-[#0d8c4f]" />
+                {unreadMessages > 0 && (
+                  <span className={styles.badge}>{unreadMessages}</span>
+                )}
               </button>
-              <div className={styles.profileChip}>
+              <div className={styles.profileChip} onClick={() => (window.location.href = '/profile')} role="button" tabIndex={0}>
                 <div className={styles.avatarCircle}>
                   {(counselor?.initials) || (counselor?.name ? counselor.name.split(' ').map((n: string) => n[0]).slice(0,2).join('') : 'C')}
                 </div>
@@ -437,32 +526,23 @@ export default function CounselorDashboard() {
               <div className={`${styles.cardHeader}`}>
                 <div className="flex items-center gap-2">
                   <h2 className={styles.sectionTitle}>Weekly Mood Analytics</h2>
-                  <button
-                    className={`${styles.pill} ${styles.pillSecondary}`}
-                    onClick={() => setShowMoodInfo((v) => !v)}
-                    aria-label="Show mood summary"
-                  >
-                    <Info className="h-5 w-5 text-[#0d8c4f]" />
-                  </button>
+                  <img
+                    src="https://cdn-icons-png.flaticon.com/512/8763/8763670.png"
+                    alt="summary"
+                    title={aiMoodSummary || getMoodSummary(paginatedMoodTrend)}
+                    className={styles.summaryIconImg}
+                  />
                 </div>
                 <div className="flex items-center gap-2">
                   <button
-                    className={`${styles.pill} ${styles.pillSecondary} ${
-                      page === 0
-                        ? "opacity-40 cursor-not-allowed"
-                        : ""
-                    }`}
+                    className={`${styles.pill} ${styles.pillSecondary} ${page === 0 ? "opacity-40 cursor-not-allowed" : ""}`}
                     onClick={() => setPage((p) => Math.max(p - 1, 0))}
                     disabled={page === 0}
                   >
                     <ChevronLeft className="h-5 w-5 text-[#0d8c4f]" />
                   </button>
                   <button
-                    className={`${styles.pill} ${styles.pillSecondary} ${
-                      page === maxPage
-                        ? "opacity-40 cursor-not-allowed"
-                        : ""
-                    }`}
+                    className={`${styles.pill} ${styles.pillSecondary} ${page === maxPage ? "opacity-40 cursor-not-allowed" : ""}`}
                     onClick={() => setPage((p) => Math.min(p + 1, maxPage))}
                     disabled={page === maxPage}
                   >
@@ -470,11 +550,7 @@ export default function CounselorDashboard() {
                   </button>
                 </div>
               </div>
-              {showMoodInfo && (
-                <div className="mb-2 p-3 bg-[#f5faff] rounded-lg text-[#2563eb] text-sm border border-[#b6e0fe]">
-                  <strong>AI Summary:</strong> {moodSummary}
-                </div>
-              )}
+              {/* AI summary now shown on hover over the info icon in the header */}
               <div className="h-[350px] flex items-center justify-center">
                 {paginatedMoodTrend.length === 0 ? (
                   <span className="text-gray-500 text-sm">No mood data available.</span>
@@ -513,8 +589,18 @@ export default function CounselorDashboard() {
                           );
                         }}
                       />
-                      <YAxis domain={["auto", "auto"]} stroke="#0d8c4f" />
-                      <RTooltip />
+                      <YAxis domain={[1, 7]} ticks={[1,2,3,4,5,6,7]} tickFormatter={(v) => labelForScore(Number(v))} stroke="#0d8c4f" />
+                      <RTooltip content={({ active, payload }) => {
+                        if (active && payload && payload.length) {
+                          const val = payload[0].value as number;
+                          return (
+                            <div style={{ background: '#111827', color: '#fff', padding: '4px 8px', borderRadius: 4, fontSize: 12 }}>
+                              {`${val.toFixed(2)} (${labelForScore(val)})`}
+                            </div>
+                          );
+                        }
+                        return null;
+                      }} />
                       <Area
                         type="monotone"
                         dataKey="avgMood"
@@ -537,6 +623,7 @@ export default function CounselorDashboard() {
                   </ResponsiveContainer>
                 )}
               </div>
+              <div className="mt-2 text-xs text-[#6b7280]">Scale: 1 = Very Sad, 2 = Sad, 3 = Neutral, 4 = Good, 5 = Happy, 6 = Very Happy, 7 = Excellent</div>
             </div>
           </div>
 
@@ -632,23 +719,34 @@ export default function CounselorDashboard() {
           </div>
         )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Sentiment Breakdown (2/3 width on desktop) */}
           <div className="lg:col-span-2">
             <div className={`${styles.card} p-4 w-full max-w-full`}>
               <div className={`${styles.cardHeader}`}>
-                <h2 className={styles.sectionTitle}>
-                  Sentiment Breakdown
-                </h2>
-                <div className="flex gap-2">
+                <div className="flex items-center gap-2">
+                  <h2 className={styles.sectionTitle}>Sentiment Breakdown</h2>
+                  <img
+                    src="https://cdn-icons-png.flaticon.com/512/8763/8763670.png"
+                    alt="summary"
+                    title={(function(){
+                      const order = ["positive","neutral","negative"] as const;
+                      const incoming: Record<string, number> = Object.fromEntries(
+                        sentimentBreakdown.map((d: any) => [String(d.name).toLowerCase(), Number(d.value) || 0])
+                      );
+                      const total = order.reduce((s,k)=>s+(incoming[k]||0),0);
+                      if(!total) return 'No sentiment data.';
+                      const pct = (k: typeof order[number]) => Math.round(((incoming[k]||0)/total)*100);
+                      const fallback = `Overall this period: Positive ${pct('positive')}%, Neutral ${pct('neutral')}%, Negative ${pct('negative')}%`;
+                      return aiSentimentSummary || fallback;})()}
+                    className={styles.summaryIconImg}
+                  />
+                </div>
+                <div className="flex justify-end gap-2">
                   {(["week", "month", "year"] as const).map((p) => (
                     <button
                       key={p}
-                      className={`${styles.pill} ${
-                        sentimentPeriod === p
-                          ? styles.pillPrimary
-                          : styles.pillSecondary
-                      }`}
+                      className={`${styles.pill} ${sentimentPeriod === p ? styles.pillPrimary : styles.pillSecondary}`}
                       onClick={() => setSentimentPeriod(p)}
                     >
                       {periodLabels[p]}
@@ -656,18 +754,19 @@ export default function CounselorDashboard() {
                   ))}
                 </div>
               </div>
+              {/* summary tooltip now on the icon beside the title above */}
               <div className="flex items-center justify-center">
                 {(() => {
-                  // Normalize to fixed categories
-                  const order = ["positive", "negative", "neutral", "mixed"] as const;
-                  const map: Record<string, number> = Object.fromEntries(
+                  // Normalize to fixed categories (exclude 'mixed')
+                  const order = ["positive", "neutral", "negative"] as const;
+                  const incoming: Record<string, number> = Object.fromEntries(
                     sentimentBreakdown.map((d: any) => [String(d.name).toLowerCase(), Number(d.value) || 0])
                   );
-                  const total = Object.values(map).reduce((a: number, b: number) => a + b, 0);
+                  const total = order.reduce((sum, k) => sum + (incoming[k] || 0), 0);
                   const data = order.map((k) => ({
                     name: k,
-                    value: map[k] || 0,
-                    percent: total > 0 ? Math.round(((map[k] || 0) / total) * 100) : 0,
+                    value: incoming[k] || 0,
+                    percent: total > 0 ? Math.round(((incoming[k] || 0) / total) * 100) : 0,
                   }));
                   if (total === 0) return <span className="text-[#6b7280] text-sm">No sentiment data available for this period.</span>;
                   // Determine dynamic chart height based on tallest bar percent to avoid clipping labels
@@ -675,7 +774,7 @@ export default function CounselorDashboard() {
                   const chartHeight = maxPercent > 85 ? 340 : maxPercent > 65 ? 300 : 280;
                   return (
                     <ResponsiveContainer width="100%" height={chartHeight}>
-                      <BarChart data={data} margin={{ top: 30, right: 10, bottom: 10, left: 10 }} barCategoryGap={4} barGap={0}>
+                      <BarChart data={data} margin={{ top: 20, right: 8, bottom: 10, left: 8 }} barCategoryGap={6} barGap={0}>
                         <defs>
                           <linearGradient id="posGrad" x1="0" y1="0" x2="0" y2="1">
                             <stop offset="0%" stopColor="#34d399" />
@@ -707,12 +806,12 @@ export default function CounselorDashboard() {
                           tickLine={false}
                         />
                         <YAxis hide domain={[0, (dataMax: number) => (typeof dataMax === 'number' ? dataMax : 0) * 1.15]} />
-                        <RTooltip content={<CustomTooltip />} />
+                        <RTooltip content={<CustomTooltip />} wrapperStyle={{ padding: 0, border: 'none', background: 'transparent' }} />
                         <Bar
                           dataKey="value"
                           radius={[50, 50, 50, 50]}
-                          barSize={72}
-                          background={{ fill: 'url(#hatch)' }}
+                          barSize={60}
+                          background={{ fill: 'transparent' }}
                           isAnimationActive
                           animationDuration={800}
                           style={{ cursor: 'default' }}
@@ -721,7 +820,7 @@ export default function CounselorDashboard() {
                             dataKey="percent"
                             position="top"
                             fill="#6b7280"
-                            offset={6}
+                            offset={4}
                             formatter={(label: React.ReactNode) => `${typeof label === 'number' ? label : Number(label ?? 0)}%`}
                           />
                           {data.map((entry, index) => {
@@ -732,7 +831,7 @@ export default function CounselorDashboard() {
                               : key === 'positive' ? 'url(#posGrad)'
                               : key === 'negative' ? 'url(#negGrad)'
                               : key === 'neutral'  ? 'url(#neuGrad)'
-                              : 'url(#mixGrad)';
+                              : 'url(#neuGrad)';
                             return <Cell key={`c-${index}`} fill={fill} />;
                           })}
                         </Bar>
@@ -740,6 +839,93 @@ export default function CounselorDashboard() {
                     </ResponsiveContainer>
                   );
                 })()}
+              </div>
+              {/* Check-in Breakdown: Mood, Energy, Stress */}
+              <div className="mt-6 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-semibold text-[#0d8c4f] text-base">Check-in Breakdown</h3>
+                  <div className="flex items-center gap-1 bg-[#f7fafd] rounded-xl p-1">
+                    <button
+                      className={`${styles.pill} ${checkinLabelMode === 'count' ? styles.pillPrimary : styles.pillSecondary}`}
+                      onClick={() => setCheckinLabelMode('count')}
+                      aria-label="Show counts"
+                      title="Show counts"
+                    >
+                      <HashIcon className="h-4 w-4" />
+                    </button>
+                    <button
+                      className={`${styles.pill} ${checkinLabelMode === 'percent' ? styles.pillPrimary : styles.pillSecondary}`}
+                      onClick={() => setCheckinLabelMode('percent')}
+                      aria-label="Show percentages"
+                      title="Show percentages"
+                    >
+                      <PercentIcon className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  {(() => {
+                    const sections = [
+                      {
+                        title: 'Mood',
+                        key: 'mood' as const,
+                        order: ['Very Sad','Sad','Neutral','Good','Happy','Very Happy', 'Excellent'],
+                      },
+                      {
+                        title: 'Energy',
+                        key: 'energy' as const,
+                        order: ['Very Low','Low','Moderate','High','Very High'],
+                      },
+                      {
+                        title: 'Stress',
+                        key: 'stress' as const,
+                        order: ['No Stress','Low Stress','Moderate','High Stress','Very High Stress'],
+                      },
+                    ];
+                    return sections.map((sec) => {
+                      const raw = (checkinBreakdown?.[sec.key] || []) as Array<{label: string; value: number}>;
+                      const map = Object.fromEntries(raw.map((r) => [r.label, r.value]));
+                      const total = Object.values(map).reduce((a: number, b: number) => a + (Number(b) || 0), 0);
+                      const d = sec.order.map((label) => ({
+                        label,
+                        value: map[label] || 0,
+                        percent: total > 0 ? Math.round(((map[label] || 0) / total) * 100) : 0,
+                      }));
+                      return (
+                        <div key={sec.title} className="bg-[#f7fafd] rounded-xl p-3">
+                          <div className="text-sm font-medium text-[#0d8c4f] mb-2">{sec.title}</div>
+                          <div style={{ height: 180 }}>
+                            <ResponsiveContainer width="100%" height="100%">
+                              <BarChart data={d} margin={{ top: 6, right: 4, bottom: 14, left: 0 }} barCategoryGap={4}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#eef2f7" />
+                                <XAxis
+                                  dataKey="label"
+                                  interval={0}
+                                  height={46}
+                                  tickLine={false}
+                                  axisLine={false}
+                                  tick={<MultiLineTick />}
+                                />
+                                <YAxis hide domain={[0, (dataMax: number) => (typeof dataMax === 'number' ? dataMax : 0) * 1.18]} />
+                                <RTooltip content={<CustomTooltip />} wrapperStyle={{ padding: 0, border: 'none', background: 'transparent' }} />
+                                <Bar dataKey="value" radius={[8,8,8,8]} barSize={22} isAnimationActive animationDuration={600}>
+                                  {checkinLabelMode === 'percent' ? (
+                                    <LabelList dataKey="percent" position="top" fill="#6b7280" offset={4} formatter={(v: any) => `${Number(v||0)}%`} />
+                                  ) : (
+                                    <LabelList dataKey="value" position="top" fill="#6b7280" offset={4} formatter={(v: any) => `${Number(v||0)}`} />
+                                  )}
+                                  {d.map((entry, idx) => (
+                                    <Cell key={idx} fill={sec.key === 'mood' ? '#10b981' : sec.key === 'energy' ? '#3b82f6' : '#ef4444'} />
+                                  ))}
+                                </Bar>
+                              </BarChart>
+                            </ResponsiveContainer>
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
               </div>
             </div>
           </div>
