@@ -298,6 +298,27 @@ def send_message(conversation_id: int, message: MessageIn):
             "content": message.content,
             "timestamp": str(datetime.now())
         }
+
+# --- Mark messages as read in a conversation ---
+@app.post("/api/conversations/{conversation_id}/read")
+def mark_conversation_read(conversation_id: int, user_id: int = Query(...)):
+    """
+    Mark all messages in the conversation as read for the given user by setting is_read = 1
+    for messages not sent by the user (i.e., incoming messages to the user).
+    """
+    update_q = text(
+        """
+        UPDATE messages
+        SET is_read = 1
+        WHERE conversation_id = :cid
+          AND sender_id <> :uid
+          AND (is_read = 0 OR is_read IS NULL)
+        """
+    )
+    with engine.connect() as conn:
+        result = conn.execute(update_q, {"cid": conversation_id, "uid": user_id})
+        conn.commit()
+        return {"updated": result.rowcount}
     
 # --- Reports APIs ---
 
