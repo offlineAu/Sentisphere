@@ -11,6 +11,7 @@ import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Link } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 
 const stats = [
@@ -80,13 +81,13 @@ export default function LearnScreen() {
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
 
   // Saved dialog state + animations
-  const [savedDialog, setSavedDialog] = useState<{ title: string } | null>(null);
+  const [savedDialog, setSavedDialog] = useState<{ title?: string; action: 'saved' | 'removed' } | null>(null);
   const dlgOpacity = useRef(new Animated.Value(0)).current;
   const dlgScale = useRef(new Animated.Value(0.98)).current;
   const dlgTranslateY = useRef(new Animated.Value(8)).current;
   const dlgTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const showSavedDialog = (title: string) => {
-    setSavedDialog({ title });
+  const showSavedDialog = (payload: { title?: string; action: 'saved' | 'removed' }) => {
+    setSavedDialog(payload);
     dlgOpacity.setValue(0);
     dlgScale.setValue(0.98);
     dlgTranslateY.setValue(8);
@@ -96,7 +97,7 @@ export default function LearnScreen() {
       Animated.timing(dlgTranslateY, { toValue: 0, duration: 200, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
     ]).start();
     if (dlgTimer.current) clearTimeout(dlgTimer.current);
-    dlgTimer.current = setTimeout(() => hideSavedDialog(), 1800);
+    dlgTimer.current = setTimeout(() => hideSavedDialog(), 1600);
   };
   const hideSavedDialog = () => {
     Animated.parallel([
@@ -114,18 +115,19 @@ export default function LearnScreen() {
   const toggleSave = (id: string) => {
     const wasSaved = savedIds.has(id);
     const next = new Set(savedIds);
-    let added = false;
     if (wasSaved) {
       next.delete(id);
     } else {
       next.add(id);
-      added = true;
     }
     setSavedIds(next);
-    if (added) {
+    const c = courses.find((x) => x.id === id);
+    if (wasSaved) {
+      if (Platform.OS !== 'web') { try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning); } catch {} }
+      showSavedDialog({ title: c?.title, action: 'removed' });
+    } else {
       if (Platform.OS !== 'web') { try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {} }
-      const c = courses.find((x) => x.id === id);
-      showSavedDialog(c?.title ?? 'Saved to your list');
+      showSavedDialog({ title: c?.title, action: 'saved' });
     }
   };
 
@@ -229,7 +231,9 @@ export default function LearnScreen() {
               <View style={styles.metaItem}><Icon name="book-open" size={16} color={palette.muted} /><ThemedText style={[styles.metaText, { color: palette.muted }]}>{item.lessons}</ThemedText></View>
             </View>
           </View>
-          <Button title="Start Learning" />
+          <Link href={{ pathname: '/(student)/(tabs)/learn/[id]', params: { id: item.id } }} asChild>
+            <Button title="Start Learning" />
+          </Link>
         </CardContent>
       </Card>
     );
@@ -240,27 +244,11 @@ export default function LearnScreen() {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         {/* Header */}
         <View style={styles.headerWrap}>
+          <View style={styles.headerIcon}>
+            <Icon name="book-open" size={18} color={palette.muted} />
+          </View>
           <ThemedText type="title" style={styles.pageTitle}>Learn & Grow</ThemedText>
           <ThemedText style={[styles.pageSubtitle, { color: palette.muted }]}>Expand your knowledge with our comprehensive mental wellness courses and resources</ThemedText>
-        </View>
-
-        {/* Stats grid */}
-        <View style={styles.statsGrid}>
-          {stats.map((s) => (
-            <View key={s.key} style={styles.statItem}>
-              <Card>
-                <CardContent style={styles.statContent}>
-                  <View style={[styles.statIcon, { backgroundColor: s.bg }]}>
-                    <Icon name={s.icon as any} size={16} color={s.color} />
-                  </View>
-                  <ThemedText style={styles.statValue}>{s.value}</ThemedText>
-                  <ThemedText style={[styles.statLabel, { color: palette.muted }]} numberOfLines={2}>
-                    {s.label}
-                  </ThemedText>
-                </CardContent>
-              </Card>
-            </View>
-          ))}
         </View>
 
         {/* Continue Learning */}
@@ -352,23 +340,48 @@ export default function LearnScreen() {
           ]}
         >
           <Pressable
-            accessibilityLabel="View saved topics"
-            onPress={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync(); } catch {} } onViewSaved(); }}
+            accessibilityLabel={savedDialog.action === 'saved' ? 'View saved topics' : 'Dismiss notification'}
+            onPress={() => {
+              if (Platform.OS !== 'web') { try { Haptics.selectionAsync(); } catch {} }
+              savedDialog.action === 'saved' ? onViewSaved() : hideSavedDialog();
+            }}
             style={styles.savedDialogCard}
           >
-            <View style={[styles.savedDialogIcon, { backgroundColor: palette.learningAccent }]}>
-              <Icon name="bookmark" size={16} color="#ffffff" fill="#ffffff" />
+            <View
+              style={[
+                styles.savedDialogIcon,
+                savedDialog.action === 'removed'
+                  ? { backgroundColor: '#FEE2E2' }
+                  : { backgroundColor: palette.learningAccent },
+              ]}
+            >
+              <Icon
+                name="bookmark"
+                size={14}
+                color={savedDialog.action === 'removed' ? '#B91C1C' : '#FFFFFF'}
+              />
             </View>
             <View style={styles.savedDialogTextWrap}>
-              <ThemedText style={styles.savedDialogTitle}>Saved</ThemedText>
-              <ThemedText style={[styles.savedDialogSubtitle, { color: palette.muted }]} numberOfLines={1}>
-                {savedDialog?.title}
+              <ThemedText
+                style={[
+                  styles.savedDialogTitle,
+                  savedDialog.action === 'removed' ? { color: '#B91C1C' } : null,
+                ]}
+              >
+                {savedDialog.action === 'removed' ? 'Removed' : 'Saved'}
               </ThemedText>
+              {!!savedDialog.title && (
+                <ThemedText style={[styles.savedDialogSubtitle, { color: palette.muted }]} numberOfLines={1}>
+                  {savedDialog.title}
+                </ThemedText>
+              )}
             </View>
-            <View style={styles.savedDialogAction}>
-              <ThemedText style={[styles.savedDialogActionText, { color: palette.learningAccent }]}>View</ThemedText>
-              <Icon name="arrow-right" size={14} color={palette.learningAccent} />
-            </View>
+            {savedDialog.action === 'saved' && (
+              <View style={styles.savedDialogAction}>
+                <ThemedText style={[styles.savedDialogActionText, { color: palette.learningAccent }]}>View</ThemedText>
+                <Icon name="arrow-right" size={14} color={palette.learningAccent} />
+              </View>
+            )}
           </Pressable>
         </Animated.View>
       )}
@@ -379,9 +392,10 @@ export default function LearnScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   scrollContent: { padding: 16, gap: 16, paddingBottom: 32 },
-  headerWrap: { alignItems: 'center', gap: 6, marginTop: 4 },
+  headerWrap: { alignItems: 'center', gap: 4, marginTop: 6 },
+  headerIcon: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#E5E7EB' },
   pageTitle: { fontSize: 28, fontFamily: 'Inter_700Bold', color: '#111827', textAlign: 'center' },
-  pageSubtitle: { fontSize: 14, textAlign: 'center' },
+  pageSubtitle: { fontSize: 13, lineHeight: 18, textAlign: 'center', maxWidth: 360 },
 
   // Stats
   statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, justifyContent: 'space-between' },

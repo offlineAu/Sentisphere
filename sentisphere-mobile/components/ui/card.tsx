@@ -7,7 +7,7 @@ export function Card({ style, children, ...rest }: ViewProps) {
   const scheme = useColorScheme() ?? 'light';
   const palette = Colors[scheme] as any;
   const baseStyle = {
-    borderRadius: 12,
+    borderRadius: 24,
     backgroundColor: palette.card ?? Colors.light.background,
     overflow: 'hidden' as const,
   } as const;
@@ -48,7 +48,7 @@ export function CardContent({ style, ...rest }: ViewProps) {
 
 const styles = StyleSheet.create({
   shadowContainer: {
-    borderRadius: 12,
+    borderRadius: 24,
   },
   content: {
     padding: 12,

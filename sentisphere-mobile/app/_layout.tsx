@@ -58,6 +58,7 @@ export default function RootLayout() {
       }}
       >
         <Stack screenOptions={{ contentStyle: { backgroundColor: Colors.light.background } }}>
+          <Stack.Screen name="index" options={{ headerShown: false }} />
           <Stack.Screen name="(student)" options={{ headerShown: false }} />
           <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
         </Stack>

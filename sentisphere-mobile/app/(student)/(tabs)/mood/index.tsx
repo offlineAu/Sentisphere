@@ -115,14 +115,6 @@ export default function MoodScreen() {
     setSubmitted(false);
   };
 
-  const ProgressBar = ({ value }: { value: number }) => (
-    <View style={styles.progressBar}>
-      <View style={[styles.progressFill, { width: `${Math.max(0, Math.min(100, value))}%` }]}>
-        <LinearGradient colors={["#A78BFA", "#7C3AED"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFillObject as any} />
-      </View>
-    </View>
-  );
-
   if (submitted) {
     return (
       <ThemedView style={[styles.container, { alignItems: 'center', justifyContent: 'center' }]}> 
@@ -241,11 +233,6 @@ export default function MoodScreen() {
                 </View>
               ))}
             </View>
-            <View style={styles.progressRow}>
-              <ThemedText style={[styles.progressLabel, { color: palette.muted }]}>Monthly Goal Progress</ThemedText>
-              <ThemedText style={styles.progressValue}>60%</ThemedText>
-            </View>
-            <ProgressBar value={60} />
           </CardContent>
         </Card>
 
