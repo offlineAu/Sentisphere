@@ -1,5 +1,6 @@
 import { Tabs } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
+import { Icon } from '@/components/ui/icon';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors } from '@/constants/theme';
 import { View, Pressable, StyleSheet, Platform, Animated, Easing } from 'react-native';
@@ -15,7 +16,7 @@ function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const [barWidth, setBarWidth] = useState(0);
 
   // Filter out routes explicitly hidden via href: null (expo-router)
-  const hiddenNames = new Set(['chat/index', 'chat/[id]', 'journal/new', 'journal/[id]']);
+  const hiddenNames = new Set(['chat/index', 'chat/[id]', 'journal/new', 'journal/[id]', 'learn/[id]']);
   const visibleRoutes = state.routes.filter((route) => {
     const opts = descriptors[route.key]?.options as any;
     if (opts?.href === null) return false;
@@ -123,7 +124,7 @@ function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
           let icon: any = 'home';
           if (n.includes('mood')) icon = 'heart';
           else if (n.includes('journal')) icon = 'book-open';
-          else if (n.includes('learn')) icon = 'book';
+          else if (n.includes('learn')) icon = 'graduation-cap';
 
           // Route animation
           const anim = animsRef.current[route.key] ?? new Animated.Value(isFocused ? 1 : 0);
@@ -148,7 +149,7 @@ function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
                 style={[styles.activeBg, { backgroundColor: palette.tint, opacity: anim, transform: [{ scale: bgScale }] }]}
               />
               <Animated.View style={{ transform: [{ scale }, { translateY }], opacity: iconOpacity }}>
-                <Feather name={icon} size={22} color={isFocused ? '#FFFFFF' : palette.icon} />
+                <Icon name={icon} size={22} color={isFocused ? '#FFFFFF' : palette.icon} />
               </Animated.View>
             </Pressable>
           );
@@ -252,6 +253,7 @@ export default function StudentTabsLayout() {
           tabBarIcon: ({ color, size }) => <Feather name="book" color={color} size={size} />,
         }}
       />
+      <Tabs.Screen name="learn/[id]" options={{ href: null }} />
       {/* Hide pages from appearing as tabs; keep them routable */}
       <Tabs.Screen name="chat/index" options={{ href: null, headerShown: false }} />
       <Tabs.Screen name="chat/[id]" options={{ href: null, headerShown: false }} />

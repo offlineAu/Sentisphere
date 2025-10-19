@@ -11,6 +11,7 @@ import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Link } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 
 const stats = [
@@ -230,7 +231,9 @@ export default function LearnScreen() {
               <View style={styles.metaItem}><Icon name="book-open" size={16} color={palette.muted} /><ThemedText style={[styles.metaText, { color: palette.muted }]}>{item.lessons}</ThemedText></View>
             </View>
           </View>
-          <Button title="Start Learning" />
+          <Link href={{ pathname: '/(student)/(tabs)/learn/[id]', params: { id: item.id } }} asChild>
+            <Button title="Start Learning" />
+          </Link>
         </CardContent>
       </Card>
     );

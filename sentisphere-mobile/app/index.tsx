@@ -1,6 +1,7 @@
 import React, { useRef, useEffect } from 'react'
-import { View, Text, StyleSheet, Pressable, Animated, Easing, Platform, Image as RNImage } from 'react-native'
+import { View, Text, StyleSheet, Pressable, Animated, Easing, Platform } from 'react-native'
 import { LinearGradient } from 'expo-linear-gradient'
+import { Asset } from 'expo-asset'
 import { router } from 'expo-router'
 import { Colors } from '@/constants/theme'
 import { Icon } from '@/components/ui/icon'
@@ -10,7 +11,7 @@ import { SvgUri } from 'react-native-svg'
 export default function SplashIntro() {
   const palette = Colors.light as any
   const logoSource: any = require('@/assets/images/logo.svg')
-  const logoUri = RNImage.resolveAssetSource(logoSource)?.uri
+  const logoUri = Asset.fromModule(logoSource).uri
 
   // subtle pulse for center glyph
   const pulse = useRef(new Animated.Value(0)).current

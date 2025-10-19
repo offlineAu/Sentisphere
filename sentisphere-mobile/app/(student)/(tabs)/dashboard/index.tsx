@@ -41,10 +41,9 @@ export default function EnhancedDashboardScreen() {
   const [journalCount] = useState(12)
   const [weeklyMoodAverage] = useState(7.2)
   const [currentStreak] = useState(5)
-  const { width: winWidth } = useWindowDimensions()
-  const isNarrow = winWidth < 400
-  const tileWidthWeb = (winWidth - GRID_PADDING * 2 - CARD_CONTENT_PADDING * 2 - QUICK_GAP) / 2
-  const qaWidthStyle = Platform.select({ web: { width: tileWidthWeb }, default: { width: isNarrow ? "100%" : "48%" } }) as any
+  const [gridW, setGridW] = useState(0)
+  const measuredTileW = gridW > 0 ? Math.floor((gridW - QUICK_GAP) / 2) : 0
+  const qaSizeStyle: any = measuredTileW ? { width: measuredTileW, height: measuredTileW } : { width: '48%', height: 160 }
 
   // Feature flags for layout
   const showLegacySections = false
@@ -202,7 +201,7 @@ export default function EnhancedDashboardScreen() {
     entrance.quick.setValue(0)
     entrance.activity.setValue(0)
     // sequence
-    const seq = [entrance.greet, entrance.mood, entrance.inspire, entrance.stat, entrance.quick, entrance.activity].map((v, idx) =>
+    const seq = [entrance.greet, entrance.inspire, entrance.quick, entrance.mood, entrance.stat, entrance.activity].map((v, idx) =>
       Animated.timing(v, {
         toValue: 1,
         duration: 340,
@@ -322,25 +321,6 @@ export default function EnhancedDashboardScreen() {
         </Animated.View>
         <View style={styles.sectionSpacer} />
 
-        <Animated.View style={makeFadeUp(entrance.mood)}>
-          <Card style={styles.cardShadow}>
-            <LinearGradient colors={["#d8b4fe", "#a5b4fc", "#93c5fd"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.moodGradient}>
-              <CardContent style={styles.moodContent}>
-                <View style={styles.moodHeader}>
-                  <ThemedText style={styles.moodTitle}>State of mood</ThemedText>
-                  <View style={styles.moodAvatar}><Icon name="user" size={16} color="rgba(255,255,255,0.95)" /></View>
-                </View>
-                <ThemedText style={styles.moodPrompt}>How are you feeling now?</ThemedText>
-                <Link href="/(student)/(tabs)/mood" asChild>
-                  <Pressable onPressIn={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} } }} style={styles.moodButton}>
-                    <ThemedText style={styles.moodButtonText}>Log Mood</ThemedText>
-                  </Pressable>
-                </Link>
-              </CardContent>
-            </LinearGradient>
-          </Card>
-        </Animated.View>
-
         {/* Enhanced Daily Inspiration with Gradient */}
         <Animated.View style={makeFadeUp(entrance.inspire)}>
           <Card style={[styles.inspirationCard, styles.cardShadow, styles.inspirationShadow]}>
@@ -384,7 +364,7 @@ export default function EnhancedDashboardScreen() {
               </View>
               <ThemedText type="subtitle" style={styles.sectionTitle}>Quick Actions</ThemedText>
             </View>
-            <View style={styles.quickGrid}>
+            <View style={styles.quickGrid} onLayout={(e) => setGridW(e.nativeEvent.layout.width)}>
               <Link href="/(student)/(tabs)/mood" asChild>
                 <Pressable
                   onHoverIn={qa1.onHoverIn}
@@ -397,19 +377,20 @@ export default function EnhancedDashboardScreen() {
                       styles.cardShadow,
                       hovered && styles.hoverLift,
                       pressed && styles.pressScale,
-                      qaWidthStyle,
+                      qaSizeStyle,
                     ])
                   }
                 >
-                  <Animated.View style={qa1.animStyle}>
+                  <Animated.View style={[{ flex: 1 }, qa1.animStyle]}>
                     <LinearGradient colors={["#8B5CF6", "#6D28D9"]} style={styles.tileGradient} pointerEvents="none" />
-                    <View style={[styles.tileOrb, { top: -20, right: -14 }]} />
-                    <View style={[styles.tileOrbSm, { bottom: -12, left: -10 }]} />
-                    <View style={styles.qaTileInner}>
-                      <View style={styles.qaTextBlock}>
-                        <View style={styles.iconCircle}><Icon name="brain" size={20} color="#4C1D95" /></View>
-                        <ThemedText style={styles.qaTitle}>Check Mood</ThemedText>
-                        <ThemedText style={styles.qaSubtitle} numberOfLines={2} ellipsizeMode="tail">How are you feeling today?</ThemedText>
+                    <View style={styles.actionContent} pointerEvents="none">
+                      <View style={styles.actionHeaderRow}>
+                        <View style={styles.iconCircleLg}><Icon name="brain" size={26} color="#4C1D95" /></View>
+                        <View style={styles.actionArrow}><Icon name="arrow-right" size={16} color={"#1F2937"} /></View>
+                      </View>
+                      <View>
+                        <ThemedText style={styles.actionTitle}>Check Mood</ThemedText>
+                        <ThemedText style={styles.actionSubtitle}>Quick daily check-in</ThemedText>
                       </View>
                     </View>
                   </Animated.View>
@@ -428,19 +409,20 @@ export default function EnhancedDashboardScreen() {
                       styles.cardShadow,
                       hovered && styles.hoverLift,
                       pressed && styles.pressScale,
-                      qaWidthStyle,
+                      qaSizeStyle,
                     ])
                   }
                 >
-                  <Animated.View style={qa2.animStyle}>
+                  <Animated.View style={[{ flex: 1 }, qa2.animStyle]}>
                     <LinearGradient colors={["#34D399", "#0d8c4f"]} style={styles.tileGradient} pointerEvents="none" />
-                    <View style={[styles.tileOrb, { top: -20, right: -14 }]} />
-                    <View style={[styles.tileOrbSm, { bottom: -12, left: -10 }]} />
-                    <View style={styles.qaTileInner}>
-                      <View style={styles.qaTextBlock}>
-                        <View style={styles.iconCircle}><Icon name="book-open" size={20} color="#065F46" /></View>
-                        <ThemedText style={styles.qaTitle}>Write Journal</ThemedText>
-                        <ThemedText style={styles.qaSubtitle} numberOfLines={2} ellipsizeMode="tail">Reflect on your thoughts</ThemedText>
+                    <View style={styles.actionContent} pointerEvents="none">
+                      <View style={styles.actionHeaderRow}>
+                        <View style={styles.iconCircleLg}><Icon name="book-open" size={26} color="#065F46" /></View>
+                        <View style={styles.actionArrow}><Icon name="arrow-right" size={16} color={"#1F2937"} /></View>
+                      </View>
+                      <View>
+                        <ThemedText style={styles.actionTitle}>Write Journal</ThemedText>
+                        <ThemedText style={styles.actionSubtitle}>Reflect in minutes</ThemedText>
                       </View>
                     </View>
                   </Animated.View>
@@ -459,19 +441,20 @@ export default function EnhancedDashboardScreen() {
                       styles.cardShadow,
                       hovered && styles.hoverLift,
                       pressed && styles.pressScale,
-                      qaWidthStyle,
+                      qaSizeStyle,
                     ])
                   }
                 >
-                  <Animated.View style={qa3.animStyle}>
+                  <Animated.View style={[{ flex: 1 }, qa3.animStyle]}>
                     <LinearGradient colors={["#60A5FA", "#2563EB"]} style={styles.tileGradient} pointerEvents="none" />
-                    <View style={[styles.tileOrb, { top: -20, right: -14 }]} />
-                    <View style={[styles.tileOrbSm, { bottom: -12, left: -10 }]} />
-                    <View style={styles.qaTileInner}>
-                      <View style={styles.qaTextBlock}>
-                        <View style={styles.iconCircle}><Icon name="calendar" size={20} color="#1D4ED8" /></View>
-                        <ThemedText style={styles.qaTitle}>Book Session</ThemedText>
-                        <ThemedText style={styles.qaSubtitle} numberOfLines={2} ellipsizeMode="tail">Schedule with counselor</ThemedText>
+                    <View style={styles.actionContent} pointerEvents="none">
+                      <View style={styles.actionHeaderRow}>
+                        <View style={styles.iconCircleLg}><Icon name="calendar" size={26} color="#1D4ED8" /></View>
+                        <View style={styles.actionArrow}><Icon name="arrow-right" size={16} color={"#1F2937"} /></View>
+                      </View>
+                      <View>
+                        <ThemedText style={styles.actionTitle}>Book Session</ThemedText>
+                        <ThemedText style={styles.actionSubtitle}>Schedule counseling</ThemedText>
                       </View>
                     </View>
                   </Animated.View>
@@ -490,19 +473,20 @@ export default function EnhancedDashboardScreen() {
                       styles.cardShadow,
                       hovered && styles.hoverLift,
                       pressed && styles.pressScale,
-                      qaWidthStyle,
+                      qaSizeStyle,
                     ])
                   }
                 >
-                  <Animated.View style={qa4.animStyle}>
+                  <Animated.View style={[{ flex: 1 }, qa4.animStyle]}>
                     <LinearGradient colors={["#5EEAD4", "#0D9488"]} style={styles.tileGradient} pointerEvents="none" />
-                    <View style={[styles.tileOrb, { top: -20, right: -14 }]} />
-                    <View style={[styles.tileOrbSm, { bottom: -12, left: -10 }]} />
-                    <View style={styles.qaTileInner}>
-                      <View style={styles.qaTextBlock}>
-                        <View style={styles.iconCircle}><Icon name="message-square" size={20} color="#0F766E" /></View>
-                        <ThemedText style={styles.qaTitle}>AI Chat</ThemedText>
-                        <ThemedText style={styles.qaSubtitle} numberOfLines={2} ellipsizeMode="tail">Get instant support</ThemedText>
+                    <View style={styles.actionContent} pointerEvents="none">
+                      <View style={styles.actionHeaderRow}>
+                        <View style={styles.iconCircleLg}><Icon name="message-square" size={26} color="#0F766E" /></View>
+                        <View style={styles.actionArrow}><Icon name="arrow-right" size={16} color={"#1F2937"} /></View>
+                      </View>
+                      <View>
+                        <ThemedText style={styles.actionTitle}>AI Chat</ThemedText>
+                        <ThemedText style={styles.actionSubtitle}>Get instant support</ThemedText>
                       </View>
                     </View>
                   </Animated.View>
@@ -510,6 +494,25 @@ export default function EnhancedDashboardScreen() {
               </Link>
             </View>
           </CardContent>
+          </Card>
+        </Animated.View>
+
+        <Animated.View style={makeFadeUp(entrance.mood)}>
+          <Card style={styles.cardShadow}>
+            <LinearGradient colors={["#d8b4fe", "#a5b4fc", "#93c5fd"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.moodGradient}>
+              <CardContent style={styles.moodContent}>
+                <View style={styles.moodHeader}>
+                  <ThemedText style={styles.moodTitle}>State of mood</ThemedText>
+                  <View style={styles.moodAvatar}><Icon name="user" size={16} color="rgba(255,255,255,0.95)" /></View>
+                </View>
+                <ThemedText style={styles.moodPrompt}>How are you feeling now?</ThemedText>
+                <Link href="/(student)/(tabs)/mood" asChild>
+                  <Pressable onPressIn={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} } }} style={styles.moodButton}>
+                    <ThemedText style={styles.moodButtonText}>Log Mood</ThemedText>
+                  </Pressable>
+                </Link>
+              </CardContent>
+            </LinearGradient>
           </Card>
         </Animated.View>
 
@@ -740,7 +743,7 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   inspirationGradient: {
-    borderRadius: 20,
+    borderRadius: 24,
   },
   inspirationContent: {
     paddingHorizontal: 24,
@@ -779,7 +782,7 @@ const styles = StyleSheet.create({
   },
   inspirationGlow: {
     ...StyleSheet.absoluteFillObject,
-    borderRadius: 20,
+    borderRadius: 24,
   },
   inspirationQuote: {
     fontSize: 20,
@@ -964,39 +967,65 @@ const styles = StyleSheet.create({
     opacity: 0.96,
   },
   quickGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 16,
-    justifyContent: "space-between",
+    justifyContent: 'flex-start',
+  },
+  quickRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: 16,
+    paddingRight: 6,
   },
   qaTile: {
-    width: Platform.select({ web: TILE_WIDTH as any, default: TILE_WIDTH_NATIVE as any }) as any,
-    aspectRatio: 1,
-    minHeight: 0,
-    borderRadius: 20,
-    paddingHorizontal: 20,
-    paddingVertical: 20,
-    gap: 10,
+    width: "48%",
+    height: 160,
+    borderRadius: 24,
     position: "relative",
-    marginBottom: Platform.select({ web: 0, default: 16 }) as number,
     overflow: "hidden",
+    marginBottom: 16,
+    display: 'flex',
+    flexShrink: 0,
   },
-  qaTileInner: {
+  actionContent: {
     flex: 1,
-    justifyContent: "flex-start",
-    gap: 8,
-    paddingHorizontal: 0,
-    paddingVertical: 0,
+    padding: 16,
+    justifyContent: 'space-between',
     alignItems: 'flex-start',
-    position: 'relative',
   },
+  actionHeaderRow: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  actionArrow: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.75)',
+  },
+  actionTitle: {
+    color: '#FFFFFF',
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 18,
+  },
+  actionSubtitle: {
+    color: 'rgba(255,255,255,0.92)',
+    fontSize: 13,
+    marginTop: 4,
+  },
+  qaTileLeft: { marginRight: 16 },
   tileGradient: {
     position: "absolute",
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    borderRadius: 20,
+    borderRadius: 24,
     opacity: Platform.select({ web: 1, default: 0.95 }) as number,
   },
   tileOrb: {
@@ -1012,6 +1041,12 @@ const styles = StyleSheet.create({
     height: 90,
     borderRadius: 45,
     backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  qaTileInner: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
   },
   // Tile background color variants
   qaTilePurple: {
@@ -1088,6 +1123,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 8,
+  },
+  iconCircleLg: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   qaArrow: {
     position: 'absolute',
