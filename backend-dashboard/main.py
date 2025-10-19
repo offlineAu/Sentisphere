@@ -1,6 +1,6 @@
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from datetime import datetime, timedelta
 import os
 from collections import Counter
@@ -9,18 +9,22 @@ import typing
 from pydantic import BaseModel
 from typing import List, Optional
 
-app = FastAPI()
+from app.core.config import settings
+from app.db.database import engine
+from app.api.routes.auth import router as auth_router
+
+app = FastAPI(title=settings.APP_NAME)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-DB_URL = "mysql+mysqlconnector://root:@localhost/sentisphere_app"
-engine = create_engine(DB_URL)
+# Optional auth router (not enforced on other routes)
+app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 
 @app.get("/api/mood-trend")
 def mood_trend():
