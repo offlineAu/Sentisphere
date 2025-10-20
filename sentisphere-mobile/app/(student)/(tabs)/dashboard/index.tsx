@@ -1,6 +1,6 @@
 "use client"
 
-import { StyleSheet, View, ScrollView, Dimensions, Pressable, Animated, Easing, Platform, useWindowDimensions, Share } from "react-native"
+import { StyleSheet, View, ScrollView, Dimensions, Pressable, Animated, Easing, Platform, useWindowDimensions, Share, Linking } from "react-native"
 import { useEffect, useState, useRef, useCallback } from "react"
 import { ThemedView } from "@/components/themed-view"
 import { ThemedText } from "@/components/themed-text"
@@ -11,15 +11,14 @@ import { useColorScheme } from "@/hooks/use-color-scheme"
 import { Colors } from "@/constants/theme"
 import { Icon } from "@/components/ui/icon"
 import { LinearGradient } from "expo-linear-gradient"
+
 import * as Haptics from "expo-haptics"
 import { useFocusEffect } from '@react-navigation/native'
 
 const { width } = Dimensions.get("window")
 const GRID_PADDING = 16 // matches scrollContent padding
 const CARD_CONTENT_PADDING = 20 // matches styles.cardContent padding
-const QUICK_GAP = 16 // matches styles.quickGrid.gap
-const TILE_WIDTH = (width - GRID_PADDING * 2 - CARD_CONTENT_PADDING * 2 - QUICK_GAP) / 2
-const TILE_WIDTH_NATIVE = width < 400 ? ("100%" as const) : ("48%" as const)
+const QUICK_GAP = 10
 
 interface MoodData {
   date: string
@@ -42,8 +41,22 @@ export default function EnhancedDashboardScreen() {
   const [weeklyMoodAverage] = useState(7.2)
   const [currentStreak] = useState(5)
   const [gridW, setGridW] = useState(0)
-  const measuredTileW = gridW > 0 ? Math.floor((gridW - QUICK_GAP) / 2) : 0
-  const qaSizeStyle: any = measuredTileW ? { width: measuredTileW, height: measuredTileW } : { width: '48%', height: 160 }
+  const measuredTileW = gridW > 0 ? Math.round((gridW - QUICK_GAP) / 2) : 0
+  const quickActionTileSize: any = gridW > 0 && gridW < 360
+    ? {
+        width: '100%',
+        flexBasis: '100%',
+        minHeight: Math.round(Math.max(132, gridW * 0.68)),
+      }
+    : measuredTileW
+      ? {
+          width: measuredTileW,
+          flexBasis: measuredTileW,
+          maxWidth: measuredTileW,
+          minWidth: measuredTileW,
+          minHeight: Math.round(measuredTileW * 0.7),
+        }
+      : { width: '48%', flexBasis: '48%', minHeight: 136 }
 
   // Feature flags for layout
   const showLegacySections = false
@@ -138,6 +151,18 @@ export default function EnhancedDashboardScreen() {
     } catch {}
   }
 
+  const COUNSELOR_ADDRESS = 'CSM Building · Ground Floor · Room No. 104'
+  const COUNSELOR_MAP_URL = 'https://maps.app.goo.gl/wg2zkJAagttgkLLb6'
+  const openDirections = () => {
+    const q = encodeURIComponent(COUNSELOR_ADDRESS)
+    const url = Platform.select({
+      ios: COUNSELOR_MAP_URL,
+      android: COUNSELOR_MAP_URL,
+      default: COUNSELOR_MAP_URL,
+    }) as string
+    Linking.openURL(url).catch(() => Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${q}`))
+  }
+
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000)
     // load first quote
@@ -201,7 +226,7 @@ export default function EnhancedDashboardScreen() {
     entrance.quick.setValue(0)
     entrance.activity.setValue(0)
     // sequence
-    const seq = [entrance.greet, entrance.inspire, entrance.quick, entrance.mood, entrance.stat, entrance.activity].map((v, idx) =>
+    const seq = [entrance.greet, entrance.inspire, entrance.quick, entrance.stat, entrance.mood, entrance.activity].map((v, idx) =>
       Animated.timing(v, {
         toValue: 1,
         duration: 340,
@@ -357,14 +382,20 @@ export default function EnhancedDashboardScreen() {
         {/* Enhanced Quick Actions */}
         <Animated.View style={makeFadeUp(entrance.quick)}>
           <Card style={styles.cardShadow}>
-          <CardContent style={styles.cardContent}>
+          <CardContent style={styles.quickActionsContent}>
             <View style={styles.sectionTitleRow}>
               <View style={styles.sectionTitleIcon}>
                 <Icon name="sparkles" size={18} color="#6B7280" />
               </View>
               <ThemedText type="subtitle" style={styles.sectionTitle}>Quick Actions</ThemedText>
             </View>
-            <View style={styles.quickGrid} onLayout={(e) => setGridW(e.nativeEvent.layout.width)}>
+            <View
+              style={[
+                styles.quickActionsGrid,
+                gridW > 0 && gridW < 360 && { justifyContent: 'center' },
+              ]}
+              onLayout={(e) => setGridW(e.nativeEvent.layout.width)}
+            >
               <Link href="/(student)/(tabs)/mood" asChild>
                 <Pressable
                   onHoverIn={qa1.onHoverIn}
@@ -373,24 +404,24 @@ export default function EnhancedDashboardScreen() {
                   onPressOut={qa1.onPressOut}
                   style={({ hovered, pressed }) =>
                     StyleSheet.flatten([
-                      styles.qaTile,
+                      styles.quickActionTile,
                       styles.cardShadow,
                       hovered && styles.hoverLift,
                       pressed && styles.pressScale,
-                      qaSizeStyle,
+                      quickActionTileSize,
                     ])
                   }
                 >
                   <Animated.View style={[{ flex: 1 }, qa1.animStyle]}>
-                    <LinearGradient colors={["#8B5CF6", "#6D28D9"]} style={styles.tileGradient} pointerEvents="none" />
-                    <View style={styles.actionContent} pointerEvents="none">
-                      <View style={styles.actionHeaderRow}>
-                        <View style={styles.iconCircleLg}><Icon name="brain" size={26} color="#4C1D95" /></View>
-                        <View style={styles.actionArrow}><Icon name="arrow-right" size={16} color={"#1F2937"} /></View>
+                    <LinearGradient colors={["#8B5CF6", "#6D28D9"]} style={styles.quickActionGradient} pointerEvents="none" />
+                    <View style={styles.quickActionContent} pointerEvents="none">
+                      <View style={styles.quickActionHeader}>
+                        <Icon name="brain" size={20} color="#FFFFFF" />
+                        <Icon name="arrow-right" size={14} color="rgba(255,255,255,0.85)" />
                       </View>
-                      <View>
-                        <ThemedText style={styles.actionTitle}>Check Mood</ThemedText>
-                        <ThemedText style={styles.actionSubtitle}>Quick daily check-in</ThemedText>
+                      <View style={styles.quickActionText}>
+                        <ThemedText style={styles.quickActionTitle}>Check Mood</ThemedText>
+                        <ThemedText style={styles.quickActionSubtitle}>Quick daily check-in</ThemedText>
                       </View>
                     </View>
                   </Animated.View>
@@ -405,24 +436,24 @@ export default function EnhancedDashboardScreen() {
                   onPressOut={qa2.onPressOut}
                   style={({ hovered, pressed }) =>
                     StyleSheet.flatten([
-                      styles.qaTile,
+                      styles.quickActionTile,
                       styles.cardShadow,
                       hovered && styles.hoverLift,
                       pressed && styles.pressScale,
-                      qaSizeStyle,
+                      quickActionTileSize,
                     ])
                   }
                 >
                   <Animated.View style={[{ flex: 1 }, qa2.animStyle]}>
-                    <LinearGradient colors={["#34D399", "#0d8c4f"]} style={styles.tileGradient} pointerEvents="none" />
-                    <View style={styles.actionContent} pointerEvents="none">
-                      <View style={styles.actionHeaderRow}>
-                        <View style={styles.iconCircleLg}><Icon name="book-open" size={26} color="#065F46" /></View>
-                        <View style={styles.actionArrow}><Icon name="arrow-right" size={16} color={"#1F2937"} /></View>
+                    <LinearGradient colors={["#34D399", "#0d8c4f"]} style={styles.quickActionGradient} pointerEvents="none" />
+                    <View style={styles.quickActionContent} pointerEvents="none">
+                      <View style={styles.quickActionHeader}>
+                        <Icon name="book-open" size={20} color="#FFFFFF" />
+                        <Icon name="arrow-right" size={14} color="rgba(255,255,255,0.85)" />
                       </View>
-                      <View>
-                        <ThemedText style={styles.actionTitle}>Write Journal</ThemedText>
-                        <ThemedText style={styles.actionSubtitle}>Reflect in minutes</ThemedText>
+                      <View style={styles.quickActionText}>
+                        <ThemedText style={styles.quickActionTitle}>Write Journal</ThemedText>
+                        <ThemedText style={styles.quickActionSubtitle}>Reflect in minutes</ThemedText>
                       </View>
                     </View>
                   </Animated.View>
@@ -437,24 +468,24 @@ export default function EnhancedDashboardScreen() {
                   onPressOut={qa3.onPressOut}
                   style={({ hovered, pressed }) =>
                     StyleSheet.flatten([
-                      styles.qaTile,
+                      styles.quickActionTile,
                       styles.cardShadow,
                       hovered && styles.hoverLift,
                       pressed && styles.pressScale,
-                      qaSizeStyle,
+                      quickActionTileSize,
                     ])
                   }
                 >
                   <Animated.View style={[{ flex: 1 }, qa3.animStyle]}>
-                    <LinearGradient colors={["#60A5FA", "#2563EB"]} style={styles.tileGradient} pointerEvents="none" />
-                    <View style={styles.actionContent} pointerEvents="none">
-                      <View style={styles.actionHeaderRow}>
-                        <View style={styles.iconCircleLg}><Icon name="calendar" size={26} color="#1D4ED8" /></View>
-                        <View style={styles.actionArrow}><Icon name="arrow-right" size={16} color={"#1F2937"} /></View>
+                    <LinearGradient colors={["#60A5FA", "#2563EB"]} style={styles.quickActionGradient} pointerEvents="none" />
+                    <View style={styles.quickActionContent} pointerEvents="none">
+                      <View style={styles.quickActionHeader}>
+                        <Icon name="calendar" size={20} color="#FFFFFF" />
+                        <Icon name="arrow-right" size={14} color="rgba(255,255,255,0.85)" />
                       </View>
-                      <View>
-                        <ThemedText style={styles.actionTitle}>Book Session</ThemedText>
-                        <ThemedText style={styles.actionSubtitle}>Schedule counseling</ThemedText>
+                      <View style={styles.quickActionText}>
+                        <ThemedText style={styles.quickActionTitle}>Book Session</ThemedText>
+                        <ThemedText style={styles.quickActionSubtitle}>Schedule counseling</ThemedText>
                       </View>
                     </View>
                   </Animated.View>
@@ -469,24 +500,24 @@ export default function EnhancedDashboardScreen() {
                   onPressOut={qa4.onPressOut}
                   style={({ hovered, pressed }) =>
                     StyleSheet.flatten([
-                      styles.qaTile,
+                      styles.quickActionTile,
                       styles.cardShadow,
                       hovered && styles.hoverLift,
                       pressed && styles.pressScale,
-                      qaSizeStyle,
+                      quickActionTileSize,
                     ])
                   }
                 >
                   <Animated.View style={[{ flex: 1 }, qa4.animStyle]}>
-                    <LinearGradient colors={["#5EEAD4", "#0D9488"]} style={styles.tileGradient} pointerEvents="none" />
-                    <View style={styles.actionContent} pointerEvents="none">
-                      <View style={styles.actionHeaderRow}>
-                        <View style={styles.iconCircleLg}><Icon name="message-square" size={26} color="#0F766E" /></View>
-                        <View style={styles.actionArrow}><Icon name="arrow-right" size={16} color={"#1F2937"} /></View>
+                    <LinearGradient colors={["#5EEAD4", "#0D9488"]} style={styles.quickActionGradient} pointerEvents="none" />
+                    <View style={styles.quickActionContent} pointerEvents="none">
+                      <View style={styles.quickActionHeader}>
+                        <Icon name="message-square" size={20} color="#FFFFFF" />
+                        <Icon name="arrow-right" size={14} color="rgba(255,255,255,0.85)" />
                       </View>
-                      <View>
-                        <ThemedText style={styles.actionTitle}>AI Chat</ThemedText>
-                        <ThemedText style={styles.actionSubtitle}>Get instant support</ThemedText>
+                      <View style={styles.quickActionText}>
+                        <ThemedText style={styles.quickActionTitle}>AI Chat</ThemedText>
+                        <ThemedText style={styles.quickActionSubtitle}>Get instant support</ThemedText>
                       </View>
                     </View>
                   </Animated.View>
@@ -497,9 +528,30 @@ export default function EnhancedDashboardScreen() {
           </Card>
         </Animated.View>
 
+        {/* Upcoming Appointments */}
+        <Animated.View style={makeFadeUp(entrance.stat)}>
+          <Card style={styles.cardShadow}>
+            <CardContent style={styles.cardContent}>
+              <View style={styles.sectionTitleRow}>
+                <View style={styles.sectionTitleIcon}>
+                  <Icon name="calendar" size={18} color={palette.muted} />
+                </View>
+                <ThemedText type="subtitle" style={styles.sectionTitle}>Upcoming</ThemedText>
+              </View>
+              <View style={styles.appointmentEmpty}>
+                <Icon name="calendar" size={28} color={palette.muted} />
+                <ThemedText style={[styles.emptyText, { color: palette.muted }]}>No appointments scheduled</ThemedText>
+                <Link href="/(student)/appointments" asChild>
+                  <Button title="Request Appointment" style={styles.appointmentButton} />
+                </Link>
+              </View>
+            </CardContent>
+          </Card>
+        </Animated.View>
+
         <Animated.View style={makeFadeUp(entrance.mood)}>
           <Card style={styles.cardShadow}>
-            <LinearGradient colors={["#d8b4fe", "#a5b4fc", "#93c5fd"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.moodGradient}>
+            <LinearGradient colors={["#374151", "#111827"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.moodGradient}>
               <CardContent style={styles.moodContent}>
                 <View style={styles.moodHeader}>
                   <ThemedText style={styles.moodTitle}>State of mood</ThemedText>
@@ -516,7 +568,34 @@ export default function EnhancedDashboardScreen() {
           </Card>
         </Animated.View>
 
-        {/* Recent Activity */}
+        {/* Counselor Location (matches Mood Prompt layout) */}
+        <Animated.View style={makeFadeUp(entrance.activity)}>
+          <Card style={[styles.cardShadow, styles.locationCard]}>
+            <LinearGradient colors={["#374151", "#111827"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.moodGradient}>
+              <CardContent style={[styles.moodContent, styles.locationCenter]}>
+                <View style={{ alignItems: 'center', gap: 1 }}>
+                  <View style={{ marginBottom: 7 }}>
+                    <Icon name="map-pin" size={24} color="#FFFFFF" />
+                  </View>
+                  <ThemedText style={styles.locationPrompt}>Guidance Office</ThemedText>
+                  <ThemedText style={styles.locationSubtitle}>CSM Building · Ground Floor · Room No. 104</ThemedText>
+                </View>
+                <Pressable
+                  accessibilityLabel="Directions"
+                  onPressIn={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} } }}
+                  onPress={openDirections}
+                  style={({ pressed }) => [styles.locationPill, pressed && { opacity: 0.95 }]}
+                >
+                  <View style={styles.locationPillIcon}><Icon name="arrow-right" size={14} color="#FFFFFF" /></View>
+                  <ThemedText style={styles.locationDirectionsText}>Directions</ThemedText>
+                </Pressable>
+              </CardContent>
+            </LinearGradient>
+          </Card>
+        </Animated.View>
+
+        {/* Recent Activity (commented out) */}
+        {/**
         <Animated.View style={makeFadeUp(entrance.activity)}>
           <Card style={styles.cardShadow}>
           <CardContent style={styles.cardContent}>
@@ -563,10 +642,6 @@ export default function EnhancedDashboardScreen() {
                     </Animated.View>
                   </Pressable>
                 </Link>
-              ))}
-            </View>
-          </CardContent>
-        </Card>
         </Animated.View>
 
         {/* Recent Mood Trends */}
@@ -649,25 +724,6 @@ export default function EnhancedDashboardScreen() {
           </Card>
         )}
 
-        {/* Upcoming Appointments */}
-        <Card style={styles.cardShadow}>
-          <CardContent style={styles.cardContent}>
-            <View style={styles.sectionTitleRow}>
-              <View style={styles.sectionTitleIcon}>
-                <Icon name="calendar" size={18} color={palette.muted} />
-              </View>
-              <ThemedText type="subtitle" style={styles.sectionTitle}>Upcoming</ThemedText>
-            </View>
-            <View style={styles.appointmentEmpty}>
-              <Icon name="calendar" size={32} color={palette.muted} />
-              <ThemedText style={[styles.emptyText, { color: palette.muted }]}>No appointments scheduled</ThemedText>
-              <Link href="/(student)/appointments" asChild>
-                <Button title="Request Appointment" style={styles.appointmentButton} />
-              </Link>
-            </View>
-          </CardContent>
-        </Card>
-
         
       </ScrollView>
     </ThemedView>
@@ -715,14 +771,14 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   greetingTitle: {
-    fontSize: 36,
+    fontSize: 28,
     fontFamily: "Inter_700Bold",
     marginTop: 2,
     marginBottom: 2,
     color: "#111827",
   },
   greetingLine: {
-    fontSize: 16,
+    fontSize: 14,
     fontFamily: "Inter_500Medium",
     color: "#6B7280",
   },
@@ -736,7 +792,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   dateText: {
-    fontSize: 14,
+    fontSize: 12,
     lineHeight: 20,
   },
   inspirationCard: {
@@ -819,25 +875,25 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.92)',
   },
   moodAvatar: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     backgroundColor: 'rgba(255,255,255,0.18)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   moodPrompt: {
-    fontSize: 28,
+    fontSize: 24,
     fontFamily: 'Inter_700Bold',
     color: '#FFFFFF',
-    lineHeight: 34,
-    marginBottom: 14,
+    lineHeight: 30,
+    marginBottom: 12,
   },
   moodButton: {
     width: '100%',
     alignSelf: 'stretch',
-    borderRadius: 18,
-    paddingVertical: 14,
+    borderRadius: 16,
+    paddingVertical: 12,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(255,255,255,0.22)',
@@ -845,9 +901,109 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.35)',
   },
   moodButtonText: {
-    fontSize: 16,
+    fontSize: 14,
     fontFamily: 'Inter_600SemiBold',
     color: 'rgba(255,255,255,0.95)',
+  },
+  // Location card styles
+  locationCard: {
+    overflow: 'hidden',
+  },
+  locationContent: {
+    padding: 0,
+  },
+  locationHero: {
+    height: 200,
+    borderRadius: 24,
+    overflow: 'hidden',
+  },
+  locationOverlayRow: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  locationLabel: {
+    fontSize: 28,
+    lineHeight: 34,
+    fontFamily: 'Inter_700Bold',
+    color: '#FFFFFF',
+  },
+  locationSublabel: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.9)',
+    marginTop: 2,
+  },
+  locationDirectionsBtn: {
+    paddingHorizontal: 16,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(17,24,39,0.8)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.25)'
+  },
+  locationDirectionsText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  locationCenter: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 14,
+    minHeight: 160,
+  },
+  locationPrompt: {
+    fontSize: 24,
+    lineHeight: 30,
+    fontFamily: 'Inter_700Bold',
+    color: '#FFFFFF',
+    textAlign: 'center',
+  },
+  locationSubtitle: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.92)',
+    textAlign: 'center',
+    marginTop: 0,
+  },
+  locationPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(17,24,39,0.72)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.25)'
+  },
+  locationPillIcon: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.18)'
+  },
+  locationMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+  },
+  locationMetaItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  locationMetaText: {
+    fontSize: 11,
   },
   statCard: {
     width: "100%",
@@ -858,21 +1014,21 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   statIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 6,
   },
   statNumber: {
-    fontSize: 28,
+    fontSize: 24,
     fontFamily: "Inter_700Bold",
     color: "#111827",
-    lineHeight: 34,
+    lineHeight: 30,
   },
   statLabel: {
-    fontSize: 12,
+    fontSize: 10,
     color: "#6B7280",
   },
   summaryRow: {
@@ -888,19 +1044,19 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   summaryIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: "center",
     justifyContent: "center",
   },
   summaryValue: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: "700",
     color: "#1F2937",
   },
   summaryLabel: {
-    fontSize: 12,
+    fontSize: 10,
     color: "#6B7280",
     textAlign: "center",
   },
@@ -908,24 +1064,24 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: 14,
     // Consistent bold weight
     fontFamily: "Inter_600SemiBold",
     marginBottom: 0,
-    lineHeight: 22,
+    lineHeight: 20,
     color: "#111827",
   },
   sectionTitleRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    marginBottom: 16,
+    marginBottom: 12,
     minHeight: 28,
   },
   sectionTitleIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "transparent",
@@ -937,7 +1093,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   viewAllText: {
-    fontSize: 14,
+    fontSize: 12,
     color: "#6B7280",
   },
   cardShadow: {
@@ -966,80 +1122,74 @@ const styles = StyleSheet.create({
   pressScale: {
     opacity: 0.96,
   },
-  quickGrid: {
+  quickActionsContent: {
+    padding: 20,
+    gap: 16,
+  },
+  quickActionsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 16,
+    columnGap: 10,
+    rowGap: 10,
     justifyContent: 'flex-start',
   },
-  quickRow: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
-    gap: 16,
-    paddingRight: 6,
-  },
-  qaTile: {
-    width: "48%",
-    height: 160,
-    borderRadius: 24,
-    position: "relative",
-    overflow: "hidden",
-    marginBottom: 16,
-    display: 'flex',
+  quickActionTile: {
+    borderRadius: 20,
+    overflow: 'hidden',
+    position: 'relative',
     flexShrink: 0,
+    flexGrow: 1,
+    marginBottom: 12,
   },
-  actionContent: {
-    flex: 1,
-    padding: 16,
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-  },
-  actionHeaderRow: {
-    width: '100%',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  actionArrow: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.75)',
-  },
-  actionTitle: {
-    color: '#FFFFFF',
-    fontFamily: 'Inter_600SemiBold',
-    fontSize: 18,
-  },
-  actionSubtitle: {
-    color: 'rgba(255,255,255,0.92)',
-    fontSize: 13,
-    marginTop: 4,
-  },
-  qaTileLeft: { marginRight: 16 },
-  tileGradient: {
+  quickActionGradient: {
     position: "absolute",
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    borderRadius: 24,
+    borderRadius: 20,
     opacity: Platform.select({ web: 1, default: 0.95 }) as number,
   },
+  quickActionContent: {
+    flex: 1,
+    paddingVertical: 18,
+    paddingHorizontal: 18,
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  quickActionHeader: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  quickActionText: {
+    alignItems: 'flex-start',
+    gap: 2,
+  },
+  quickActionTitle: {
+    color: '#FFFFFF',
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 14,
+  },
+  quickActionSubtitle: {
+    color: 'rgba(255,255,255,0.92)',
+    fontSize: 10,
+  },
+  qaTileLeft: { marginRight: 16 },
   tileOrb: {
     position: 'absolute',
-    width: 140,
-    height: 140,
-    borderRadius: 70,
+    width: 120,
+    height: 120,
+    borderRadius: 60,
     backgroundColor: 'rgba(255,255,255,0.18)',
   },
   tileOrbSm: {
     position: 'absolute',
-    width: 90,
-    height: 90,
-    borderRadius: 45,
+    width: 80,
+    height: 80,
+    borderRadius: 40,
     backgroundColor: 'rgba(255,255,255,0.12)',
   },
   qaTileInner: {
@@ -1062,9 +1212,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#ECFEFF",
   },
   qaIconWrap: {
-    width: Platform.select({ web: 36, default: 44 }) as number,
-    height: Platform.select({ web: 36, default: 44 }) as number,
-    borderRadius: Platform.select({ web: 18, default: 22 }) as number,
+    width: Platform.select({ web: 32, default: 40 }) as number,
+    height: Platform.select({ web: 32, default: 40 }) as number,
+    borderRadius: Platform.select({ web: 16, default: 20 }) as number,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -1077,25 +1227,11 @@ const styles = StyleSheet.create({
     paddingTop: Platform.select({ web: 2, default: 4 }) as number,
   },
   qaArrowWrap: {
-    width: Platform.select({ web: 30, default: 30 }) as number,
-    height: Platform.select({ web: 30, default: 30 }) as number,
-    borderRadius: Platform.select({ web: 14, default: 14 }) as number,
+    width: Platform.select({ web: 26, default: 26 }) as number,
+    height: Platform.select({ web: 26, default: 26 }) as number,
+    borderRadius: Platform.select({ web: 12, default: 12 }) as number,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#EEF2F7",
-  },
-  qaTitle: {
-    fontSize: Platform.select({ web: 16, default: 18 }) as number,
-    // Ensure semi-bold weight across platforms
-    fontFamily: "Inter_600SemiBold",
-    color: "#FFFFFF",
-    // Slightly tighter spacing under title
-    marginBottom: Platform.select({ web: 1, default: 2 }) as number,
-  },
-  qaSubtitle: {
-    fontSize: Platform.select({ web: 12, default: 13 }) as number,
-    // Tighter paragraph spacing on tiles
-    lineHeight: Platform.select({ web: 16, default: 16 }) as number,
     marginTop: Platform.select({ web: 0, default: 1 }) as number,
     color: 'rgba(255,255,255,0.92)',
   },
@@ -1113,21 +1249,21 @@ const styles = StyleSheet.create({
     // Reduce gap between header row and text block
     marginTop: Platform.select({ web: 2, default: 4 }) as number,
     alignItems: 'flex-start',
-    gap: 6,
+    gap: 2,
   },
   iconCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 8,
   },
   iconCircleLg: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1149,7 +1285,7 @@ const styles = StyleSheet.create({
   },
   quickButton: {
     width: (width - 64) / 2,
-    height: 80,
+    height: 72,
     borderRadius: 12,
     padding: 0,
   },
@@ -1158,7 +1294,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   quickButtonText: {
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: "600",
   },
   moodList: {
@@ -1175,25 +1311,25 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   moodIndicator: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: "center",
     justifyContent: "center",
   },
   moodEmoji: {
-    fontSize: 18,
+    fontSize: 16,
   },
   moodValue: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: "600",
     color: "#1F2937",
   },
   moodDate: {
-    fontSize: 12,
+    fontSize: 10,
   },
   moodNote: {
-    fontSize: 14,
+    fontSize: 12,
     flex: 1,
     textAlign: "right",
     marginLeft: 16,
@@ -1214,9 +1350,9 @@ const styles = StyleSheet.create({
     width: "100%",
   },
   journalIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     backgroundColor: "#F0FDF4",
     alignItems: "center",
     justifyContent: "center",
@@ -1225,7 +1361,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   journalTitle: {
-    fontSize: 16,
+    fontSize: 14,
     fontFamily: "Inter_600SemiBold",
     color: "#1F2937",
     marginBottom: 2,
@@ -1236,7 +1372,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   journalDate: {
-    fontSize: 12,
+    fontSize: 10,
   },
   journalMoodBadge: {
     backgroundColor: "#F3F4F6",
@@ -1245,7 +1381,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   journalMoodText: {
-    fontSize: 10,
+    fontSize: 9,
     color: "#6B7280",
     fontWeight: "500",
   },
@@ -1269,9 +1405,9 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   activityIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -1293,12 +1429,12 @@ const styles = StyleSheet.create({
     opacity: 0,
   },
   activityTitle: {
-    fontSize: 15,
+    fontSize: 13,
     fontFamily: "Inter_600SemiBold",
     color: "#111827",
   },
   activityDesc: {
-    fontSize: 13,
+    fontSize: 11,
     marginTop: 1,
   },
   activityMeta: {
@@ -1308,17 +1444,20 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   activityTime: {
-    fontSize: 12,
+    fontSize: 10,
   },
   appointmentEmpty: {
     alignItems: "center",
     gap: 12,
-    paddingVertical: 24,
+    paddingVertical: 20,
   },
   emptyText: {
-    fontSize: 16,
+    fontSize: 14,
   },
   appointmentButton: {
+    width: '100%',
+    maxWidth: 320,
+    alignSelf: 'center',
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 8,

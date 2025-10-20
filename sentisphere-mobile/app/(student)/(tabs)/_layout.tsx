@@ -16,12 +16,17 @@ function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const [barWidth, setBarWidth] = useState(0);
 
   // Filter out routes explicitly hidden via href: null (expo-router)
-  const hiddenNames = new Set(['chat/index', 'chat/[id]', 'journal/new', 'journal/[id]', 'learn/[id]']);
+  const hiddenNames = new Set(['chat/index', 'chat/[id]', 'journal/new', 'journal/[id]', 'learn/[id]', 'learn/article/[articleId]']);
   const visibleRoutes = state.routes.filter((route) => {
     const opts = descriptors[route.key]?.options as any;
     if (opts?.href === null) return false;
     return !hiddenNames.has(route.name);
   });
+
+  // Hide the entire tab bar on specific deep screens (e.g., article detail)
+  const currentName = state.routes[state.index]?.name as string | undefined;
+  const hideBarOn = new Set(['chat/index', 'chat/[id]', 'journal/new', 'journal/[id]', 'learn/[id]', 'learn/article/[articleId]']);
+  const hideBar = !!currentName && hideBarOn.has(currentName);
 
   // Animated values per route
   const animsRef = useRef<Record<string, Animated.Value>>({});
@@ -81,6 +86,10 @@ function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
       ]),
     ]).start();
   }, [state.index, barWidth, visibleRoutes]);
+
+  if (hideBar) {
+    return null;
+  }
 
   return (
     <View style={[styles.tabWrap, { paddingBottom: Math.max(insets.bottom, Platform.OS === 'web' ? 12 : 8) }]}>
@@ -254,6 +263,7 @@ export default function StudentTabsLayout() {
         }}
       />
       <Tabs.Screen name="learn/[id]" options={{ href: null }} />
+      <Tabs.Screen name="learn/article/[articleId]" options={{ href: null }} />
       {/* Hide pages from appearing as tabs; keep them routable */}
       <Tabs.Screen name="chat/index" options={{ href: null, headerShown: false }} />
       <Tabs.Screen name="chat/[id]" options={{ href: null, headerShown: false }} />
