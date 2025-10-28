@@ -1,4 +1,7 @@
+import React, { useEffect, useState } from 'react';
 import { useSidebar } from "./SidebarContext";
+import { router, usePage } from '@inertiajs/react';
+import { logoutFastApi, sessionStatus } from '../lib/auth';
 import {
   Home,
   MessageCircle,
@@ -23,6 +26,30 @@ const mainNavLinks = [
 export default function Sidebar() {
   const { open, setOpen } = useSidebar();
   const currentPath = window.location.pathname;
+  const [isAuthed, setIsAuthed] = useState<boolean>(false);
+  const [checked, setChecked] = useState<boolean>(false);
+  const page: any = usePage();
+  const hideSidebar = Boolean(page?.props?.hideSidebar);
+
+  // Hide sidebar on login page entirely
+  if (currentPath === '/login' || hideSidebar) return null;
+
+  useEffect(() => {
+    let mounted = true;
+    sessionStatus().then(s => {
+      if (!mounted) return;
+      setIsAuthed(!!s.authenticated);
+      setChecked(true);
+    }).catch(() => {
+      if (!mounted) return;
+      setIsAuthed(false);
+      setChecked(true);
+    });
+    return () => { mounted = false; };
+  }, []);
+
+  // Only render after we checked the session; and only if authenticated
+  if (!checked || !isAuthed) return null;
 
   return (
     <motion.aside
@@ -117,7 +144,21 @@ export default function Sidebar() {
 
       {/* General Section */}
       <div className={styles.menuTitle}>GENERAL</div>
-      <button className={styles.signoutBtn} tabIndex={open ? 0 : -1}>
+      {isAuthed && (
+        <div className="px-4 py-1 text-[11px] text-gray-500" aria-live="polite">Signed in</div>
+      )}
+      <button
+        className={styles.signoutBtn}
+        tabIndex={open ? 0 : -1}
+        onClick={async () => {
+          const res = await logoutFastApi();
+          if (res?.ok) {
+            router.visit('/login');
+          } else {
+            router.visit('/login');
+          }
+        }}
+      >
         <div className={styles.iconWrap}>
           <LogOut />
         </div>

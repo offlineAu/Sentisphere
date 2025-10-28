@@ -4,8 +4,9 @@ import { Send, MessageSquare, User, Search } from "lucide-react";
 import { useSidebar } from "../components/SidebarContext";
 import Sidebar from "../components/Sidebar";
 import styles from "./Chat.module.css";
-import axios from "axios";
-const API_BASE = (import.meta as any).env?.VITE_API_URL || "";
+import api from "../lib/api";
+import { sessionStatus } from "../lib/auth";
+import { router } from "@inertiajs/react";
 
 // -----------------------------
 // Types
@@ -35,6 +36,11 @@ interface ChatMessage {
 // -----------------------------
 export default function Chat() {
   const { open } = useSidebar();
+  const [authenticated, setAuthenticated] = useState<boolean>(false);
+  const [userId, setUserId] = useState<number>(() => {
+    const envId = (import.meta as any).env?.VITE_COUNSELOR_USER_ID;
+    return Number(envId) || 1;
+  });
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [activeConversation, setActiveConversation] = useState<number | null>(null);
@@ -45,13 +51,25 @@ export default function Chat() {
   const [searchQuery, setSearchQuery] = useState("");
   const [filter, setFilter] = useState<"all" | "unread" | "read">("all");
 
-  // ⚡ Change this for logged-in user (student/counselor)
-  const userId = 1; // put your counselor's user_id from the DB
+  // Check session authentication and redirect if needed
+  useEffect(() => {
+    let mounted = true;
+    sessionStatus().then(s => {
+      if (!mounted) return;
+      if (s?.authenticated) {
+        setAuthenticated(true);
+      } else {
+        router.visit('/login');
+      }
+    });
+    return () => { mounted = false; };
+  }, []);
 
   // Fetch conversations
   useEffect(() => {
-    axios
-      .get<Conversation[]>(`${API_BASE}/api/conversations`, {
+    if (!authenticated) return;
+    api
+      .get<Conversation[]>(`/conversations`, {
         params: { user_id: userId },
       })
       .then((res) => {
@@ -61,15 +79,13 @@ export default function Chat() {
         }
       })
       .catch((err) => console.error("Error fetching conversations:", err));
-  }, [userId]);
+  }, [userId, authenticated]);
 
   // Fetch messages when active conversation changes
   useEffect(() => {
-    if (!activeConversation) return;
-    axios
-      .get<ChatMessage[]>(
-        `${API_BASE}/api/conversations/${activeConversation}/messages`
-      )
+    if (!activeConversation || !authenticated) return;
+    api
+      .get<ChatMessage[]>(`/conversations/${activeConversation}/messages`)
       .then((res) => {
         setMessages(res.data);
         setMessagesByConversation((prev) => ({ ...prev, [activeConversation]: res.data }));
@@ -89,20 +105,20 @@ export default function Chat() {
       setParticipantNickname("");
       return;
     }
-    axios
-      .get<{ nickname: string }>(`${API_BASE}/api/users/${currentConversation.initiator_user_id}`)
+    api
+      .get<{ nickname: string }>(`/users/${currentConversation.initiator_user_id}`)
       .then((res) => setParticipantNickname(res.data.nickname || ""))
       .catch(() => setParticipantNickname(""));
   }, [currentConversation]);
 
   // Lightweight polling to fetch messages per conversation and compute unread via is_read
   useEffect(() => {
-    if (conversations.length === 0) return;
+    if (conversations.length === 0 || !authenticated) return;
     const poll = async () => {
       const ids = conversations.map((c) => c.id);
       for (const id of ids) {
         try {
-          const { data } = await axios.get<ChatMessage[]>(`${API_BASE}/api/conversations/${id}/messages`);
+          const { data } = await api.get<ChatMessage[]>(`/conversations/${id}/messages`);
           setMessagesByConversation((prev) => ({ ...prev, [id]: data }));
           const unread = data.filter((m) => !Boolean((m as any).is_read) && m.sender_id !== userId).length;
           setUnreadCounts((prev) => ({ ...prev, [id]: unread }));
@@ -135,14 +151,11 @@ export default function Chat() {
       currentConversation.status !== "open"
     )
       return;
-    axios
-      .post<ChatMessage>(
-        `${API_BASE}/api/conversations/${activeConversation}/messages`,
-        {
-          sender_id: userId,
-          content: newMessage,
-        }
-      )
+    api
+      .post<ChatMessage>(`/conversations/${activeConversation}/messages`, {
+        sender_id: userId,
+        content: newMessage,
+      })
       .then((res) => {
         setMessages((prev) => [...prev, res.data]);
         setNewMessage("");
@@ -161,7 +174,7 @@ export default function Chat() {
       <Sidebar />
       <main
         className={`transition-all duration-200 bg-[#f5f5f5] min-h-screen space-y-4 ${
-          open ? "pl-[17rem]" : "pl-[4.5rem]"
+          open ? "pl-[17rem]" : "pl-[5rem]"
         } pt-1 pr-6 pb-6`}
       >
         <motion.div
@@ -231,8 +244,8 @@ export default function Chat() {
                             setActiveConversation(c.id);
                             // optimistically clear unread, and notify backend to mark as read
                             setUnreadCounts((prev) => ({ ...prev, [c.id]: 0 }));
-                            axios
-                              .post(`${API_BASE}/api/conversations/${c.id}/read`, null, { params: { user_id: userId }})
+                            api
+                              .post(`/conversations/${c.id}/read`, null, { params: { user_id: userId }})
                               .catch(() => {/* ignore */});
                           }}
                           className={`relative pl-4 pr-3 py-3 cursor-pointer text-left transition select-none rounded-md box-border ${
@@ -314,7 +327,7 @@ export default function Chat() {
 
                     {/* Messages */}
                     <div ref={messagesScrollRef} className="flex-1 min-h-0 min-w-0 w-full max-w-full p-4 overflow-y-scroll space-y-4" style={{ scrollbarGutter: 'stable both-edges' }}>
-                      {messages.map((m) => (
+                      {messages.  map((m) => (
                         <div
                           key={m.id}
                           className={`max-w-[70%] px-4 py-2 rounded-2xl shadow-sm break-normal whitespace-pre-wrap hyphens-none overflow-hidden ${

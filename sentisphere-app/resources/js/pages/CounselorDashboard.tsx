@@ -16,8 +16,11 @@ import {
   Cell,
 } from "recharts";
 import { useSidebar } from "../components/SidebarContext";
+import DashboardLayout from "../layouts/DashboardLayout";
 import styles from './CounselorDashboard.module.css';
-const API_BASE = (import.meta as any).env?.VITE_API_URL || "";
+import api from "../lib/api";
+import { sessionStatus } from "../lib/auth";
+import { router } from "@inertiajs/react";
 
 // -----------------------------
 // Types
@@ -118,6 +121,7 @@ const getMoodSummary = (data: any[]) => {
 // -----------------------------
 export default function CounselorDashboard() {
   const { open } = useSidebar();
+  const [authenticated, setAuthenticated] = useState<boolean>(false);
   const [moodTrend, setMoodTrend] = useState<any[]>([]);
   const [sentimentBreakdown, setSentimentBreakdown] = useState<any[]>([]);
   const [checkinBreakdown, setCheckinBreakdown] = useState<{ mood: any[]; energy: any[]; stress: any[] } | null>(null);
@@ -164,84 +168,41 @@ export default function CounselorDashboard() {
     return found ? found.label : String(v);
   };
 
-  // Fetch from backend
+  // Check session authentication and redirect if needed
   useEffect(() => {
-    fetch(`${API_BASE}/api/mood-trend`)
-      .then((res) => res.json())
-      .then(setMoodTrend)
-      .catch(console.error);
-
-    fetch(`${API_BASE}/api/appointments`)
-      .then((res) => res.json())
-      .then(setAppointments)
-      .catch(console.error);
-
-    fetch(`${API_BASE}/api/recent-alerts`)
-      .then((res) => res.json())
-      .then(data => setRecentAlerts(data))
-      .catch(console.error);
-
-    fetch(`${API_BASE}/api/all-alerts`)
-      .then((res) => res.json())
-      .then(data => setAllAlerts(data))
-      .catch(console.error);
-
-    fetch(`${API_BASE}/api/students-monitored`)
-      .then((res) => res.json())
-      .then(data => setStudentsMonitored(data.count))
-      .catch(console.error);
-
-    fetch(`${API_BASE}/api/open-appointments`)
-      .then((res) => res.json())
-      .then(data => setOpenAppointments(data.count))
-      .catch(console.error);
-
-    fetch(`${API_BASE}/api/this-week-checkins`)
-      .then(res => res.json())
-      .then(data => setThisWeekCheckins(data.count))
-      .catch(console.error);
-
-    fetch(`${API_BASE}/api/high-risk-flags`)
-      .then(res => res.json())
-      .then(data => setHighRiskFlags(data.count))
-      .catch(console.error);
-
-    // New: appointment logs and user activities (mobile appointment page interactions)
-    fetch(`${API_BASE}/api/appointment-logs`)
-      .then(res => res.json())
-      .then(data => setAppointmentLogs(data))
-      .catch(console.error);
-
-    fetch(`${API_BASE}/api/user-activities?target_type=appointment`)
-      .then(res => res.json())
-      .then(data => setUserActivities(data))
-      .catch(console.error);
-
-    // Counselor profile
-    const counselorId = (import.meta as any).env?.VITE_COUNSELOR_USER_ID || 1;
-    fetch(`${API_BASE}/api/counselor-profile?user_id=${counselorId}`)
-      .then(res => res.json())
-      .then(setCounselor)
-      .catch(console.error);
-
-    // Unread messages count (badge)
-    fetch(`${API_BASE}/api/unread-messages`)
-      .then(res => res.ok ? res.json() : Promise.reject())
-      .then(data => {
-        if (typeof data?.count === 'number') setUnreadMessages(data.count);
-      })
-      .catch(() => setUnreadMessages(0));
-
-    // Initial AI summaries (safe to ignore errors)
-    fetch(`${API_BASE}/api/ai/sentiment-summary?period=${sentimentPeriod}`)
-      .then(res => res.ok ? res.json() : Promise.reject())
-      .then(d => setAiSentimentSummary(d?.summary || null))
-      .catch(() => setAiSentimentSummary(null));
-    fetch(`${API_BASE}/api/ai/mood-summary?period=${sentimentPeriod}`)
-      .then(res => res.ok ? res.json() : Promise.reject())
-      .then(d => setAiMoodSummary(d?.summary || null))
-      .catch(() => setAiMoodSummary(null));
+    let mounted = true;
+    sessionStatus().then(s => {
+      if (!mounted) return;
+      if (s?.authenticated) {
+        setAuthenticated(true);
+      } else {
+        router.visit('/login');
+      }
+    });
+    return () => { mounted = false; };
   }, []);
+
+  // Fetch from backend via Laravel proxy (/api) when authenticated
+  useEffect(() => {
+    if (!authenticated) return;
+    api.get<any[]>('/mood-trend').then(r=>setMoodTrend(r.data)).catch(console.error);
+    api.get<any[]>('/appointments').then(r=>setAppointments(r.data)).catch(console.error);
+    api.get<any[]>('/recent-alerts').then(r=>setRecentAlerts(r.data)).catch(console.error);
+    api.get<any[]>('/all-alerts').then(r=>setAllAlerts(r.data)).catch(console.error);
+    api.get<{count:number}>('/students-monitored').then(r=>setStudentsMonitored(r.data.count)).catch(console.error);
+    api.get<{count:number}>('/open-appointments').then(r=>setOpenAppointments(r.data.count)).catch(console.error);
+    api.get<{count:number}>('/this-week-checkins').then(r=>setThisWeekCheckins(r.data.count)).catch(console.error);
+    api.get<{count:number}>('/high-risk-flags').then(r=>setHighRiskFlags(r.data.count)).catch(console.error);
+    api.get<any[]>('/appointment-logs').then(r=>setAppointmentLogs(r.data)).catch(console.error);
+    api.get<any[]>('/user-activities', { params: { target_type: 'appointment' }}).then(r=>setUserActivities(r.data)).catch(console.error);
+    const counselorId = (import.meta as any).env?.VITE_COUNSELOR_USER_ID || 1;
+    api.get<any>('/counselor-profile', { params: { user_id: counselorId }}).then(r=>setCounselor(r.data)).catch(console.error);
+    api.get<{count:number}>('/unread-messages').then(r=>{
+      if (typeof r.data?.count === 'number') setUnreadMessages(r.data.count);
+    }).catch(()=>setUnreadMessages(0));
+    api.get<{summary?: string}>('/ai/sentiment-summary', { params: { period: sentimentPeriod }}).then(r=>setAiSentimentSummary(r.data?.summary || null)).catch(()=>setAiSentimentSummary(null));
+    api.get<{summary?: string}>('/ai/mood-summary', { params: { period: sentimentPeriod }}).then(r=>setAiMoodSummary(r.data?.summary || null)).catch(()=>setAiMoodSummary(null));
+  }, [authenticated]);
 
   // Only run this on initial mount
   useEffect(() => {
@@ -252,26 +213,14 @@ export default function CounselorDashboard() {
     return () => { isMounted = false; };
   }, []);
 
-  // Fetch sentiment breakdown when sentimentPeriod changes
+  // Fetch sentiment breakdown when sentimentPeriod changes (only if authenticated)
   useEffect(() => {
-    fetch(`${API_BASE}/api/sentiments?period=${sentimentPeriod}`)
-      .then((res) => res.json())
-      .then(setSentimentBreakdown)
-      .catch(console.error);
-    fetch(`${API_BASE}/api/checkin-breakdown?period=${sentimentPeriod}`)
-      .then(res => res.json())
-      .then(setCheckinBreakdown)
-      .catch(console.error);
-    // Refresh AI summaries for the selected period
-    fetch(`${API_BASE}/api/ai/sentiment-summary?period=${sentimentPeriod}`)
-      .then(res => res.ok ? res.json() : Promise.reject())
-      .then(d => setAiSentimentSummary(d?.summary || null))
-      .catch(() => setAiSentimentSummary(null));
-    fetch(`${API_BASE}/api/ai/mood-summary?period=${sentimentPeriod}`)
-      .then(res => res.ok ? res.json() : Promise.reject())
-      .then(d => setAiMoodSummary(d?.summary || null))
-      .catch(() => setAiMoodSummary(null));
-  }, [sentimentPeriod]);
+    if (!authenticated) return;
+    api.get<any[]>('/sentiments', { params: { period: sentimentPeriod }}).then(r=>setSentimentBreakdown(r.data)).catch(console.error);
+    api.get<{mood:any[];energy:any[];stress:any[]}>('/checkin-breakdown', { params: { period: sentimentPeriod }}).then(r=>setCheckinBreakdown(r.data)).catch(console.error);
+    api.get<{summary?: string}>('/ai/sentiment-summary', { params: { period: sentimentPeriod }}).then(r=>setAiSentimentSummary(r.data?.summary || null)).catch(()=>setAiSentimentSummary(null));
+    api.get<{summary?: string}>('/ai/mood-summary', { params: { period: sentimentPeriod }}).then(r=>setAiMoodSummary(r.data?.summary || null)).catch(()=>setAiMoodSummary(null));
+  }, [sentimentPeriod, authenticated]);
 
   const parseWeekString = (weekStr: string) => {
     const [yearStr, monthStr, weekLabel] = weekStr.split("-");
@@ -434,25 +383,16 @@ export default function CounselorDashboard() {
 
   const getFirstPeriodWithData = async () => {
     for (const period of ["week", "month", "year"] as const) {
-      const res = await fetch(`${API_BASE}/api/sentiments?period=${period}`);
-      const data = await res.json();
-      if (data.length > 0) return period;
+      const { data } = await api.get<any[]>('/sentiments', { params: { period }});
+      if (Array.isArray(data) && data.length > 0) return period;
     }
     return "year"; // fallback if all are empty
   };
 
   return (
-    <main
-      className={`transition-all duration-200 ${
-        open ? "pl-[17rem] p-6 space-y-4 bg-[#f9fafb] min-h-screen" : "pl-[4.5rem] p-6 space-y-5 bg-[#f9fafb] min-h-screen"
-      } pt-1 pr-6 pb-6 w-full`}
-      style={{ minHeight: "100vh" }}
-    >
-      <motion.div
-        initial={{ opacity: 0, y: 6 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.35 }}
-        className="p-4 sm:p-5 space-y-5 max-w-full"
+      <main
+        className={`transition-all duration-200 bg-[#f9fafb] min-h-screen pt-1 pr-6 pb-6 w-full p-4 sm:p-5 space-y-5 max-w-full`}
+        style={{ minHeight: "100vh" }}
       >
         {/* Header with search + message + profile */}
         <div className="flex flex-col gap-4">
@@ -1005,7 +945,10 @@ export default function CounselorDashboard() {
             </div>
           </div>
         </div>
-      </motion.div>
-    </main>
+      </main>
   );
 }
+
+// Use shared layout so Sidebar renders under Inertia and pages pad consistently
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(CounselorDashboard as any).layout = (page: React.ReactNode) => <DashboardLayout>{page}</DashboardLayout>;

@@ -3,7 +3,7 @@
   top: 0;
   left: 0;
   height: 100vh;
-  width: 16rem;
+  width: 17rem; /* align with motion animate open width */
   background: #f9fafb;
   display: flex;
   flex-direction: column;
@@ -14,11 +14,11 @@
 }
 
 .open {
-  width: 16rem;
+  width: 17rem;
 }
 
 .closed {
-  width: 4.5rem;
+  width: 5rem;
 }
 
 .logoRow {
