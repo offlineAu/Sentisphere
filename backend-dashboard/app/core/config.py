@@ -1,5 +1,5 @@
 import os
-from pydantic import BaseSettings, AnyHttpUrl
+from pydantic_settings import BaseSettings
 from typing import List
 
 class Settings(BaseSettings):
@@ -15,9 +15,7 @@ class Settings(BaseSettings):
     DB_DRIVER: str = os.getenv("DB_DRIVER", "mysql+mysqlconnector")
 
     # CORS
-    CORS_ORIGINS: List[AnyHttpUrl] = [
-        os.getenv("FRONTEND_ORIGIN", "http://localhost:5173")
-    ]
+    CORS_ORIGINS: List[str] = []
 
     # JWT
     JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "change-me-in-prod")
@@ -28,4 +26,13 @@ class Settings(BaseSettings):
         env_file = ".env"
         case_sensitive = False
 
-settings = Settings()
+def _load_settings() -> "Settings":
+    s = Settings()
+    origins = os.getenv("FRONTEND_ORIGINS") or os.getenv("FRONTEND_ORIGIN")
+    if origins:
+        s.CORS_ORIGINS = [o.strip() for o in origins.split(",") if o.strip()]
+    else:
+        s.CORS_ORIGINS = ["http://localhost:5173", "http://localhost:8000"]
+    return s
+
+settings = _load_settings()

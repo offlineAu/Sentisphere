@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight, TrendingUp, AlertTriangle, UserRound, CalendarDays, Activity, Download, Filter } from "lucide-react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip } from "recharts";
-import { useSidebar } from "../components/SidebarContext";
+import DashboardLayout from "../layouts/DashboardLayout";
+import api from "../lib/api";
 import styles from "./Reports.module.css";
-const API_BASE = (import.meta as any).env?.VITE_API_URL || "";
 
 type TopStat = {
   label: string;
@@ -77,7 +77,6 @@ function CustomWeekTick({ x, y, payload }: any) {
 }
 
 function Reports() {
-  const { open } = useSidebar();
 
   const [loading, setLoading] = useState(true);
 
@@ -99,15 +98,12 @@ function Reports() {
 
   // --- Fetch mood trend ---
   useEffect(() => {
-    fetch(`${API_BASE}/api/mood-trend`)
-      .then(res => res.json())
-      .then(data => {
-        setMoodTrendData(data);
-
-        if (data.length > 0) {
+    api.get<any[]>(`/mood-trend`)
+      .then(({ data }) => {
+        setMoodTrendData(data || []);
+        if ((data || []).length > 0) {
           const lastWeek = data[data.length - 1];
           const prevWeek = data.length > 1 ? data[data.length - 2] : lastWeek;
-
           setCurrentAvg(lastWeek.avgMood || 0);
           setTrend(Math.round((lastWeek.avgMood - prevWeek.avgMood) * 10) / 10);
         }
@@ -117,9 +113,8 @@ function Reports() {
 
   // --- Fetch participation ---
   useEffect(() => {
-    fetch(`${API_BASE}/api/reports/participation`)
-      .then(res => res.json())
-      .then(data => setParticipation(data.participation))
+    api.get<{ participation: number }>(`/reports/participation`)
+      .then(({ data }) => setParticipation(Number(data?.participation || 0)))
       .catch(err => console.error(err));
   }, []);
 
@@ -127,8 +122,8 @@ function Reports() {
   useEffect(() => {
     const fetchReports = async () => {
       try {
-        const topRes = await fetch(`${API_BASE}/api/reports/top-stats`);
-        const topData = await topRes.json();
+        const topRes = await api.get<any>(`/reports/top-stats`);
+        const topData = topRes.data;
 
         const calcDelta = (current: number, previous: number) => {
           if (!previous) return { delta: "", deltaColor: "" };
@@ -147,8 +142,8 @@ function Reports() {
           { label: "Avg. Wellness Score", value: topData.avg_wellness_score, ...calcDelta(topData.avg_wellness_score, prevStats.avg_wellness_score) },
         ]);
 
-        const alertsRes = await fetch(`${API_BASE}/api/recent-alerts`);
-        const alertsData = await alertsRes.json();
+        const alertsRes = await api.get<any[]>(`/recent-alerts`);
+        const alertsData = alertsRes.data || [];
         const riskCount: Record<string, number> = { High: 0, Medium: 0, Low: 0 };
         alertsData.forEach((a: any) => { riskCount[a.severity] = (riskCount[a.severity] || 0) + 1; });
 
@@ -165,8 +160,8 @@ function Reports() {
           time: a.created_at,
         })));
 
-        const moodRes = await fetch(`${API_BASE}/api/mood-trend`);
-        const moodData = await moodRes.json();
+        const moodRes = await api.get<any[]>(`/mood-trend`);
+        const moodData = moodRes.data || [];
         const latestMood = moodData[moodData.length - 1]?.avgMood || 0;
         const previousMood = moodData[moodData.length - 2]?.avgMood || 0;
         const moodDelta = latestMood - previousMood;
@@ -175,16 +170,16 @@ function Reports() {
           { label: "Overall Mood", value: `${latestMood}/10`, delta: `${moodDelta >= 0 ? "+" : ""}${moodDelta.toFixed(1)}`, deltaColor: moodDelta >= 0 ? "text-green-600" : "text-red-600" },
         ]);
 
-        const concernsRes = await fetch(`${API_BASE}/api/reports/concerns`);
-        const concernsData = await concernsRes.json();
+        const concernsRes = await api.get<any[]>(`/reports/concerns`);
+        const concernsData = concernsRes.data || [];
         setConcerns(concernsData.map((c: any) => ({ ...c, barColor: "#2563eb" })));
 
-        const interventionsRes = await fetch(`${API_BASE}/api/reports/interventions`);
-        const interventionsData = await interventionsRes.json();
+        const interventionsRes = await api.get<any[]>(`/reports/interventions`);
+        const interventionsData = interventionsRes.data || [];
         setInterventions(interventionsData.map((i: any) => ({ ...i, barColor: "#0d8c4f" })));
 
-        const attentionRes = await fetch(`${API_BASE}/api/reports/attention`);
-        const attentionData = await attentionRes.json();
+        const attentionRes = await api.get<any[]>(`/reports/attention`);
+        const attentionData = attentionRes.data || [];
         setAttentionStudents(
           attentionData.map((s: any) => ({
             ...s,
@@ -211,7 +206,7 @@ function Reports() {
 
   return (
     <main
-      className={`transition-all duration-200 bg-[#f9fafb] min-h-screen space-y-6 ${open ? "pl-[18.5rem]" : "pl-[6rem]"} pt-6 pr-6 pb-6`}
+      className={`transition-all duration-200 bg-[#f9fafb] min-h-screen space-y-4 pt-6 pr-4 pb-6`}
       style={{ minHeight: "100vh" }}
     >
       {/* Header */}
@@ -420,5 +415,9 @@ function Reports() {
     </main>
   );
 }
+
+// Use shared layout so Sidebar renders and paddings are consistent across pages
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(Reports as any).layout = (page: React.ReactNode) => <DashboardLayout>{page}</DashboardLayout>;
 
 export default Reports;

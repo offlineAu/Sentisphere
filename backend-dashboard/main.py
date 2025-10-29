@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Query, HTTPException
+from fastapi import FastAPI, Query, HTTPException, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from datetime import datetime, timedelta
@@ -8,12 +8,17 @@ import re
 import typing
 from pydantic import BaseModel
 from typing import List, Optional
+import logging
+from fastapi.security import OAuth2PasswordBearer
 
 from app.core.config import settings
 from app.db.database import engine
 from app.api.routes.auth import router as auth_router
+from app.services.jwt import decode_token
 
 app = FastAPI(title=settings.APP_NAME)
+
+logging.basicConfig(level=logging.INFO)
 
 app.add_middleware(
     CORSMiddleware,
@@ -25,6 +30,30 @@ app.add_middleware(
 
 # Optional auth router (not enforced on other routes)
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
+
+def get_current_user(token: str = Depends(oauth2_scheme)) -> str:
+    try:
+        payload = decode_token(token)
+        sub = payload.get("sub")
+        if not sub:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+        return str(sub)
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
+
+@app.get("/api/auth/me")
+def auth_me(token: str = Depends(oauth2_scheme)):
+    """Return the current authenticated user id from JWT (subject)."""
+    try:
+        payload = decode_token(token)
+        sub = payload.get("sub")
+        if not sub:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+        return {"user_id": int(sub)}
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
 
 @app.get("/api/mood-trend")
 def mood_trend():
@@ -60,6 +89,167 @@ def mood_trend():
             for row in result
         ]
     return data
+
+class CounselorProfileUpdate(BaseModel):
+    name: Optional[str] = None
+    email: Optional[str] = None
+    department: Optional[str] = None  # maps to organization on UI
+    contact_number: Optional[str] = None
+    availability: Optional[str] = None
+    year_experience: Optional[int] = None
+    # Extra optional fields that may or may not exist in schema; ignored if columns missing
+    phone: Optional[str] = None
+    license_number: Optional[str] = None
+    specializations: Optional[str] = None
+    education: Optional[str] = None
+    bio: Optional[str] = None
+    experience_years: Optional[str] = None
+    languages: Optional[str] = None
+
+
+@app.put("/api/counselor-profile")
+def update_counselor_profile(
+    payload: CounselorProfileUpdate,
+    user_id: Optional[int] = Query(None),
+    current_user: str = Depends(get_current_user),
+):
+    """Update counselor profile data. Updates `user` (name/email) and, if present,
+    `counselorprofile` fields (title/department/etc). Only updates columns that exist.
+    If a counselorprofile row doesn't exist yet, it will be inserted.
+    """
+    try:
+        uid = int(user_id) if user_id is not None else int(current_user)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid user id")
+
+    with engine.connect() as conn:
+        # Update base user table
+        if payload.name is not None or payload.email is not None:
+            fields = []
+            params = {"uid": uid}
+            if payload.name is not None:
+                fields.append("name = :name")
+                params["name"] = payload.name
+            if payload.email is not None:
+                fields.append("email = :email")
+                params["email"] = payload.email
+            if fields:
+                conn.execute(text(f"UPDATE user SET {', '.join(fields)} WHERE user_id = :uid"), params)
+
+        # Check if counselor_profile table exists
+        exists = conn.execute(text(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM information_schema.tables
+            WHERE table_schema = DATABASE() AND table_name = 'counselor_profile'
+            """
+        )).mappings().first()["cnt"] > 0
+
+        if exists:
+            # Discover available columns
+            cols = {r["COLUMN_NAME"] for r in conn.execute(text(
+                """
+                SELECT COLUMN_NAME FROM information_schema.columns
+                WHERE table_schema = DATABASE() AND table_name = 'counselor_profile'
+                """
+            )).mappings()}
+
+            # Build update set for available fields
+            updates = []
+            params = {"uid": uid}
+            def add(col: str, val: Optional[str]):
+                if val is not None and col in cols:
+                    updates.append(f"{col} = :{col}")
+                    params[col] = val
+
+            add("department", payload.department)
+            # New counselor_profile fields
+            add("contact_number", payload.contact_number or payload.phone)
+            add("availability", payload.availability)
+            # Optional extras if present in schema
+            add("phone", payload.phone)
+            add("license_number", payload.license_number)
+            add("specializations", payload.specializations)
+            add("education", payload.education)
+            add("bio", payload.bio)
+            add("experience_years", payload.experience_years)
+            add("languages", payload.languages)
+            # Numeric year_experience
+            if payload.year_experience is not None and "year_experience" in cols:
+                updates.append("year_experience = :year_experience")
+                params["year_experience"] = int(payload.year_experience)
+            elif payload.experience_years and payload.experience_years.isdigit() and "year_experience" in cols:
+                updates.append("year_experience = :year_experience")
+                params["year_experience"] = int(payload.experience_years)
+
+            # Ensure a row exists, attempt update first
+            if updates:
+                result = conn.execute(text(
+                    f"UPDATE counselor_profile SET {', '.join(updates)} WHERE user_id = :uid"
+                ), params)
+                if result.rowcount == 0:
+                    # Insert minimal row first, then update with fields
+                    insert_cols = ["user_id"] + [k for k in params.keys() if k != "uid"]
+                    insert_vals = [":uid"] + [f":{k}" for k in params.keys() if k != "uid"]
+                    conn.execute(text(
+                        f"INSERT INTO counselor_profile ({', '.join(insert_cols)}) VALUES ({', '.join(insert_vals)})"
+                    ), params)
+
+        conn.commit()
+
+    return {"ok": True}
+
+# Fetch counselor profile (joined with user)
+@app.get("/api/counselor-profile")
+def get_counselor_profile(
+    user_id: Optional[int] = Query(None),
+    current_user: str = Depends(get_current_user),
+):
+    try:
+        uid = int(user_id) if user_id is not None else int(current_user)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid user id")
+
+    with engine.connect() as conn:
+        # Left join to include user info even if counselor_profile row missing
+        q = text(
+            """
+            SELECT 
+              u.user_id, u.name, u.email, u.role,
+              cp.department, cp.contact_number, cp.availability,
+              cp.year_experience, cp.phone, cp.license_number, cp.specializations,
+              cp.education, cp.bio, cp.experience_years, cp.languages, cp.created_at
+            FROM user u
+            LEFT JOIN counselor_profile cp ON cp.user_id = u.user_id
+            WHERE u.user_id = :uid
+            LIMIT 1
+            """
+        )
+        row = conn.execute(q, {"uid": uid}).mappings().first()
+        if not row:
+            raise HTTPException(status_code=404, detail="User not found")
+        return {
+            "user_id": row["user_id"],
+            "name": row["name"],
+            "email": row["email"],
+            "role": row["role"],
+            "department": row.get("department") if hasattr(row, "get") else row["department"],
+            "contact_number": row.get("contact_number") if hasattr(row, "get") else row["contact_number"],
+            "availability": row.get("availability") if hasattr(row, "get") else row["availability"],
+            "year_experience": row.get("year_experience") if hasattr(row, "get") else row["year_experience"],
+            "phone": row.get("phone") if hasattr(row, "get") else row["phone"],
+            "license_number": row.get("license_number") if hasattr(row, "get") else row["license_number"],
+            "specializations": row.get("specializations") if hasattr(row, "get") else row["specializations"],
+            "education": row.get("education") if hasattr(row, "get") else row["education"],
+            "bio": row.get("bio") if hasattr(row, "get") else row["bio"],
+            "experience_years": row.get("experience_years") if hasattr(row, "get") else row["experience_years"],
+            "languages": row.get("languages") if hasattr(row, "get") else row["languages"],
+            "created_at": (
+                row.get("created_at").strftime("%Y-%m-%d %H:%M:%S") if hasattr(row, "get") and row.get("created_at") else (
+                    row["created_at"].strftime("%Y-%m-%d %H:%M:%S") if "created_at" in row and row["created_at"] else None
+                )
+            ),
+        }
 
 @app.get("/api/sentiments")
 def sentiment_breakdown(period: str = Query("month", enum=["week", "month", "year"])):
@@ -420,7 +610,7 @@ def high_risk_flags():
 
 # --- Conversations list ---
 @app.get("/api/conversations")
-def get_conversations(user_id: int = Query(...)):
+def get_conversations(user_id: int = Query(...), current_user: str = Depends(get_current_user)):
     query = """
         SELECT DISTINCT
             c.conversation_id AS id,
@@ -445,7 +635,7 @@ def get_conversations(user_id: int = Query(...)):
 
 # --- Messages per conversation ---
 @app.get("/api/conversations/{conversation_id}/messages")
-def get_messages(conversation_id: int):
+def get_messages(conversation_id: int, current_user: str = Depends(get_current_user)):
     query = """
         SELECT 
             m.message_id AS id,
@@ -467,14 +657,12 @@ def get_messages(conversation_id: int):
 
 
 # --- Send message ---
-from pydantic import BaseModel
-
 class MessageIn(BaseModel):
     sender_id: int
     content: str
 
 @app.post("/api/conversations/{conversation_id}/messages")
-def send_message(conversation_id: int, message: MessageIn):
+def send_message(conversation_id: int, message: MessageIn, current_user: str = Depends(get_current_user)):
     query = """
         INSERT INTO messages (conversation_id, sender_id, content, timestamp)
         VALUES (:cid, :sid, :content, NOW())
@@ -494,9 +682,18 @@ def send_message(conversation_id: int, message: MessageIn):
             "timestamp": str(datetime.now())
         }
 
+@app.get("/health")
+def health():
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return {"status": "ok"}
+    except Exception:
+        raise HTTPException(status_code=503, detail="unhealthy")
+
 # --- Mark messages as read in a conversation ---
 @app.post("/api/conversations/{conversation_id}/read")
-def mark_conversation_read(conversation_id: int, user_id: int = Query(...)):
+def mark_conversation_read(conversation_id: int, user_id: int = Query(...), current_user: str = Depends(get_current_user)):
     """
     Mark all messages in the conversation as read for the given user by setting is_read = 1
     for messages not sent by the user (i.e., incoming messages to the user).
@@ -518,7 +715,7 @@ def mark_conversation_read(conversation_id: int, user_id: int = Query(...)):
 # --- Reports APIs ---
 
 @app.get("/api/reports/top-stats")
-def get_top_stats():
+def get_top_stats(current_user: str = Depends(get_current_user)):
     query = """
         SELECT 
             (SELECT COUNT(*) FROM user WHERE role = 'student') AS total_students,
