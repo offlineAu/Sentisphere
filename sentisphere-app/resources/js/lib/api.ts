@@ -2,7 +2,7 @@ import axios from 'axios';
 
 // Use relative base so it works with Vite proxy in dev and Laravel proxy in prod
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: `${import.meta.env.VITE_API_URL || ''}/api`,
 });
 
 // Initialize Authorization header from localStorage token if present

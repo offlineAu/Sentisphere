@@ -48,11 +48,18 @@ export async function logoutFastApi(): Promise<LogoutResponse> {
 
 export async function sessionStatus(): Promise<SessionStatus> {
   try {
-    const resp = await axios.get<SessionStatus>('/auth/session', {
-      headers: { 'Accept': 'application/json' },
-      validateStatus: () => true,
-    });
-    return resp.data || { authenticated: false };
+    const tok = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
+    const resp = await api.get<{ user_id: number }>(
+      '/auth/me',
+      {
+        headers: tok ? { Authorization: `Bearer ${tok}` } : undefined,
+        validateStatus: () => true,
+      }
+    );
+    if (resp.status >= 200 && resp.status < 300 && typeof resp.data?.user_id === 'number') {
+      return { authenticated: true };
+    }
+    return { authenticated: false };
   } catch (e) {
     return { authenticated: false };
   }

@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { Send, MessageSquare, User, Search } from "lucide-react";
 import { useSidebar } from "../components/SidebarContext";
 import Sidebar from "../components/Sidebar";
+import { LoadingSpinner } from "../components/loading-spinner";
 import styles from "./Chat.module.css";
 import api from "../lib/api";
 import { sessionStatus } from "../lib/auth";
@@ -50,6 +51,7 @@ export default function Chat() {
   const [messagesByConversation, setMessagesByConversation] = useState<Record<number, ChatMessage[]>>({});
   const [searchQuery, setSearchQuery] = useState("");
   const [filter, setFilter] = useState<"all" | "unread" | "read">("all");
+  const [loading, setLoading] = useState(true);
 
   // Check session authentication and redirect if needed
   useEffect(() => {
@@ -68,17 +70,25 @@ export default function Chat() {
   // Fetch conversations
   useEffect(() => {
     if (!authenticated) return;
-    api
-      .get<Conversation[]>(`/conversations`, {
-        params: { user_id: userId },
-      })
-      .then((res) => {
+    
+    setLoading(true);
+    const fetchConversations = async () => {
+      try {
+        const res = await api.get<Conversation[]>(`/conversations`, {
+          params: { user_id: userId },
+        });
         setConversations(res.data);
         if (res.data.length > 0) {
           setActiveConversation(res.data[0].id);
         }
-      })
-      .catch((err) => console.error("Error fetching conversations:", err));
+      } catch (err) {
+        console.error("Error fetching conversations:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchConversations();
   }, [userId, authenticated]);
 
   // Fetch messages when active conversation changes
@@ -168,6 +178,18 @@ export default function Chat() {
       })
       .catch((err) => console.error("Error sending message:", err));
   };
+
+  // Show loading spinner while data is being fetched
+  if (loading) {
+    return (
+      <div className="flex h-[80vh] w-full items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <LoadingSpinner size="lg" className="text-primary" />
+          <p className="text-muted-foreground">Loading conversations...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex bg-[#f5f5f5] min-h-screen">

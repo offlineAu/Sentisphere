@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     CORS_ORIGINS: List[str] = []
 
     # JWT
-    JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "change-me-in-prod")
+    JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "super-dev-secret-please-change-later")
     JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
     JWT_EXPIRE_MINUTES: int = int(os.getenv("JWT_EXPIRE_MINUTES", "60"))
 
@@ -32,7 +32,12 @@ def _load_settings() -> "Settings":
     if origins:
         s.CORS_ORIGINS = [o.strip() for o in origins.split(",") if o.strip()]
     else:
-        s.CORS_ORIGINS = ["http://localhost:5173", "http://localhost:8000"]
+        s.CORS_ORIGINS = [
+            "http://localhost:5173",
+            "http://localhost:8000",
+            "http://127.0.0.1:5173",
+            "http://127.0.0.1:8000",
+        ]
     return s
 
 settings = _load_settings()

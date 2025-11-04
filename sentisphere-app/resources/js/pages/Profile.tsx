@@ -2,6 +2,7 @@ import DashboardLayout from '../layouts/DashboardLayout';
 import styles from './Profile.module.css';
 import { useEffect, useState } from 'react';
 import api from '../lib/api';
+import { LoadingSpinner } from '../components/loading-spinner';
 
 type ProfileData = {
   name: string;
@@ -41,19 +42,16 @@ function Profile() {
     contact_number: '',
   });
 
+
   useEffect(() => {
     let mounted = true;
-    async function boot() {
+    
+    const fetchProfile = async (uid: number) => {
       try {
-        // Resolve current user id via FastAPI auth
-        const me = await api.get<{ user_id: number }>(`/auth/me`);
-        const uid = Number(me.data?.user_id) || 0;
-        if (mounted) setUserId(uid || null);
-
-        const loadUid = uid || (Number(new URLSearchParams(window.location.search).get('uid')) || Number(window.localStorage.getItem('current_user_id')) || 1);
-        const resp = await api.get<any>(`/counselor-profile`, { params: { user_id: loadUid } });
+        const resp = await api.get<any>(`/counselor-profile`, { params: { user_id: uid } });
         if (!mounted) return;
-        setData((prev) => ({
+        
+        setData(prev => ({
           ...prev,
           name: resp.data?.name || '',
           email: resp.data?.email || '',
@@ -68,40 +66,51 @@ function Profile() {
           bio: resp.data?.bio || prev.bio,
           languages: resp.data?.languages || prev.languages,
           created_at: resp.data?.created_at || prev.created_at,
-        } as ProfileData));
-      } catch {
-        // try fallback without me() if fails
-        try {
-          const params = new URLSearchParams(window.location.search);
-          const uidStr = params.get('uid') || window.localStorage.getItem('current_user_id') || '1';
-          const uid = Number(uidStr) || 1;
-          if (mounted) setUserId(uid);
-          const resp = await api.get<any>(`/counselor-profile`, { params: { user_id: uid } });
-          if (mounted) {
-            setData((prev) => ({
-              ...prev,
-              name: resp.data?.name || '',
-              email: resp.data?.email || '',
-              organization: resp.data?.department || '',
-              phone: resp.data?.phone || resp.data?.contact_number || '',
-              experience_years: resp.data?.experience_years || (resp.data?.year_experience ? String(resp.data?.year_experience) : ''),
-              availability: resp.data?.availability || prev.availability,
-              contact_number: resp.data?.contact_number || prev.contact_number,
-              license_number: resp.data?.license_number || prev.license_number,
-              specializations: resp.data?.specializations || prev.specializations,
-              education: resp.data?.education || prev.education,
-              bio: resp.data?.bio || prev.bio,
-              languages: resp.data?.languages || prev.languages,
-              created_at: resp.data?.created_at || prev.created_at,
-            } as ProfileData));
-          }
-        } catch {}
-      } finally {
-        if (mounted) setLoading(false);
+        }));
+        return true; // Success
+      } catch (error) {
+        console.error('Error fetching profile:', error);
+        return false; // Failure
       }
-    }
-    boot();
-    return () => { mounted = false; };
+    };
+
+    const loadProfile = async () => {
+      try {
+        // First try with auth/me
+        try {
+          const me = await api.get<{ user_id: number }>(`/auth/me`);
+          const uid = Number(me.data?.user_id) || 0;
+          if (mounted) setUserId(uid || null);
+          
+          const loadUid = uid || (Number(new URLSearchParams(window.location.search).get('uid')) || 
+                                Number(window.localStorage.getItem('current_user_id')) || 1);
+          
+          const success = await fetchProfile(loadUid);
+          if (success) return;
+        } catch (meError) {
+          console.log('Auth/me failed, trying fallback...');
+        }
+
+        // Fallback to direct profile fetch
+        const params = new URLSearchParams(window.location.search);
+        const uidStr = params.get('uid') || window.localStorage.getItem('current_user_id') || '1';
+        const uid = Number(uidStr) || 1;
+        if (mounted) setUserId(uid);
+        await fetchProfile(uid);
+      } catch (error) {
+        console.error('Error in profile loading sequence:', error);
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    loadProfile();
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const onChange = (k: keyof ProfileData) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -135,6 +144,18 @@ function Profile() {
       setSaving(false);
     }
   };
+
+  // Show loading spinner while data is being fetched
+  if (loading) {
+    return (
+      <div className="flex h-[80vh] w-full items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <LoadingSpinner size="lg" className="text-primary" />
+          <p className="text-muted-foreground">Loading profile...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <main

@@ -121,6 +121,18 @@
   height: 20px;
 }
 
+/* Disabled nav item (e.g., Coming Soon) */
+.navLinkDisabled {
+  color: #9ca3af; /* muted */
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.navLinkDisabled:hover {
+  background: transparent; /* disable hover background */
+  color: #9ca3af; /* keep muted color */
+}
+
 .spacer {
   flex: 1;
 }
