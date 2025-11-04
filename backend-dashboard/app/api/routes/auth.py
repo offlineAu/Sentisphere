@@ -1,8 +1,11 @@
 from fastapi import APIRouter, HTTPException, Depends, Request
 from sqlalchemy import text
+from sqlalchemy.exc import ProgrammingError
 from app.schemas.auth import Token
 from app.services.jwt import create_access_token
 from app.db.database import engine
+from datetime import datetime, timezone, timedelta
+from app.core.config import settings
 
 router = APIRouter()
 
@@ -45,19 +48,78 @@ async def login_for_access_token(request: Request):
         raise HTTPException(status_code=422, detail="Missing username or password")
 
     with engine.connect() as conn:
-        row = conn.execute(
-            text("""
-                SELECT user_id, password_hash
-                FROM user
-                WHERE email = :email OR name = :email
-                LIMIT 1
-            """),
-            {"email": username}
-        ).mappings().first()
-        if not row or not _verify_password(password, row["password_hash"] or ""):
+        row = None
+        try:
+            row = conn.execute(
+                text(
+                    """
+                    SELECT user_id, email, name, password_hash, password
+                    FROM user
+                    WHERE email = :email OR name = :email
+                    LIMIT 1
+                    """
+                ),
+                {"email": username},
+            ).mappings().first()
+        except ProgrammingError:
+            row = conn.execute(
+                text(
+                    """
+                    SELECT user_id, email, name, password_hash
+                    FROM user
+                    WHERE email = :email OR name = :email
+                    LIMIT 1
+                    """
+                ),
+                {"email": username},
+            ).mappings().first()
+        stored = ""
+        if row:
+            try:
+                stored = (row.get("password_hash") or "") or (row.get("password") or "")
+            except AttributeError:
+                stored = (row["password_hash"] if "password_hash" in row and row["password_hash"] else "") or (row["password"] if "password" in row and row["password"] else "")
+        if not row or not _verify_password(password, stored):
             raise HTTPException(status_code=400, detail="Incorrect username or password")
-        sub = str(row["user_id"]) if row.get("user_id") is not None else username
-        token = create_access_token(subject=sub)
+            
+        try:
+            # Get user details with proper type conversion and fallbacks
+            user_id = str(row.get("user_id") or "")
+            if not user_id:
+                raise ValueError("User ID is required")
+                
+            user_email = str(row.get("email") or "")
+            user_name = str(row.get("name") or user_email.split('@')[0] if user_email and '@' in user_email else "User")
+            
+            # Prepare user data for token - ensure all values are strings
+            user_data = {
+                "email": user_email,
+                "name": user_name,
+                "role": "counselor"
+            }
+            
+            print(f"Creating token with user data: {user_data}")
+            
+            # Create token with user data
+            token = create_access_token(
+                subject=user_id,
+                expires_delta=timedelta(minutes=settings.JWT_EXPIRE_MINUTES),
+                user_data=user_data
+            )
+            
+            if not token:
+                raise ValueError("Failed to create token: Empty token returned")
+                
+            print(f"Token created successfully. Length: {len(token)}")
+            return Token(access_token=token)
+            
+        except ValueError as ve:
+            print(f"Validation error: {str(ve)}")
+            raise HTTPException(status_code=400, detail=str(ve))
+        except Exception as e:
+            error_msg = f"Error creating access token: {str(e)}"
+            print(error_msg)
+            raise HTTPException(status_code=500, detail=error_msg)
         return Token(access_token=token)
 
 @router.post("/signup")

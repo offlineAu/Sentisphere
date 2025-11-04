@@ -18,9 +18,9 @@ import styles from "./Sidebar.module.css";
 const mainNavLinks = [
   { href: "/", label: "Dashboard", icon: <Home /> },
   { href: "/chat", label: "Chat", icon: <MessageCircle /> },
-  { href: "/appointments", label: "Appointments", icon: <CalendarDays /> },
   { href: "/reports", label: "Reports", icon: <FileText /> },
   { href: "/profile", label: "Profile", icon: <User /> },
+  { href: "/appointments", label: "Appointments (Soon)", icon: <CalendarDays /> },
 ];
 
 export default function Sidebar() {
@@ -105,7 +105,38 @@ export default function Sidebar() {
       <div className={styles.menuTitle}>MENU</div>
       <nav className={styles.nav}>
         {mainNavLinks.map((link) => {
-          const isActive = currentPath === link.href;
+          const isAppointments = link.href === "/appointments";
+          const isActive = !isAppointments && currentPath === link.href;
+
+          if (isAppointments) {
+            return (
+              <motion.div
+                key={link.href}
+                className={`${styles.navLink} ${styles.navLinkDisabled}`}
+                whileHover={{ scale: 1.0 }}
+                transition={{ duration: 0.15 }}
+                aria-disabled="true"
+                title="Coming soon"
+                tabIndex={-1}
+              >
+                <div className={`${styles.iconWrap}`}>
+                  {link.icon}
+                </div>
+                <AnimatePresence>
+                  {open && (
+                    <motion.span
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: -10 }}
+                      transition={{ duration: 0.2 }}
+                    >
+                      {link.label}
+                    </motion.span>
+                  )}
+                </AnimatePresence>
+              </motion.div>
+            );
+          }
 
           return (
             <motion.a
