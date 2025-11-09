@@ -19,6 +19,7 @@ const { width } = Dimensions.get("window")
 const GRID_PADDING = 16 // matches scrollContent padding
 const CARD_CONTENT_PADDING = 20 // matches styles.cardContent padding
 const QUICK_GAP = 10
+const HALF_GAP = QUICK_GAP / 2
 
 interface MoodData {
   date: string
@@ -33,6 +34,14 @@ interface JournalEntry {
   mood: string
 }
 
+type UpcomingAppointment = {
+  id: string
+  counselor: string
+  startAt: string
+  mode?: string
+  location?: string
+}
+
 export default function EnhancedDashboardScreen() {
   const scheme = useColorScheme() ?? "light"
   const palette = Colors[scheme] as any
@@ -41,22 +50,16 @@ export default function EnhancedDashboardScreen() {
   const [weeklyMoodAverage] = useState(7.2)
   const [currentStreak] = useState(5)
   const [gridW, setGridW] = useState(0)
-  const measuredTileW = gridW > 0 ? Math.round((gridW - QUICK_GAP) / 2) : 0
-  const quickActionTileSize: any = gridW > 0 && gridW < 360
+  const measuredTileW = gridW > 0 ? (gridW - QUICK_GAP) / 2 : 0
+  const quickActionTileSize: any = measuredTileW
     ? {
-        width: '100%',
-        flexBasis: '100%',
-        minHeight: Math.round(Math.max(132, gridW * 0.68)),
-      }
-    : measuredTileW
-      ? {
-          width: measuredTileW,
-          flexBasis: measuredTileW,
-          maxWidth: measuredTileW,
-          minWidth: measuredTileW,
-          minHeight: Math.round(measuredTileW * 0.7),
-        }
-      : { width: '48%', flexBasis: '48%', minHeight: 136 }
+      width: measuredTileW,
+      flexBasis: measuredTileW,
+      maxWidth: measuredTileW,
+      minWidth: measuredTileW,
+      minHeight: Math.max(132, Math.round(measuredTileW * 0.7)),
+    }
+    : { width: '50%', flexBasis: '50%', minHeight: 136 }
 
   // Feature flags for layout
   const showLegacySections = false
@@ -118,6 +121,22 @@ export default function EnhancedDashboardScreen() {
     { id: "1", title: "Morning Reflections", date: "2024-01-15", mood: "Optimistic" },
     { id: "2", title: "Weekend Plans", date: "2024-01-14", mood: "Excited" },
   ])
+
+  const [upcomingAppointments] = useState<UpcomingAppointment[]>([])
+  const nextAppointment = upcomingAppointments[0] ?? null
+  const hasUpcomingAppointments = !!nextAppointment
+
+  const formatAppointmentDate = (startAt: string) => {
+    const date = new Date(startAt)
+    if (Number.isNaN(date.getTime())) return startAt
+    return date.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })
+  }
+
+  const formatAppointmentTime = (startAt: string) => {
+    const date = new Date(startAt)
+    if (Number.isNaN(date.getTime())) return ''
+    return date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+  }
 
   // Quote from Real Inspire API: https://api.realinspire.live/v1/quotes/random
   type InspireQuote = { content: string; author: string }
@@ -349,7 +368,7 @@ export default function EnhancedDashboardScreen() {
         {/* Enhanced Daily Inspiration with Gradient */}
         <Animated.View style={makeFadeUp(entrance.inspire)}>
           <Card style={[styles.inspirationCard, styles.cardShadow, styles.inspirationShadow]}>
-            <LinearGradient colors={[palette.tint, palette.tint]} style={styles.inspirationGradient}>
+            <LinearGradient colors={["#065F46", palette.tint]} style={styles.inspirationGradient}>
               <CardContent style={styles.inspirationContent}>
                 {/* Subtle animated glow overlay */}
                 <Animated.View pointerEvents="none" style={[styles.inspirationGlow, { opacity: inspireGlowOpacity, transform: [{ scale: inspireScale }] }]}>
@@ -389,13 +408,7 @@ export default function EnhancedDashboardScreen() {
               </View>
               <ThemedText type="subtitle" style={styles.sectionTitle}>Quick Actions</ThemedText>
             </View>
-            <View
-              style={[
-                styles.quickActionsGrid,
-                gridW > 0 && gridW < 360 && { justifyContent: 'center' },
-              ]}
-              onLayout={(e) => setGridW(e.nativeEvent.layout.width)}
-            >
+            <View style={styles.quickActionsGrid} onLayout={(e) => setGridW(e.nativeEvent.layout.width)}>
               <Link href="/(student)/(tabs)/mood" asChild>
                 <Pressable
                   onHoverIn={qa1.onHoverIn}
@@ -516,7 +529,7 @@ export default function EnhancedDashboardScreen() {
                         <Icon name="arrow-right" size={14} color="rgba(255,255,255,0.85)" />
                       </View>
                       <View style={styles.quickActionText}>
-                        <ThemedText style={styles.quickActionTitle}>AI Chat</ThemedText>
+                        <ThemedText style={styles.quickActionTitle}>Chat</ThemedText>
                         <ThemedText style={styles.quickActionSubtitle}>Get instant support</ThemedText>
                       </View>
                     </View>
@@ -529,29 +542,51 @@ export default function EnhancedDashboardScreen() {
         </Animated.View>
 
         {/* Upcoming Appointments */}
-        <Animated.View style={makeFadeUp(entrance.stat)}>
-          <Card style={styles.cardShadow}>
-            <CardContent style={styles.cardContent}>
-              <View style={styles.sectionTitleRow}>
-                <View style={styles.sectionTitleIcon}>
-                  <Icon name="calendar" size={18} color={palette.muted} />
+        {hasUpcomingAppointments && nextAppointment && (
+          <Animated.View style={makeFadeUp(entrance.stat)}>
+            <Card style={styles.cardShadow}>
+              <CardContent style={styles.upcomingContent}>
+                <View style={styles.sectionTitleRow}>
+                  <View style={styles.sectionTitleIcon}>
+                    <Icon name="calendar" size={18} color={palette.muted} />
+                  </View>
+                  <ThemedText type="subtitle" style={styles.sectionTitle}>Upcoming session</ThemedText>
                 </View>
-                <ThemedText type="subtitle" style={styles.sectionTitle}>Upcoming</ThemedText>
-              </View>
-              <View style={styles.appointmentEmpty}>
-                <Icon name="calendar" size={28} color={palette.muted} />
-                <ThemedText style={[styles.emptyText, { color: palette.muted }]}>No appointments scheduled</ThemedText>
-                <Link href="/(student)/appointments" asChild>
-                  <Button title="Request Appointment" style={styles.appointmentButton} />
-                </Link>
-              </View>
-            </CardContent>
-          </Card>
-        </Animated.View>
+
+                <View style={styles.upcomingSummary}>
+                  <View style={styles.upcomingMain}>
+                    <ThemedText style={styles.upcomingCounselor}>{nextAppointment.counselor}</ThemedText>
+                    <ThemedText style={[styles.upcomingMeta, { color: palette.muted }]}>
+                      {formatAppointmentDate(nextAppointment.startAt)} · {formatAppointmentTime(nextAppointment.startAt)}
+                    </ThemedText>
+                  </View>
+                  <View style={styles.upcomingTags}>
+                    {nextAppointment.mode ? (
+                      <View style={styles.upcomingBadge}>
+                        <ThemedText style={styles.upcomingBadgeText}>{nextAppointment.mode}</ThemedText>
+                      </View>
+                    ) : null}
+                    {nextAppointment.location ? (
+                      <View style={styles.upcomingBadge}>
+                        <ThemedText style={styles.upcomingBadgeText}>{nextAppointment.location}</ThemedText>
+                      </View>
+                    ) : null}
+                  </View>
+                </View>
+
+                <View style={styles.upcomingActions}>
+                  <Link href="/(student)/appointments" asChild>
+                    <Button variant="outline" title="Manage appointments" />
+                  </Link>
+                </View>
+              </CardContent>
+            </Card>
+          </Animated.View>
+        )}
 
         <Animated.View style={makeFadeUp(entrance.mood)}>
           <Card style={styles.cardShadow}>
-            <LinearGradient colors={["#374151", "#111827"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.moodGradient}>
+            <LinearGradient colors={["#065F46", palette.tint]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.moodGradient}>
               <CardContent style={styles.moodContent}>
                 <View style={styles.moodHeader}>
                   <ThemedText style={styles.moodTitle}>State of mood</ThemedText>
@@ -571,7 +606,7 @@ export default function EnhancedDashboardScreen() {
         {/* Counselor Location (matches Mood Prompt layout) */}
         <Animated.View style={makeFadeUp(entrance.activity)}>
           <Card style={[styles.cardShadow, styles.locationCard]}>
-            <LinearGradient colors={["#374151", "#111827"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.moodGradient}>
+            <LinearGradient colors={["#065F46", palette.tint]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.moodGradient}>
               <CardContent style={[styles.moodContent, styles.locationCenter]}>
                 <View style={{ alignItems: 'center', gap: 1 }}>
                   <View style={{ marginBottom: 7 }}>
@@ -812,7 +847,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 12,
+    marginBottom: 0,
   },
   inspirationTitle: {
     fontSize: 14,
@@ -978,9 +1013,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     height: 44,
     borderRadius: 22,
-    backgroundColor: 'rgba(17,24,39,0.72)',
+    backgroundColor: 'rgba(255,255,255,0.16)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.25)'
+    borderColor: 'rgba(255,255,255,0.38)'
   },
   locationPillIcon: {
     width: 22,
@@ -988,7 +1023,7 @@ const styles = StyleSheet.create({
     borderRadius: 11,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.18)'
+    backgroundColor: 'rgba(255,255,255,0.24)'
   },
   locationMetaRow: {
     flexDirection: 'row',
@@ -1042,6 +1077,48 @@ const styles = StyleSheet.create({
     padding: 16,
     alignItems: "center",
     gap: 8,
+  },
+  upcomingContent: {
+    padding: 20,
+    gap: 14,
+  },
+  upcomingSummary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 16,
+  },
+  upcomingMain: {
+    flex: 1,
+    gap: 4,
+  },
+  upcomingCounselor: {
+    fontSize: 16,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#111827',
+  },
+  upcomingMeta: {
+    fontSize: 12,
+  },
+  upcomingTags: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  upcomingBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: '#F0FDF4',
+  },
+  upcomingBadgeText: {
+    fontSize: 10,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#047857',
+  },
+  upcomingActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
   },
   summaryIcon: {
     width: 36,
@@ -1129,17 +1206,17 @@ const styles = StyleSheet.create({
   quickActionsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    columnGap: 10,
     rowGap: 10,
-    justifyContent: 'flex-start',
+    justifyContent: 'space-between',
+    width: '100%',
   },
   quickActionTile: {
     borderRadius: 20,
     overflow: 'hidden',
     position: 'relative',
     flexShrink: 0,
-    flexGrow: 1,
-    marginBottom: 12,
+    flexGrow: 0,
+    marginBottom: 0,
   },
   quickActionGradient: {
     position: "absolute",

@@ -1,5 +1,5 @@
 import { StyleSheet, View, FlatList, TextInput, KeyboardAvoidingView, Platform, Pressable, useWindowDimensions } from 'react-native';
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
@@ -36,6 +36,14 @@ export default function ChatScreen() {
   const { width } = useWindowDimensions();
   const isTablet = width >= 900;
   const insets = useSafeAreaInsets();
+  const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8000';
+
+  useEffect(() => {
+    fetch(`${API_BASE_URL}/api/test`)
+      .then((res) => res.json())
+      .then((data) => console.log('API test:', data))
+      .catch((err) => console.error('API test error:', err));
+  }, []);
 
   const doHaptic = async (kind: 'light' | 'selection' | 'success' = 'light') => {
     if (Platform.OS === 'web') return;
@@ -133,13 +141,33 @@ export default function ChatScreen() {
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ThemedView style={[styles.container, { paddingTop: insets.top + 24 }]}> 
-        <View style={{ alignItems: 'center', gap: 6, marginBottom: 8 }}>
+      <ThemedView style={[styles.container, { paddingTop: insets.top + 24, paddingHorizontal: 16 }]}> 
+        <View style={{ width: '100%', gap: 6, marginBottom: 12 }}>
           <View style={styles.headerRow}>
-            <View style={[styles.headerIcon, { backgroundColor: palette.background, borderColor: palette.border }]}><Icon name="message-square" size={18} color={palette.tint} /></View>
-            <ThemedText type="subtitle" style={{ fontSize: 20 }}>Chat</ThemedText>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Go back to dashboard"
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              onPressIn={() => doHaptic('selection')}
+              onPress={() => router.replace('/(student)/(tabs)/dashboard')}
+              style={({ pressed }) => [
+                styles.backButton,
+                {
+                  backgroundColor: palette.background,
+                  borderColor: palette.border,
+                  opacity: pressed ? 0.7 : 1,
+                },
+              ]}
+            >
+              <Icon name="arrow-left" size={22} color={palette.text} />
+            </Pressable>
+            <View style={styles.headerCenter}>
+              <View style={[styles.headerIcon, { backgroundColor: palette.background, borderColor: palette.border }]}><Icon name="message-square" size={18} color={palette.tint} /></View>
+              <ThemedText type="subtitle" style={{ fontSize: 20 }}>Chat</ThemedText>
+            </View>
+            <View style={styles.backButtonPlaceholder} />
           </View>
-          <ThemedText style={{ color: palette.muted, fontSize: 13, textAlign: 'center' }}>Manage and respond to student concerns</ThemedText>
+          <ThemedText style={{ color: palette.muted, fontSize: 13, textAlign: 'center', alignSelf: 'center' }}>Manage and respond to student concerns</ThemedText>
         </View>
 
         <View style={styles.main}>
@@ -187,9 +215,20 @@ export default function ChatScreen() {
 const styles = StyleSheet.create({
   // Layout
   container: { flex: 1 },
-  main: { flex: 1, padding: 16 },
-  headerRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  main: { flex: 1, paddingHorizontal: 0, paddingBottom: 16 },
+  headerRow: { flexDirection: 'row', alignItems: 'center', gap: 8, justifyContent: 'space-between' },
   headerIcon: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
+  backButton: {
+    borderWidth: 1,
+    borderRadius: 12,
+    width: 42,
+    height: 42,
+    padding: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerCenter: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, justifyContent: 'center' },
+  backButtonPlaceholder: { width: 42, height: 42 },
   sidebar: { width: 320, maxWidth: 360 },
   chatPanel: { flex: 1 },
   chatPanelInner: { minHeight: 420 },

@@ -22,6 +22,29 @@ export default function MoodScreen() {
   const scheme = useColorScheme() ?? 'light';
   const palette = Colors[scheme] as any;
 
+  const hexToRgb = (hex: string) => {
+    const h = hex?.replace('#', '');
+    if (!h || h.length !== 6) return null;
+    const r = parseInt(h.substring(0, 2), 16);
+    const g = parseInt(h.substring(2, 4), 16);
+    const b = parseInt(h.substring(4, 6), 16);
+    return { r, g, b };
+  };
+  const rgbToHex = (r: number, g: number, b: number) => {
+    const toHex = (v: number) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0');
+    return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+  };
+  const mixHex = (a: string, b: string, weight: number) => {
+    const c1 = hexToRgb(a);
+    const c2 = hexToRgb(b);
+    if (!c1 || !c2) return a;
+    const w = Math.max(0, Math.min(1, weight));
+    const r = c1.r * (1 - w) + c2.r * w;
+    const g = c1.g * (1 - w) + c2.g * w;
+    const bl = c1.b * (1 - w) + c2.b * w;
+    return rgbToHex(r, g, bl);
+  };
+
   const moods: MoodOption[] = [
     { key: 'very-sad', emoji: '😢', label: 'Very Sad' },
     { key: 'sad', emoji: '😔', label: 'Sad' },
@@ -34,6 +57,17 @@ export default function MoodScreen() {
 
   const energies = ['Very Low', 'Low', 'Moderate', 'High', 'Very High'];
   const stresses = ['No Stress', 'Low Stress', 'Moderate', 'High Stress', 'Very High'];
+
+  // Subtle mood color map for emoji pills
+  const moodColors: Record<string, { bg: string; border: string; text: string }> = {
+    'Very Sad': { bg: '#E0F2FE', border: '#BAE6FD', text: '#0284C7' },
+    'Sad': { bg: '#DBEAFE', border: '#BFDBFE', text: '#1D4ED8' },
+    'Neutral': { bg: '#F3F4F6', border: '#E5E7EB', text: '#6B7280' },
+    'Good': { bg: '#DCFCE7', border: '#BBF7D0', text: '#16A34A' },
+    'Happy': { bg: '#FEF3C7', border: '#FDE68A', text: '#D97706' },
+    'Very Happy': { bg: '#FFEDD5', border: '#FED7AA', text: '#EA580C' },
+    'Excellent': { bg: '#ECFCCB', border: '#D9F99D', text: '#65A30D' },
+  };
 
   // Active color maps for intensity levels
   const energyColors: Record<string, { bg: string; border: string; text: string }> = {
@@ -52,10 +86,13 @@ export default function MoodScreen() {
   };
 
   // Local animated selectable components
-  const MoodPillItem = ({ emoji, label, active, onPress }: { emoji: string; label: string; active: boolean; onPress: () => void }) => {
+  const MoodPillItem = ({ emoji, label, active, onPress, activeBg, activeBorder, activeText }: { emoji: string; label: string; active: boolean; onPress: () => void; activeBg?: string; activeBorder?: string; activeText?: string }) => {
     const scale = (useState(() => new Animated.Value(1))[0]);
     const ease = Easing.bezier(0.22, 1, 0.36, 1);
     const to = (v: number, d = 180) => Animated.timing(scale, { toValue: v, duration: d, easing: ease, useNativeDriver: true }).start();
+    const faintMix = scheme === 'dark' ? 0.9 : 0.85;
+    const faintBg = activeBg ? mixHex(activeBg, palette.background, faintMix) : mixHex('#F9FAFB', palette.background, faintMix);
+    const faintBorder = activeBorder ? mixHex(activeBorder, palette.border, 0.7) : palette.border;
     return (
       <Pressable
         onPress={onPress}
@@ -65,9 +102,25 @@ export default function MoodScreen() {
         onPressOut={() => Animated.spring(scale, { toValue: 1.04, stiffness: 240, damping: 18, mass: 0.85, useNativeDriver: true }).start()}
         style={({ pressed }) => ({ opacity: pressed ? 0.96 : 1 })}
       >
-        <Animated.View style={StyleSheet.flatten([styles.moodPill, active && styles.moodPillActive, { transform: [{ scale }] }])}>
+        <Animated.View
+          style={StyleSheet.flatten([
+            styles.moodPill,
+            active
+              ? { backgroundColor: activeBg ?? '#EEF2FF', borderColor: activeBorder ?? '#C7D2FE' }
+              : { backgroundColor: faintBg, borderColor: faintBorder },
+            { transform: [{ scale }] },
+          ])}
+        >
           <ThemedText style={styles.moodEmoji}>{emoji}</ThemedText>
-          <ThemedText style={StyleSheet.flatten([styles.moodPillLabel, active && styles.moodPillLabelActive])}>{label}</ThemedText>
+          <ThemedText
+            style={StyleSheet.flatten([
+              styles.moodPillLabel,
+              active && styles.moodPillLabelActive,
+              active && activeText ? { color: activeText } : null,
+            ])}
+          >
+            {label}
+          </ThemedText>
         </Animated.View>
       </Pressable>
     );
@@ -85,6 +138,9 @@ export default function MoodScreen() {
         Animated.timing(scale, { toValue: 1, duration: 160, easing: ease, useNativeDriver: true }),
       ]).start();
     };
+    const faintMix = scheme === 'dark' ? 0.9 : 0.85;
+    const faintBg = activeBg ? mixHex(activeBg, palette.background, faintMix) : mixHex('#F9FAFB', palette.background, faintMix);
+    const faintBorder = activeBorder ? mixHex(activeBorder, palette.border, 0.7) : palette.border;
     return (
       <Pressable
         onPress={handlePress}
@@ -94,7 +150,7 @@ export default function MoodScreen() {
         onPressOut={() => to(1, 140)}
         style={({ pressed }) => ({ opacity: pressed ? 0.96 : 1 })}
       >
-        <Animated.View style={StyleSheet.flatten([styles.chip, active && { backgroundColor: activeBg, borderColor: activeBorder }, { transform: [{ scale }] }])}>
+        <Animated.View style={StyleSheet.flatten([styles.chip, active ? { backgroundColor: activeBg, borderColor: activeBorder } : { backgroundColor: faintBg, borderColor: faintBorder }, { transform: [{ scale }] }])}>
           <ThemedText style={StyleSheet.flatten([styles.chipText, active && styles.chipTextActive, active && activeText ? { color: activeText } : null])}>{text}</ThemedText>
         </Animated.View>
       </Pressable>
@@ -158,7 +214,16 @@ export default function MoodScreen() {
             <ThemedText style={[styles.fieldLabel, styles.fieldLabelGroup]}>How are you feeling right now?</ThemedText>
             <View style={styles.moodGrid}>
               {moods.map((m) => (
-                <MoodPillItem key={m.key} emoji={m.emoji} label={m.label} active={selectedMood === m.label} onPress={() => setSelectedMood(m.label)} />
+                <MoodPillItem
+                  key={m.key}
+                  emoji={m.emoji}
+                  label={m.label}
+                  active={selectedMood === m.label}
+                  onPress={() => setSelectedMood(m.label)}
+                  activeBg={moodColors[m.label]?.bg}
+                  activeBorder={moodColors[m.label]?.border}
+                  activeText={moodColors[m.label]?.text}
+                />
               ))}
             </View>
 
