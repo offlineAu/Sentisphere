@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Query, HTTPException
+from fastapi import FastAPI, Query, HTTPException, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from datetime import datetime, timedelta
@@ -8,12 +8,17 @@ import re
 import typing
 from pydantic import BaseModel
 from typing import List, Optional
+import logging
+from fastapi.security import OAuth2PasswordBearer
 
 from app.core.config import settings
 from app.db.database import engine
 from app.api.routes.auth import router as auth_router
+from app.services.jwt import decode_token
 
 app = FastAPI(title=settings.APP_NAME)
+
+logging.basicConfig(level=logging.INFO)
 
 app.add_middleware(
     CORSMiddleware,
@@ -25,6 +30,30 @@ app.add_middleware(
 
 # Optional auth router (not enforced on other routes)
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
+
+def get_current_user(token: str = Depends(oauth2_scheme)) -> str:
+    try:
+        payload = decode_token(token)
+        sub = payload.get("sub")
+        if not sub:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+        return str(sub)
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
+
+@app.get("/api/auth/me")
+def auth_me(token: str = Depends(oauth2_scheme)):
+    """Return the current authenticated user id from JWT (subject)."""
+    try:
+        payload = decode_token(token)
+        sub = payload.get("sub")
+        if not sub:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+        return {"user_id": int(sub)}
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
 
 @app.get("/api/mood-trend")
 def mood_trend():
@@ -61,76 +90,261 @@ def mood_trend():
         ]
     return data
 
+@app.get("/api/alerts")
+def list_alerts(limit: int = Query(100, ge=1, le=1000)):
+    """Return alerts with only severity and created_at for UI risk assessment.
+    Sorted newest first, limited by `limit`.
+    """
+    query = text(
+        """
+        SELECT severity, created_at
+        FROM alert
+        WHERE severity IN ('low','medium','high','critical')
+        ORDER BY created_at DESC
+        LIMIT :limit
+        """
+    )
+    with engine.connect() as conn:
+        rows = conn.execute(query, {"limit": limit}).mappings()
+        return [
+            {
+                "severity": r["severity"],
+                "created_at": r["created_at"].strftime("%Y-%m-%dT%H:%M:%S") if r["created_at"] else None,
+            }
+            for r in rows
+        ]
+
+class CounselorProfileUpdate(BaseModel):
+    name: Optional[str] = None
+    email: Optional[str] = None
+    department: Optional[str] = None  # maps to organization on UI
+    contact_number: Optional[str] = None
+    availability: Optional[str] = None
+    year_experience: Optional[int] = None
+    # Extra optional fields that may or may not exist in schema; ignored if columns missing
+    phone: Optional[str] = None
+    license_number: Optional[str] = None
+    specializations: Optional[str] = None
+    education: Optional[str] = None
+    bio: Optional[str] = None
+    experience_years: Optional[str] = None
+    languages: Optional[str] = None
+
+
+@app.put("/api/counselor-profile")
+def update_counselor_profile(
+    payload: CounselorProfileUpdate,
+    user_id: Optional[int] = Query(None),
+    current_user: str = Depends(get_current_user),
+):
+    """Update counselor profile data. Updates `user` (name/email) and, if present,
+    `counselorprofile` fields (title/department/etc). Only updates columns that exist.
+    If a counselorprofile row doesn't exist yet, it will be inserted.
+    """
+    try:
+        uid = int(user_id) if user_id is not None else int(current_user)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid user id")
+
+    with engine.connect() as conn:
+        # Update base user table
+        if payload.name is not None or payload.email is not None:
+            fields = []
+            params = {"uid": uid}
+            if payload.name is not None:
+                fields.append("name = :name")
+                params["name"] = payload.name
+            if payload.email is not None:
+                fields.append("email = :email")
+                params["email"] = payload.email
+            if fields:
+                conn.execute(text(f"UPDATE user SET {', '.join(fields)} WHERE user_id = :uid"), params)
+
+        # Check if counselor_profile table exists
+        exists = conn.execute(text(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM information_schema.tables
+            WHERE table_schema = DATABASE() AND table_name = 'counselor_profile'
+            """
+        )).mappings().first()["cnt"] > 0
+
+        if exists:
+            # Discover available columns
+            cols = {r["COLUMN_NAME"] for r in conn.execute(text(
+                """
+                SELECT COLUMN_NAME FROM information_schema.columns
+                WHERE table_schema = DATABASE() AND table_name = 'counselor_profile'
+                """
+            )).mappings()}
+
+            # Build update set for available fields
+            updates = []
+            params = {"uid": uid}
+            def add(col: str, val: Optional[str]):
+                if val is not None and col in cols:
+                    updates.append(f"{col} = :{col}")
+                    params[col] = val
+
+            add("department", payload.department)
+            # New counselor_profile fields
+            add("contact_number", payload.contact_number or payload.phone)
+            add("availability", payload.availability)
+            # Optional extras if present in schema
+            add("phone", payload.phone)
+            add("license_number", payload.license_number)
+            add("specializations", payload.specializations)
+            add("education", payload.education)
+            add("bio", payload.bio)
+            add("experience_years", payload.experience_years)
+            add("languages", payload.languages)
+            # Numeric year_experience
+            if payload.year_experience is not None and "year_experience" in cols:
+                updates.append("year_experience = :year_experience")
+                params["year_experience"] = int(payload.year_experience)
+            elif payload.experience_years and payload.experience_years.isdigit() and "year_experience" in cols:
+                updates.append("year_experience = :year_experience")
+                params["year_experience"] = int(payload.experience_years)
+
+            # Ensure a row exists, attempt update first
+            if updates:
+                result = conn.execute(text(
+                    f"UPDATE counselor_profile SET {', '.join(updates)} WHERE user_id = :uid"
+                ), params)
+                if result.rowcount == 0:
+                    # Insert minimal row first, then update with fields
+                    insert_cols = ["user_id"] + [k for k in params.keys() if k != "uid"]
+                    insert_vals = [":uid"] + [f":{k}" for k in params.keys() if k != "uid"]
+                    conn.execute(text(
+                        f"INSERT INTO counselor_profile ({', '.join(insert_cols)}) VALUES ({', '.join(insert_vals)})"
+                    ), params)
+
+        conn.commit()
+
+    return {"ok": True}
+
+# Fetch counselor profile (joined with user)
+@app.get("/api/counselor-profile")
+def get_counselor_profile(
+    user_id: Optional[int] = Query(None),
+    current_user: str = Depends(get_current_user),
+):
+    try:
+        uid = int(user_id) if user_id is not None else int(current_user)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid user id")
+
+    with engine.connect() as conn:
+        # Left join to include user info even if counselor_profile row missing
+        q = text(
+            """
+            SELECT 
+              u.user_id, u.name, u.email, u.role,
+              cp.department, cp.contact_number, cp.availability,
+              cp.year_experience, cp.phone, cp.license_number, cp.specializations,
+              cp.education, cp.bio, cp.experience_years, cp.languages, cp.created_at
+            FROM user u
+            LEFT JOIN counselor_profile cp ON cp.user_id = u.user_id
+            WHERE u.user_id = :uid
+            LIMIT 1
+            """
+        )
+        row = conn.execute(q, {"uid": uid}).mappings().first()
+        if not row:
+            raise HTTPException(status_code=404, detail="User not found")
+        return {
+            "user_id": row["user_id"],
+            "name": row["name"],
+            "email": row["email"],
+            "role": row["role"],
+            "department": row.get("department") if hasattr(row, "get") else row["department"],
+            "contact_number": row.get("contact_number") if hasattr(row, "get") else row["contact_number"],
+            "availability": row.get("availability") if hasattr(row, "get") else row["availability"],
+            "year_experience": row.get("year_experience") if hasattr(row, "get") else row["year_experience"],
+            "phone": row.get("phone") if hasattr(row, "get") else row["phone"],
+            "license_number": row.get("license_number") if hasattr(row, "get") else row["license_number"],
+            "specializations": row.get("specializations") if hasattr(row, "get") else row["specializations"],
+            "education": row.get("education") if hasattr(row, "get") else row["education"],
+            "bio": row.get("bio") if hasattr(row, "get") else row["bio"],
+            "experience_years": row.get("experience_years") if hasattr(row, "get") else row["experience_years"],
+            "languages": row.get("languages") if hasattr(row, "get") else row["languages"],
+            "created_at": (
+                row.get("created_at").strftime("%Y-%m-%d %H:%M:%S") if hasattr(row, "get") and row.get("created_at") else (
+                    row["created_at"].strftime("%Y-%m-%d %H:%M:%S") if "created_at" in row and row["created_at"] else None
+                )
+            ),
+        }
+
 @app.get("/api/sentiments")
 def sentiment_breakdown(period: str = Query("month", enum=["week", "month", "year"])):
-    now = datetime.now()
+    # Choose SQL filter based on calendar period
     if period == "week":
-        start = now - timedelta(days=7)
+        condition = "YEARWEEK(analyzed_at, 1) = YEARWEEK(CURDATE(), 1)"
+    elif period == "month":
+        condition = "YEAR(analyzed_at) = YEAR(CURDATE()) AND MONTH(analyzed_at) = MONTH(CURDATE())"
     elif period == "year":
-        start = now.replace(month=1, day=1)
-    else:  # month
-        start = now.replace(day=1)
+        condition = "YEAR(analyzed_at) = YEAR(CURDATE())"
+    else:
+        condition = "TRUE"
 
-    # Combine sentiments from both tables
-    query = """
+    # Combined query using MySQL calendar logic
+    query = f"""
         SELECT sentiment, COUNT(*) AS value FROM (
             SELECT sentiment, analyzed_at FROM checkin_sentiment
             UNION ALL
             SELECT sentiment, analyzed_at FROM journal_sentiment
         ) AS combined
-        WHERE analyzed_at >= :date
+        WHERE {condition}
         GROUP BY sentiment
     """
+
     with engine.connect() as conn:
-        result = conn.execute(text(query), {"date": start.strftime('%Y-%m-%d %H:%M:%S')}).mappings()
-        # Ensure data is always an array and chart-friendly
+        result = conn.execute(text(query)).mappings()
         data = [{"name": row["sentiment"], "value": row["value"]} for row in result]
         return data
 
 @app.get("/api/checkin-breakdown")
 def checkin_breakdown(period: str = Query("month", enum=["week", "month", "year"])):
-    now = datetime.now()
+    # Use MySQL calendar-based filtering
     if period == "week":
-        start = now - timedelta(days=7)
+        condition = "YEARWEEK(created_at, 1) = YEARWEEK(CURDATE(), 1)"
+    elif period == "month":
+        condition = "YEAR(created_at) = YEAR(CURDATE()) AND MONTH(created_at) = MONTH(CURDATE())"
     elif period == "year":
-        start = now.replace(month=1, day=1)
+        condition = "YEAR(created_at) = YEAR(CURDATE())"
     else:
-        start = now.replace(day=1)
+        condition = "TRUE"
 
-    q_mood = text(
-        """
+    q_mood = text(f"""
         SELECT mood_level AS label, COUNT(*) AS value
         FROM emotional_checkin
-        WHERE created_at >= :date
+        WHERE {condition}
         GROUP BY mood_level
-        """
-    )
-    q_energy = text(
-        """
+    """)
+    q_energy = text(f"""
         SELECT energy_level AS label, COUNT(*) AS value
         FROM emotional_checkin
-        WHERE created_at >= :date
+        WHERE {condition}
         GROUP BY energy_level
-        """
-    )
-    q_stress = text(
-        """
+    """)
+    q_stress = text(f"""
         SELECT stress_level AS label, COUNT(*) AS value
         FROM emotional_checkin
-        WHERE created_at >= :date
+        WHERE {condition}
         GROUP BY stress_level
-        """
-    )
+    """)
+
     with engine.connect() as conn:
-        params = {"date": start.strftime('%Y-%m-%d %H:%M:%S')}
-        mood_rows = conn.execute(q_mood, params).mappings()
-        energy_rows = conn.execute(q_energy, params).mappings()
-        stress_rows = conn.execute(q_stress, params).mappings()
+        mood_rows = conn.execute(q_mood).mappings()
+        energy_rows = conn.execute(q_energy).mappings()
+        stress_rows = conn.execute(q_stress).mappings()
+
         return {
             "mood": [{"label": r["label"], "value": r["value"]} for r in mood_rows],
             "energy": [{"label": r["label"], "value": r["value"]} for r in energy_rows],
             "stress": [{"label": r["label"], "value": r["value"]} for r in stress_rows],
         }
+
 
 # -----------------------------
 # AI Summaries (heuristic fallback)
@@ -264,34 +478,7 @@ def ai_mood_summary(period: str = Query("month", enum=["week","month","year"])):
     )
     return {"summary": llm or heuristic}
 
-@app.get("/api/appointments")
-def appointments():
-    query = """
-        SELECT
-            a.log_id AS id,
-            u.name AS student,
-            a.form_type,
-            a.downloaded_at,
-            a.remarks
-        FROM appointment_log a
-        JOIN user u ON a.user_id = u.user_id
-        WHERE a.downloaded_at >= CURDATE()
-        ORDER BY a.downloaded_at
-        LIMIT 12
-    """
-    with engine.connect() as conn:
-        result = conn.execute(text(query)).mappings()
-        data = [
-            {
-                "id": row["id"],
-                "student": row["student"],
-                "form_type": row["form_type"],
-                "downloaded_at": row["downloaded_at"].strftime("%Y-%m-%d %H:%M:%S") if row["downloaded_at"] else "",
-                "remarks": row["remarks"],
-            }
-            for row in result
-        ]
-    return data
+# Removed deprecated /api/appointments endpoint (Upcoming Appointments feature deprecated)
 
 @app.get("/api/recent-alerts")
 def recent_alerts():
@@ -420,7 +607,7 @@ def high_risk_flags():
 
 # --- Conversations list ---
 @app.get("/api/conversations")
-def get_conversations(user_id: int = Query(...)):
+def get_conversations(user_id: int = Query(...), current_user: str = Depends(get_current_user)):
     query = """
         SELECT DISTINCT
             c.conversation_id AS id,
@@ -443,9 +630,107 @@ def get_conversations(user_id: int = Query(...)):
         return [dict(row) for row in result]
 
 
+# --- Analytics: Chat-based Intervention Success ---
+def _simple_sentiment_scores(texts):
+    """Return a list of polarity scores in [-1,1] using a tiny lexicon heuristic.
+    This keeps the endpoint runnable without extra dependencies.
+    """
+    pos_words = {
+        "good","great","improve","better","okay","fine","thanks","thank","happy","relieved","hopeful","resolved","helpful","appreciate","glad"
+    }
+    neg_words = {
+        "bad","worse","sad","anxious","anxiety","stress","stressed","angry","upset","worried","depressed","terrible","awful","hopeless","stuck"
+    }
+    scores = []
+    for t in texts or []:
+        t_low = (t or "").lower()
+        p = sum(1 for w in pos_words if w in t_low)
+        n = sum(1 for w in neg_words if w in t_low)
+        score = 0.0
+        if p or n:
+            score = (p - n) / max(p + n, 1)
+        scores.append(max(-1.0, min(1.0, score)))
+    return scores
+
+def _avg(nums):
+    nums = [float(x) for x in (nums or []) if x is not None]
+    return (sum(nums) / len(nums)) if nums else 0.0
+
+@app.get("/api/analytics/intervention-success")
+def intervention_success():
+    """Measure intervention success from chat only, by comparing early vs late
+    student message sentiment within ended conversations.
+    """
+    q_convos = text(
+        """
+        SELECT c.conversation_id
+        FROM conversations c
+        WHERE c.status = 'ended'
+        """
+    )
+    q_msgs = text(
+        """
+        SELECT m.content, m.timestamp, u.role
+        FROM messages m
+        JOIN user u ON m.sender_id = u.user_id
+        WHERE m.conversation_id = :cid
+        ORDER BY m.timestamp ASC
+        """
+    )
+
+    total = 0
+    success = 0
+    total_duration_min = 0.0
+    total_message_count = 0
+
+    with engine.connect() as conn:
+        convos = list(conn.execute(q_convos).mappings())
+        for c in convos:
+            cid = c["conversation_id"]
+            rows = list(conn.execute(q_msgs, {"cid": cid}).mappings())
+            if not rows:
+                continue
+
+            student_msgs = [r["content"] for r in rows if (r.get("role") or "").lower() == "student"]
+            if len(student_msgs) < 2:
+                continue
+
+            total += 1
+
+            # Early vs late sentiment (use up to 3 from start/end)
+            start_slice = student_msgs[:3]
+            end_slice = student_msgs[-3:]
+            start_scores = _simple_sentiment_scores(start_slice)
+            end_scores = _simple_sentiment_scores(end_slice)
+            if _avg(end_scores) > _avg(start_scores):
+                success += 1
+
+            # Engagement metrics
+            total_message_count += len(rows)
+            try:
+                first_ts = rows[0]["timestamp"]
+                last_ts = rows[-1]["timestamp"]
+                if first_ts and last_ts:
+                    duration_min = (last_ts - first_ts).total_seconds() / 60.0
+                    total_duration_min += max(0.0, duration_min)
+            except Exception:
+                pass
+
+    success_rate = round((success / total * 100.0), 2) if total else 0.0
+    avg_duration = round((total_duration_min / total), 1) if total else 0.0
+    avg_messages = round((total_message_count / total), 1) if total else 0.0
+
+    return {
+        "overall_success_rate": success_rate,
+        "total_sessions": total,
+        "successful_sessions": success,
+        "average_conversation_duration_minutes": avg_duration,
+        "average_messages_per_conversation": avg_messages,
+    }
+
 # --- Messages per conversation ---
 @app.get("/api/conversations/{conversation_id}/messages")
-def get_messages(conversation_id: int):
+def get_messages(conversation_id: int, current_user: str = Depends(get_current_user)):
     query = """
         SELECT 
             m.message_id AS id,
@@ -467,14 +752,12 @@ def get_messages(conversation_id: int):
 
 
 # --- Send message ---
-from pydantic import BaseModel
-
 class MessageIn(BaseModel):
     sender_id: int
     content: str
 
 @app.post("/api/conversations/{conversation_id}/messages")
-def send_message(conversation_id: int, message: MessageIn):
+def send_message(conversation_id: int, message: MessageIn, current_user: str = Depends(get_current_user)):
     query = """
         INSERT INTO messages (conversation_id, sender_id, content, timestamp)
         VALUES (:cid, :sid, :content, NOW())
@@ -494,9 +777,18 @@ def send_message(conversation_id: int, message: MessageIn):
             "timestamp": str(datetime.now())
         }
 
+@app.get("/health")
+def health():
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return {"status": "ok"}
+    except Exception:
+        raise HTTPException(status_code=503, detail="unhealthy")
+
 # --- Mark messages as read in a conversation ---
 @app.post("/api/conversations/{conversation_id}/read")
-def mark_conversation_read(conversation_id: int, user_id: int = Query(...)):
+def mark_conversation_read(conversation_id: int, user_id: int = Query(...), current_user: str = Depends(get_current_user)):
     """
     Mark all messages in the conversation as read for the given user by setting is_read = 1
     for messages not sent by the user (i.e., incoming messages to the user).
@@ -518,7 +810,7 @@ def mark_conversation_read(conversation_id: int, user_id: int = Query(...)):
 # --- Reports APIs ---
 
 @app.get("/api/reports/top-stats")
-def get_top_stats():
+def get_top_stats(current_user: str = Depends(get_current_user)):
     query = """
         SELECT 
             (SELECT COUNT(*) FROM user WHERE role = 'student') AS total_students,
@@ -554,6 +846,7 @@ def get_top_stats():
 def get_attention_students():
     query = """
         SELECT 
+            u.user_id,
             u.name,
             COALESCE(a.severity, 'low') AS risk,
             ROUND(AVG(
@@ -584,6 +877,7 @@ def get_attention_students():
         result = conn.execute(text(query)).mappings()
         return [
             {
+                "user_id": row["user_id"],
                 "name": row["name"],
                 "risk": row["risk"].capitalize(),
                 "score": f"{row['score'] or 0}/10",
@@ -596,46 +890,193 @@ def get_attention_students():
 
 
 @app.get("/api/reports/concerns")
-def get_concerns():
-    query = """
-        SELECT reason AS label, COUNT(*) AS students
-        FROM alert
-        WHERE status='open'
-        GROUP BY reason
+def get_concerns(period: str = Query("month", enum=["week", "month"])):
+    now = datetime.now()
+    if period == "week":
+        start = now - timedelta(days=7)
+    else:
+        start = now.replace(day=1)
+
+    # Attempt to aggregate emotions (comma-separated) from journal_sentiment and checkin_sentiment
+    emotions_sql = text(
+        """
+        SELECT label, COUNT(*) AS students
+        FROM (
+            SELECT LOWER(TRIM(SUBSTRING_INDEX(js.emotions, ',', 1))) AS label
+            FROM journal_sentiment js
+            JOIN journal j ON j.journal_id = js.journal_id
+            WHERE j.created_at >= :date AND js.emotions IS NOT NULL AND js.emotions <> ''
+            UNION ALL
+            SELECT LOWER(TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(js.emotions, ',', 2), ',', -1)))
+            FROM journal_sentiment js
+            JOIN journal j ON j.journal_id = js.journal_id
+            WHERE j.created_at >= :date AND js.emotions LIKE '%,%'
+            UNION ALL
+            SELECT LOWER(TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(js.emotions, ',', 3), ',', -1)))
+            FROM journal_sentiment js
+            JOIN journal j ON j.journal_id = js.journal_id
+            WHERE j.created_at >= :date AND js.emotions LIKE '%,%,%'
+            UNION ALL
+            SELECT LOWER(TRIM(SUBSTRING_INDEX(cs.emotions, ',', 1)))
+            FROM checkin_sentiment cs
+            JOIN emotional_checkin ec ON ec.checkin_id = cs.checkin_id
+            WHERE ec.created_at >= :date AND cs.emotions IS NOT NULL AND cs.emotions <> ''
+            UNION ALL
+            SELECT LOWER(TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(cs.emotions, ',', 2), ',', -1)))
+            FROM checkin_sentiment cs
+            JOIN emotional_checkin ec ON ec.checkin_id = cs.checkin_id
+            WHERE ec.created_at >= :date AND cs.emotions LIKE '%,%'
+            UNION ALL
+            SELECT LOWER(TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(cs.emotions, ',', 3), ',', -1)))
+            FROM checkin_sentiment cs
+            JOIN emotional_checkin ec ON ec.checkin_id = cs.checkin_id
+            WHERE ec.created_at >= :date AND cs.emotions LIKE '%,%,%'
+        ) t
+        WHERE t.label IS NOT NULL AND t.label <> ''
+        GROUP BY label
         ORDER BY students DESC
         LIMIT 5
-    """
+        """
+    )
+
+    sentiments_sql = text(
+        """
+        SELECT label, COUNT(*) AS students FROM (
+            SELECT LOWER(js.sentiment) AS label
+            FROM journal_sentiment js
+            JOIN journal j ON j.journal_id = js.journal_id
+            WHERE j.created_at >= :date
+            UNION ALL
+            SELECT LOWER(cs.sentiment)
+            FROM checkin_sentiment cs
+            JOIN emotional_checkin ec ON ec.checkin_id = cs.checkin_id
+            WHERE ec.created_at >= :date
+        ) s
+        GROUP BY label
+        ORDER BY students DESC
+        LIMIT 5
+        """
+    )
+
     with engine.connect() as conn:
-        result = conn.execute(text(query)).mappings()
-        total = sum([row["students"] for row in result])
+        # Try emotions within requested period
+        params = {"date": start.strftime('%Y-%m-%d %H:%M:%S')}
+        rows = list(conn.execute(emotions_sql, params).mappings())
+        # Fallback to sentiments within requested period
+        if not rows:
+            rows = list(conn.execute(sentiments_sql, params).mappings())
+        # Final fallback: widen window to last 90 days
+        if not rows:
+            wide_start = (now - timedelta(days=90)).strftime('%Y-%m-%d %H:%M:%S')
+            rows = list(conn.execute(emotions_sql, {"date": wide_start}).mappings())
+            if not rows:
+                rows = list(conn.execute(sentiments_sql, {"date": wide_start}).mappings())
+        # Proxy fallback: top alert reasons (last 90 days)
+        if not rows:
+            alerts_q = text(
+                """
+                SELECT LOWER(TRIM(reason)) AS label, COUNT(*) AS students
+                FROM alert
+                WHERE created_at >= :date AND reason IS NOT NULL AND reason <> ''
+                GROUP BY LOWER(TRIM(reason))
+                ORDER BY students DESC
+                LIMIT 5
+                """
+            )
+            rows = list(conn.execute(alerts_q, {"date": (now - timedelta(days=90)).strftime('%Y-%m-%d %H:%M:%S')}).mappings())
+
+        total = sum(int(r["students"]) for r in rows)
         return [
             {
-                "label": row["label"],
-                "students": row["students"],
-                "percent": round((row["students"]/total)*100, 1) if total > 0 else 0
+                "label": (r["label"] or "").strip(),
+                "students": int(r["students"]),
+                "percent": round((int(r["students"]) / total) * 100, 1) if total > 0 else 0,
             }
-            for row in result
+            for r in rows
         ]
 
 
 @app.get("/api/reports/interventions")
-def get_interventions():
-    query = """
-        SELECT form_type AS label, COUNT(*) AS participants
-        FROM appointment_log
-        GROUP BY form_type
-    """
+def get_interventions(period: str = Query("month", enum=["week", "month"])):
+    now = datetime.now()
+    if period == "week":
+        start = now - timedelta(days=7)
+    else:
+        start = now.replace(day=1)
+
+    summary_q = text(
+        """
+        SELECT 
+          COUNT(*) AS total_alerts,
+          SUM(CASE WHEN status = 'resolved' THEN 1 ELSE 0 END) AS resolved_alerts
+        FROM alert
+        WHERE created_at >= :date
+        """
+    )
+
+    # Optional: by_type from intervention_log if table exists
+    exists_q = text(
+        """
+        SELECT COUNT(*) AS cnt
+        FROM information_schema.tables
+        WHERE table_schema = DATABASE() AND table_name = 'intervention_log'
+        """
+    )
+    by_type_q = text(
+        """
+        SELECT intervention_type AS label,
+               COUNT(*) AS participants,
+               ROUND(SUM(CASE WHEN outcome IN ('resolved','improved') THEN 1 ELSE 0 END)/COUNT(*)*100,1) AS percent
+        FROM intervention_log
+        WHERE started_at >= :date
+        GROUP BY intervention_type
+        ORDER BY participants DESC
+        """
+    )
+
     with engine.connect() as conn:
-        result = conn.execute(text(query)).mappings()
-        total = sum([row["participants"] for row in result])
-        return [
-            {
-                "label": row["label"],
-                "participants": row["participants"],
-                "percent": round((row["participants"]/total)*100, 1) if total > 0 else 0
-            }
-            for row in result
-        ]
+        s = conn.execute(summary_q, {"date": start.strftime('%Y-%m-%d %H:%M:%S')}).mappings().first()
+        total_alerts = int(s["total_alerts"] or 0)
+        resolved_alerts = int(s["resolved_alerts"] or 0)
+        success_rate = round((resolved_alerts / total_alerts) * 100, 1) if total_alerts else 0.0
+
+        has_intervention = conn.execute(exists_q).mappings().first()["cnt"] > 0
+        by_type = []
+        if has_intervention:
+            by_type = [dict(row) for row in conn.execute(by_type_q, {"date": start.strftime('%Y-%m-%d %H:%M:%S')}).mappings()]
+        else:
+            # Fallback: derive by_type using appointment_log form_type (as proxy)
+            fallback_q = text(
+                """
+                SELECT form_type AS label, COUNT(*) AS participants
+                FROM appointment_log
+                WHERE downloaded_at >= :date
+                GROUP BY form_type
+                ORDER BY participants DESC
+                """
+            )
+            rows = conn.execute(fallback_q, {"date": start.strftime('%Y-%m-%d %H:%M:%S')}).mappings()
+            total = sum(int(r["participants"]) for r in rows)
+            # Re-run to iterate again
+            rows = conn.execute(fallback_q, {"date": start.strftime('%Y-%m-%d %H:%M:%S')}).mappings()
+            by_type = [
+                {
+                    "label": r["label"],
+                    "participants": int(r["participants"]),
+                    "percent": round((int(r["participants"]) / total) * 100, 1) if total > 0 else 0,
+                }
+                for r in rows
+            ]
+
+        return {
+            "summary": {
+                "total_alerts": total_alerts,
+                "resolved_alerts": resolved_alerts,
+                "success_rate": success_rate,
+            },
+            "by_type": by_type,
+            "sentiment_change": []  # Optional: populate with advanced analysis later
+        }
 
 @app.get("/api/reports/participation")
 def get_participation():

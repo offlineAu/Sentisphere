@@ -1,5 +1,6 @@
-import { useEffect, useState, useRef } from "react";
-import { ChevronLeft, ChevronRight, Info, Users, CalendarCheck, CalendarClock, AlertTriangle, AlertCircle, Bell, Search, Mail, Percent as PercentIcon, Hash as HashIcon } from "lucide-react";
+import { useEffect, useState, useRef, ReactElement } from "react";
+import axios from "axios";
+import { ChevronLeft, ChevronRight, Info, Users, CalendarCheck, CalendarClock, AlertTriangle, AlertCircle, Bell, Search, Mail, Percent as PercentIcon, Hash as HashIcon, Brain, User } from "lucide-react";
 import { motion } from "framer-motion";
 import {
   ResponsiveContainer,
@@ -16,23 +17,37 @@ import {
   Cell,
 } from "recharts";
 import { useSidebar } from "../components/SidebarContext";
+import DashboardLayout from "../layouts/DashboardLayout";
 import styles from './CounselorDashboard.module.css';
-const API_BASE = (import.meta as any).env?.VITE_API_URL || "";
+import api from "../lib/api";
+import { LoadingSpinner } from "../components/loading-spinner";
+import { sessionStatus } from "../lib/auth";
+import { router } from "@inertiajs/react";
+
+// Format date to be more readable (e.g., "October 23, 2023 3:58 PM")
+const formatDate = (dateString: string | Date, includeTime = false) => {
+  const date = typeof dateString === 'string' ? new Date(dateString) : dateString;
+  const options: Intl.DateTimeFormatOptions = {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  };
+  
+  if (includeTime) {
+    options.hour = 'numeric';
+    options.minute = '2-digit';
+    options.hour12 = true;
+  }
+  
+  return date.toLocaleString('en-US', options);
+};
 
 // -----------------------------
 // Types
 // -----------------------------
 type StudentRisk = "low" | "medium" | "high";
 
-interface Appointment {
-  id: string;
-  student: string;
-  date: string;
-  time: string;
-  counselor: string;
-  status: "scheduled" | "completed" | "no-show" | "cancelled";
-  notes?: string;
-}
+// Removed Appointment interface (Upcoming Appointments section deprecated)
 
 interface MoodPoint {
   week: string;
@@ -52,6 +67,62 @@ interface StudentFlag {
   risk: StudentRisk;
   signals: string[];
 }
+
+// Custom XAxis tick component with proper TypeScript types
+import { SVGProps } from 'react';
+
+const XAxisTick = (props: {
+  x?: number;
+  y?: number;
+  payload?: {
+    value: string | number;
+    [key: string]: any;
+  };
+} & SVGProps<SVGTextElement>) => {
+  const { x = 0, y = 0, payload, ...rest } = props;
+
+  if (!payload) {
+    return <text x={x} y={y} {...rest} />;
+  }
+
+  // Split the label into words
+  const words = String(payload.value).split(' ');
+  const isTwoWords = words.length === 2;
+  const isThreeWords = words.length === 3;
+
+  // Calculate text width to adjust positioning
+  const textLength = String(payload.value).length;
+  const xOffset = -10; // Adjust this value to move text left/right
+  
+  return (
+    <g transform={`translate(${x},${y})`}>
+      <text
+        x={xOffset}
+        y={0}
+        dy={isTwoWords ? 30 : isThreeWords ? 40 : 20}
+        textAnchor="end"
+        fill="#666"
+        style={{
+          fontSize: 10,
+          textTransform: 'capitalize',
+          fontFamily: 'system-ui, -apple-system, sans-serif',
+        }}
+        {...rest}
+      >
+        {words[0]}
+        {isTwoWords && (
+          <tspan x={xOffset} dy="1.2em" textAnchor="end">{words[1]}</tspan>
+        )}
+        {isThreeWords && (
+          <>
+            <tspan x={xOffset} dy="1.2em" textAnchor="end">{words[1]}</tspan>
+            <tspan x={xOffset} dy="1.2em" textAnchor="end">{words[2]}</tspan>
+          </>
+        )}
+      </text>
+    </g>
+  );
+};
 
 // -----------------------------
 // Components
@@ -87,20 +158,75 @@ const StatCard: React.FC<{
   value: string | number;
   icon: React.ReactNode;
   delta?: string;
-}> = ({ title, value, icon, delta }) => (
-  <div className="bg-white rounded-2xl shadow p-4 hover:shadow-md transition">
-    <div className="flex items-center justify-between">
-      <h3 className={styles.statCardTitle}>{title}</h3>
-      {icon}
-    </div>
-    <div className={styles.statCardValue}>{value}</div>
-    {delta && (
-      <div className={styles.statCardDelta}>
-        <ChevronRight className="h-3 w-3 text-[#2563eb]" /> {delta}
+  variant?: 'default' | 'appointments' | 'risk' | 'checkins';
+  customGradient?: string;
+}> = ({ title, value, icon, delta, variant = 'default', customGradient }) => {
+  const getGradient = () => {
+    if (customGradient) {
+      return `bg-gradient-to-br ${customGradient} border border-transparent`;
+    }
+    
+    switch(variant) {
+      case 'appointments':
+        return 'bg-gradient-to-br from-amber-300 to-amber-500 border border-amber-300';
+      case 'risk':
+        return 'bg-gradient-to-br from-rose-400 to-rose-600 border border-rose-400';
+      case 'checkins':
+        return 'bg-gradient-to-br from-sky-400 to-sky-600 border border-sky-400';
+      default:
+        return 'bg-gradient-to-br from-emerald-500 to-emerald-600 border border-emerald-400';
+    }
+  };
+
+  const getTextColor = (variant: 'default' | 'appointments' | 'risk' | 'checkins' = 'default'): string => {
+    switch (variant) {
+      case 'appointments': // amber (yellow tone)
+        return 'text-amber-950'; // dark text if gradient is bright
+      case 'risk': // rose (red tone)
+        return 'text-white'; // best contrast
+      case 'checkins': // sky (blue tone)
+        return 'text-white'; // crisp and readable
+      default: // emerald (green tone)
+        return 'text-white';
+    }
+  };
+
+  const getIconBgColor = (variant: 'default' | 'appointments' | 'risk' | 'checkins' = 'default') => {
+    switch(variant) {
+      case 'appointments':
+        return 'bg-yellow-500/30';
+      case 'risk':
+        return 'bg-red-500/30';
+      case 'checkins':
+        return 'bg-blue-500/30';
+      default:
+        return 'bg-emerald-500/30';
+    }
+  };
+
+  return (
+    <div className={`${getGradient()} rounded-2xl shadow p-5 hover:shadow-md transition-all duration-300 h-full`}>
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-sm font-medium text-white">
+          {title}
+        </h3>
+        <div className={`p-2 rounded-lg ${getIconBgColor()}`}>
+          <div className={getTextColor()}>
+            {icon}
+          </div>
+        </div>
       </div>
-    )}
-  </div>
-);
+      <div className="text-2xl font-bold text-white">
+        {value}
+      </div>
+      {delta && (
+        <div className="mt-2 text-xs flex items-center text-white/90">
+          <ChevronRight className="h-3 w-3 text-white" /> {delta}
+        </div>
+      )}
+    </div>
+  );
+};
 
 // AI summary generator (simple version for demo)
 const getMoodSummary = (data: any[]) => {
@@ -113,17 +239,27 @@ const getMoodSummary = (data: any[]) => {
   return "No mood data available for this period.";
 };
 
+
+// User profile type
+type UserProfile = {
+  id: number;
+  name: string;
+  email: string;
+  role?: string;
+  created_at?: string;
+};
+
 // -----------------------------
 // Main Dashboard
 // -----------------------------
 export default function CounselorDashboard() {
   const { open } = useSidebar();
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
+  const [authenticated, setAuthenticated] = useState<boolean>(false);
   const [moodTrend, setMoodTrend] = useState<any[]>([]);
   const [sentimentBreakdown, setSentimentBreakdown] = useState<any[]>([]);
   const [checkinBreakdown, setCheckinBreakdown] = useState<{ mood: any[]; energy: any[]; stress: any[] } | null>(null);
-  const [appointments, setAppointments] = useState<any[]>([]);
   const [appointmentLogs, setAppointmentLogs] = useState<any[]>([]);
-  const [userActivities, setUserActivities] = useState<any[]>([]);
   const [recentAlerts, setRecentAlerts] = useState<any[]>([]);
   const [allAlerts, setAllAlerts] = useState<any[]>([]);
   const [showAllAlerts, setShowAllAlerts] = useState(false);
@@ -138,6 +274,8 @@ export default function CounselorDashboard() {
   // AI summaries (optional: fetched from backend if available)
   const [aiSentimentSummary, setAiSentimentSummary] = useState<string | null>(null);
   const [aiMoodSummary, setAiMoodSummary] = useState<string | null>(null);
+  const [aiCheckinSummary, setAICheckinSummary] = useState('');
+  const [showAISummary, setShowAISummary] = useState(false);
   // Persisted label mode for Check-in Breakdown: 'count' | 'percent'
   const [checkinLabelMode, setCheckinLabelMode] = useState<'count' | 'percent'>(() => {
     const v = localStorage.getItem('checkinLabelMode');
@@ -148,6 +286,7 @@ export default function CounselorDashboard() {
   }, [checkinLabelMode]);
   // Messages unread count (UI badge only; wire up when API is available)
   const [unreadMessages, setUnreadMessages] = useState<number>(0);
+  const [loading, setLoading] = useState(true);
 
   const moodScale = [
     { value: 1, label: 'Very Sad' },
@@ -164,84 +303,133 @@ export default function CounselorDashboard() {
     return found ? found.label : String(v);
   };
 
-  // Fetch from backend
+  // Check session authentication and redirect if needed
   useEffect(() => {
-    fetch(`${API_BASE}/api/mood-trend`)
-      .then((res) => res.json())
-      .then(setMoodTrend)
-      .catch(console.error);
-
-    fetch(`${API_BASE}/api/appointments`)
-      .then((res) => res.json())
-      .then(setAppointments)
-      .catch(console.error);
-
-    fetch(`${API_BASE}/api/recent-alerts`)
-      .then((res) => res.json())
-      .then(data => setRecentAlerts(data))
-      .catch(console.error);
-
-    fetch(`${API_BASE}/api/all-alerts`)
-      .then((res) => res.json())
-      .then(data => setAllAlerts(data))
-      .catch(console.error);
-
-    fetch(`${API_BASE}/api/students-monitored`)
-      .then((res) => res.json())
-      .then(data => setStudentsMonitored(data.count))
-      .catch(console.error);
-
-    fetch(`${API_BASE}/api/open-appointments`)
-      .then((res) => res.json())
-      .then(data => setOpenAppointments(data.count))
-      .catch(console.error);
-
-    fetch(`${API_BASE}/api/this-week-checkins`)
-      .then(res => res.json())
-      .then(data => setThisWeekCheckins(data.count))
-      .catch(console.error);
-
-    fetch(`${API_BASE}/api/high-risk-flags`)
-      .then(res => res.json())
-      .then(data => setHighRiskFlags(data.count))
-      .catch(console.error);
-
-    // New: appointment logs and user activities (mobile appointment page interactions)
-    fetch(`${API_BASE}/api/appointment-logs`)
-      .then(res => res.json())
-      .then(data => setAppointmentLogs(data))
-      .catch(console.error);
-
-    fetch(`${API_BASE}/api/user-activities?target_type=appointment`)
-      .then(res => res.json())
-      .then(data => setUserActivities(data))
-      .catch(console.error);
-
-    // Counselor profile
-    const counselorId = (import.meta as any).env?.VITE_COUNSELOR_USER_ID || 1;
-    fetch(`${API_BASE}/api/counselor-profile?user_id=${counselorId}`)
-      .then(res => res.json())
-      .then(setCounselor)
-      .catch(console.error);
-
-    // Unread messages count (badge)
-    fetch(`${API_BASE}/api/unread-messages`)
-      .then(res => res.ok ? res.json() : Promise.reject())
-      .then(data => {
-        if (typeof data?.count === 'number') setUnreadMessages(data.count);
-      })
-      .catch(() => setUnreadMessages(0));
-
-    // Initial AI summaries (safe to ignore errors)
-    fetch(`${API_BASE}/api/ai/sentiment-summary?period=${sentimentPeriod}`)
-      .then(res => res.ok ? res.json() : Promise.reject())
-      .then(d => setAiSentimentSummary(d?.summary || null))
-      .catch(() => setAiSentimentSummary(null));
-    fetch(`${API_BASE}/api/ai/mood-summary?period=${sentimentPeriod}`)
-      .then(res => res.ok ? res.json() : Promise.reject())
-      .then(d => setAiMoodSummary(d?.summary || null))
-      .catch(() => setAiMoodSummary(null));
+    let mounted = true;
+    sessionStatus().then(s => {
+      if (!mounted) return;
+      if (s?.authenticated) {
+        setAuthenticated(true);
+      } else {
+        router.visit('/login');
+      }
+    });
+    return () => { mounted = false; };
   }, []);
+
+  // Define API response types
+  interface ApiResponse<T> {
+    data: T;
+  }
+
+  interface NumericResponse extends ApiResponse<number> {}
+  interface ArrayResponse<T> extends ApiResponse<T[]> {}
+
+  // Fetch from backend via Laravel proxy (/api) when authenticated
+  useEffect(() => {
+    if (!authenticated) return;
+    
+    setLoading(true);
+    const fetchData = async () => {
+      try {
+        // Helper function to safely get numeric data
+        const getNumericData = async (endpoint: string): Promise<number> => {
+          try {
+            console.log(`[DEBUG] Fetching from ${endpoint}`);
+            const response = await api.get<any>(endpoint);
+            console.log(`[DEBUG] Response from ${endpoint}:`, response);
+            
+            // Handle the actual response structure: { data: { count: number } }
+            let result = 0;
+            
+            if (response?.data?.count !== undefined) {
+              // Handle { data: { count: number } } structure
+              result = Number(response.data.count) || 0;
+              console.log(`[DEBUG] Extracted count from ${endpoint}:`, result);
+            } else if (typeof response?.data === 'number') {
+              // Fallback for direct number response
+              result = response.data;
+            } else if (typeof response === 'number') {
+              // Fallback for direct number response (unlikely but handled)
+              result = response;
+            } else {
+              console.warn(`[DEBUG] Unexpected response format from ${endpoint}:`, response);
+              result = 0;
+            }
+            
+            console.log(`[DEBUG] Final value for ${endpoint}:`, result);
+            return result;
+            
+          } catch (error) {
+            console.error(`[ERROR] Error fetching ${endpoint}:`, error);
+            return 0;
+          }
+        };
+
+        // Fetch numeric data in parallel
+        const [
+          studentsMonitored,
+          openAppointments,
+          highRiskFlags,
+          thisWeekCheckins,
+          // Fetch array data
+          moodTrendRes,
+          recentAlertsRes,
+          allAlertsRes,
+          appointmentLogsRes
+        ] = await Promise.all([
+          getNumericData('/students-monitored'),
+          getNumericData('/open-appointments'),
+          getNumericData('/high-risk-flags'),
+          getNumericData('/this-week-checkins'),
+          // Array data
+          api.get<ArrayResponse<any>>('/mood-trend').catch(() => ({ data: [] })),
+          api.get<ArrayResponse<any>>('/recent-alerts').catch(() => ({ data: [] })),
+          api.get<ArrayResponse<any>>('/all-alerts').catch(() => ({ data: [] })),
+          api.get<ArrayResponse<any>>('/appointment-logs').catch(() => ({ data: [] }))
+        ]);
+
+        // Log all numeric states before setting them
+        console.log('[DEBUG] Setting numeric states:', {
+          studentsMonitored,
+          openAppointments,
+          highRiskFlags,
+          thisWeekCheckins
+        });
+        
+        // Set numeric states
+        setStudentsMonitored(studentsMonitored);
+        setOpenAppointments(openAppointments);
+        setHighRiskFlags(highRiskFlags);
+        setThisWeekCheckins(thisWeekCheckins);
+        
+        // Log after state updates (will show in next render)
+        setTimeout(() => {
+          console.log('[DEBUG] Current states after update (next render):', {
+            studentsMonitoredState: studentsMonitored,
+            highRiskFlagsState: highRiskFlags,
+            thisWeekCheckinsState: thisWeekCheckins,
+            openAppointmentsState: openAppointments
+          });
+        }, 0);
+
+        // Set array states with proper type checking
+        setMoodTrend(Array.isArray(moodTrendRes?.data) ? moodTrendRes.data : []);
+        setRecentAlerts(Array.isArray(recentAlertsRes?.data) ? recentAlertsRes.data : []);
+        setAllAlerts(Array.isArray(allAlertsRes?.data) ? allAlertsRes.data : []);
+        setAppointmentLogs(Array.isArray(appointmentLogsRes?.data) ? appointmentLogsRes.data : []);
+        
+        // Add a small delay to ensure all data is rendered before hiding the spinner
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      } catch (error) {
+        console.error('Error fetching dashboard data:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, [authenticated]);
 
   // Only run this on initial mount
   useEffect(() => {
@@ -252,26 +440,66 @@ export default function CounselorDashboard() {
     return () => { isMounted = false; };
   }, []);
 
-  // Fetch sentiment breakdown when sentimentPeriod changes
+  // Fetch sentiment breakdown when sentimentPeriod changes (only if authenticated)
   useEffect(() => {
-    fetch(`${API_BASE}/api/sentiments?period=${sentimentPeriod}`)
-      .then((res) => res.json())
-      .then(setSentimentBreakdown)
-      .catch(console.error);
-    fetch(`${API_BASE}/api/checkin-breakdown?period=${sentimentPeriod}`)
-      .then(res => res.json())
-      .then(setCheckinBreakdown)
-      .catch(console.error);
-    // Refresh AI summaries for the selected period
-    fetch(`${API_BASE}/api/ai/sentiment-summary?period=${sentimentPeriod}`)
-      .then(res => res.ok ? res.json() : Promise.reject())
-      .then(d => setAiSentimentSummary(d?.summary || null))
-      .catch(() => setAiSentimentSummary(null));
-    fetch(`${API_BASE}/api/ai/mood-summary?period=${sentimentPeriod}`)
-      .then(res => res.ok ? res.json() : Promise.reject())
-      .then(d => setAiMoodSummary(d?.summary || null))
-      .catch(() => setAiMoodSummary(null));
-  }, [sentimentPeriod]);
+    if (!authenticated) return;
+    api.get<any[]>('/sentiments', { params: { period: sentimentPeriod }}).then(r=>setSentimentBreakdown(r.data)).catch(console.error);
+    api.get<{mood:any[];energy:any[];stress:any[]}>('/checkin-breakdown', { params: { period: sentimentPeriod }}).then(r=>setCheckinBreakdown(r.data)).catch(console.error);
+    api.get<{summary?: string}>('/ai/sentiment-summary', { params: { period: sentimentPeriod }}).then(r=>setAiSentimentSummary(r.data?.summary || null)).catch(()=>setAiSentimentSummary(null));
+    api.get<{summary?: string}>('/ai/mood-summary', { params: { period: sentimentPeriod }}).then(r=>setAiMoodSummary(r.data?.summary || null)).catch(()=>setAiMoodSummary(null));
+  }, [sentimentPeriod, authenticated]);
+
+  // Get user info from token
+  useEffect(() => {
+    const getUserFromToken = () => {
+      try {
+        // Get the token from localStorage
+        const token = localStorage.getItem('auth_token');
+        if (!token) {
+          console.warn('No auth token found');
+          setLoading(false);
+          return;
+        }
+
+        // Log the raw token for debugging
+        console.log('Raw token:', token);
+        
+        // Decode the JWT token (middle part is the payload)
+        const tokenParts = token.split('.');
+        if (tokenParts.length !== 3) {
+          console.error('Invalid token format');
+          return;
+        }
+        
+        // Safely decode base64 URL
+        const base64Url = tokenParts[1];
+        const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+        const payload = JSON.parse(decodeURIComponent(atob(base64).split('').map(function(c) {
+          return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+        }).join('')));
+        
+        console.log('Token payload:', payload);
+
+        // Create user data from token
+        const userData: UserProfile = {
+          id: parseInt(payload.sub) || 0,
+          // Try different possible fields for name and email
+          name: payload.name || payload.username || payload.email?.split('@')[0] || 'User',
+          email: payload.email || `${payload.sub || 'user'}@example.com`,
+          role: payload.role || payload.scope || 'counselor' // Default to counselor if not specified
+        };
+
+        console.log('User data from token:', userData);
+        setCurrentUser(userData);
+      } catch (error) {
+        console.error('Error parsing user data from token:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    getUserFromToken();
+  }, []);
 
   const parseWeekString = (weekStr: string) => {
     const [yearStr, monthStr, weekLabel] = weekStr.split("-");
@@ -282,14 +510,23 @@ export default function CounselorDashboard() {
     return { year, month, week };
   };
 
-  const sortedMoodTrend = [...moodTrend].sort((a, b) => {
-    const pa = parseWeekString(a.week);
-    const pb = parseWeekString(b.week);
+  // Filter out weeks without valid mood data and sort by date
+  const sortedMoodTrend = [...moodTrend]
+    .filter(entry => {
+      // Ensure we have a valid week string and avgMood is a number
+      return entry.week && 
+             typeof entry.week === 'string' && 
+             typeof entry.avgMood === 'number' && 
+             !isNaN(entry.avgMood);
+    })
+    .sort((a, b) => {
+      const pa = parseWeekString(a.week);
+      const pb = parseWeekString(b.week);
 
-    if (pb.year !== pa.year) return pb.year - pa.year;
-    if (pb.month !== pa.month) return pb.month - pa.month;
-    return pb.week - pa.week; // ascending week, W5 > W1
-  });
+      if (pb.year !== pa.year) return pb.year - pa.year;
+      if (pb.month !== pa.month) return pb.month - pa.month;
+      return pb.week - pa.week; // ascending week, W5 > W1
+    });
 
   const getCurrentWeekString = () => {
     const today = new Date();
@@ -434,95 +671,93 @@ export default function CounselorDashboard() {
 
   const getFirstPeriodWithData = async () => {
     for (const period of ["week", "month", "year"] as const) {
-      const res = await fetch(`${API_BASE}/api/sentiments?period=${period}`);
-      const data = await res.json();
-      if (data.length > 0) return period;
+      const { data } = await api.get<any[]>('/sentiments', { params: { period }});
+      if (Array.isArray(data) && data.length > 0) return period;
     }
     return "year"; // fallback if all are empty
   };
 
-  return (
-    <main
-      className={`transition-all duration-200 ${
-        open ? "pl-[17rem] p-6 space-y-4 bg-[#f9fafb] min-h-screen" : "pl-[4.5rem] p-6 space-y-5 bg-[#f9fafb] min-h-screen"
-      } pt-1 pr-6 pb-6 w-full`}
-      style={{ minHeight: "100vh" }}
-    >
-      <motion.div
-        initial={{ opacity: 0, y: 6 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.35 }}
-        className="p-4 sm:p-5 space-y-5 max-w-full"
-      >
-        {/* Header with search + message + profile */}
-        <div className="flex flex-col gap-4">
-          <div className="flex items-center justify-between gap-4">
-            <div className={styles.searchBar}>
-              <Search className={styles.searchIcon} />
-              <input className={styles.searchInput} placeholder="Search" />
-            </div>
-            <div className="flex items-center gap-3">
-              <button className={`${styles.pill} ${styles.pillSecondary} relative`} title="Messages" onClick={() => (window.location.href = '/chat')}>
-                <Mail className="h-4 w-4 text-[#0d8c4f]" />
-                {unreadMessages > 0 && (
-                  <span className={styles.badge}>{unreadMessages}</span>
-                )}
-              </button>
-              <div className={styles.profileChip} onClick={() => (window.location.href = '/profile')} role="button" tabIndex={0}>
-                <div className={styles.avatarCircle}>
-                  {(counselor?.initials) || (counselor?.name ? counselor.name.split(' ').map((n: string) => n[0]).slice(0,2).join('') : 'C')}
-                </div>
-                <div>
-                  <div className={styles.profileName}>{counselor?.name || 'Counselor'}</div>
-                  <div className={styles.profileEmail}>{counselor?.email || ''}</div>
-                </div>
-              </div>
-            </div>
-          </div>
+  // Show loading spinner while data is being fetched
+  if (loading) {
+    return (
+      <div className="flex h-[80vh] w-full items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <LoadingSpinner size="lg" className="text-primary" />
+          <p className="text-muted-foreground">Loading dashboard data...</p>
+          <p className="text-xs text-muted-foreground">This may take a few moments</p>
+        </div>
+      </div>
+    );
+  }
 
+  return (
+    <div className="flex flex-col min-h-screen">
+      <div className="flex-1 pr-8 pl-5">
+        <div className="flex items-center justify-between p-4">
           <div>
             <h1 className={styles.headerTitle}>Counselor Dashboard</h1>
             <p className={styles.headerSubtitle}>
-              Overview of student well-being, appointments, and risk signals.
+              Overview of student well-being and risk signals.
             </p>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className={styles.profileChip}>
+              <div className={styles.avatarCircle}>
+                {currentUser?.name ? (
+                  currentUser.name.split(' ').map((n: string) => n[0]).slice(0, 2).join('')
+                ) : (
+                  <User className="w-5 h-5 text-gray-600" />
+                )}
+              </div>
+              <div>
+                <div className={styles.profileName}>
+                  {currentUser?.name || 'User'}
+                  {currentUser?.role && (
+                    <span className="ml-2 text-xs font-normal text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
+                      {currentUser.role}
+                    </span>
+                  )}
+                </div>
+                <div className={styles.profileEmail}>{currentUser?.email || ''}</div>
+              </div>
+            </div>
           </div>
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* Gradient card for Students Monitored */}
-          <div className="rounded-2xl shadow p-4 bg-gradient-to-br from-[#0ea768] to-[#0d8c4f] text-white">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-medium opacity-90">Students Monitored</h3>
-              <Users className="h-4 w-4 opacity-90" />
-            </div>
-            <div className="text-3xl font-extrabold mt-1">{studentsMonitored}</div>
-            <div className="text-xs opacity-90 mt-1 flex items-center gap-1">
-              <ChevronRight className="h-3 w-3" /> Updated today
-            </div>
-          </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+          <StatCard
+            title="Students Monitored"
+            value={studentsMonitored}
+            variant="default"
+            icon={<Users className="h-4 w-4" />}
+            delta={`Updated ${formatDate(new Date())}`}
+          />
           <StatCard
             title="This Week Check-ins"
             value={thisWeekCheckins}
-            icon={<CalendarCheck className="h-4 w-4 text-[#2563eb]" />}
+            variant="checkins"
+            icon={<CalendarCheck className="h-4 w-4" />}
           />
           <StatCard
             title="Open Appointments"
             value={openAppointments}
-            icon={<CalendarClock className="h-4 w-4 text-[#6b7280]" />}
+            variant="appointments"
+            icon={<CalendarClock className="h-4 w-4" />}
           />
           <StatCard
             title="High-Risk Flags"
             value={highRiskFlags}
-            icon={<AlertTriangle className="h-4 w-4 text-red-500" />}
+            variant="risk"
+            icon={<AlertTriangle className="h-4 w-4" />}
           />
         </div>
 
         {/* Weekly Mood Analytics - moved up and made more prominent */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
           {/* Weekly Mood Trend (2/3 width on desktop) */}
-          <div className="lg:col-span-2">
-            <div className={`${styles.card} p-4 w-full max-w-full`}>
+          <div className="lg:col-span-2 space-y-6">
+            <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow p-5 hover:shadow-md transition-all duration-300 w-full border border-gray-100">
               <div className={`${styles.cardHeader}`}>
                 <div className="flex items-center gap-2">
                   <h2 className={styles.sectionTitle}>Weekly Mood Analytics</h2>
@@ -653,7 +888,7 @@ export default function CounselorDashboard() {
                           {severityBadge(alert.severity)}
                         </div>
                         <div className="text-xs text-[#6b7280]">
-                          {alert.reason} • {new Date(alert.created_at).toLocaleDateString()}
+                          {alert.reason} • {formatDate(alert.created_at, true)}
                         </div>
                       </div>
                     </div>
@@ -706,7 +941,7 @@ export default function CounselorDashboard() {
                             {severityBadge(alert.severity)}
                           </div>
                           <div className="text-xs text-[#6b7280]">
-                            {alert.reason} • {new Date(alert.created_at).toLocaleDateString()}
+                            {alert.reason} • {formatDate(alert.created_at, true)}
                           </div>
                         </div>
                       </div>
@@ -719,10 +954,10 @@ export default function CounselorDashboard() {
           </div>
         )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
           {/* Sentiment Breakdown (2/3 width on desktop) */}
-          <div className="lg:col-span-2">
-            <div className={`${styles.card} p-4 w-full max-w-full`}>
+          <div className="lg:col-span-2 space-y-6">
+            <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow p-5 hover:shadow-md transition-all duration-300 w-full border border-gray-100">
               <div className={`${styles.cardHeader}`}>
                 <div className="flex items-center gap-2">
                   <h2 className={styles.sectionTitle}>Sentiment Breakdown</h2>
@@ -842,150 +1077,229 @@ export default function CounselorDashboard() {
               </div>
               {/* Check-in Breakdown: Mood, Energy, Stress */}
               <div className="mt-6 space-y-3">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-semibold text-[#0d8c4f] text-base">Check-in Breakdown</h3>
-                  <div className="flex items-center gap-1 bg-[#f7fafd] rounded-xl p-1">
-                    <button
-                      className={`${styles.pill} ${checkinLabelMode === 'count' ? styles.pillPrimary : styles.pillSecondary}`}
-                      onClick={() => setCheckinLabelMode('count')}
-                      aria-label="Show counts"
-                      title="Show counts"
-                    >
-                      <HashIcon className="h-4 w-4" />
-                    </button>
-                    <button
-                      className={`${styles.pill} ${checkinLabelMode === 'percent' ? styles.pillPrimary : styles.pillSecondary}`}
-                      onClick={() => setCheckinLabelMode('percent')}
-                      aria-label="Show percentages"
-                      title="Show percentages"
-                    >
-                      <PercentIcon className="h-4 w-4" />
-                    </button>
-                  </div>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-medium text-[#0d8c4f]">Check-in Breakdown </h3>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   {(() => {
-                    const sections = [
+                    const metrics = [
                       {
                         title: 'Mood',
                         key: 'mood' as const,
-                        order: ['Very Sad','Sad','Neutral','Good','Happy','Very Happy', 'Excellent'],
+                        color: '#10b981',
+                        levels: ['Very Sad', 'Sad', 'Neutral', 'Good', 'Happy', 'Very Happy', 'Excellent'],
                       },
                       {
                         title: 'Energy',
                         key: 'energy' as const,
-                        order: ['Very Low','Low','Moderate','High','Very High'],
+                        color: '#3b82f6',
+                        levels: ['Very Low', 'Low', 'Moderate', 'High', 'Very High'],
                       },
                       {
                         title: 'Stress',
                         key: 'stress' as const,
-                        order: ['No Stress','Low Stress','Moderate','High Stress','Very High Stress'],
+                        color: '#ef4444',
+                        levels: ['No Stress', 'Low Stress', 'Moderate', 'High Stress', 'Very High Stress'],
                       },
                     ];
-                    return sections.map((sec) => {
-                      const raw = (checkinBreakdown?.[sec.key] || []) as Array<{label: string; value: number}>;
-                      const map = Object.fromEntries(raw.map((r) => [r.label, r.value]));
-                      const total = Object.values(map).reduce((a: number, b: number) => a + (Number(b) || 0), 0);
-                      const d = sec.order.map((label) => ({
-                        label,
-                        value: map[label] || 0,
-                        percent: total > 0 ? Math.round(((map[label] || 0) / total) * 100) : 0,
-                      }));
+
+                    // Check if there's any data to display
+                    const hasData = metrics.some(metric => {
+                      const data = checkinBreakdown?.[metric.key] || [];
+                      return data.length > 0 && data.some((item: any) => Number(item.value) > 0);
+                    });
+
+                    if (!hasData) {
                       return (
-                        <div key={sec.title} className="bg-[#f7fafd] rounded-xl p-3">
-                          <div className="text-sm font-medium text-[#0d8c4f] mb-2">{sec.title}</div>
-                          <div style={{ height: 180 }}>
-                            <ResponsiveContainer width="100%" height="100%">
-                              <BarChart data={d} margin={{ top: 6, right: 4, bottom: 14, left: 0 }} barCategoryGap={4}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#eef2f7" />
-                                <XAxis
-                                  dataKey="label"
-                                  interval={0}
-                                  height={46}
-                                  tickLine={false}
-                                  axisLine={false}
-                                  tick={<MultiLineTick />}
+                        <div className="col-span-3 py-8 text-center">
+                          <div className="text-gray-400 mb-2">
+                            <svg className="mx-auto h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                          </div>
+                          <p className="text-gray-500 text-sm">No check-in data available. Check back later for updates.</p>
+                        </div>
+                      );
+                    }
+
+                    return metrics.map((metric) => {
+                      const data = checkinBreakdown?.[metric.key] || [];
+                      const total = data.reduce((sum: number, item: any) => sum + (Number(item.value) || 0), 0);
+                      
+                      if (total === 0) {
+                        return (
+                          <div key={metric.key} className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+                            <div className="flex flex-col items-center justify-center h-full">
+                              <div className="text-gray-300 mb-2">
+                                <svg className="w-12 h-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                              </div>
+                              <h4 className="text-sm font-medium text-gray-400 mb-1">{metric.title}</h4>
+                              <p className="text-xs text-gray-400">No data</p>
+                            </div>
+                          </div>
+                        );
+                      }
+                      
+                      // Calculate weighted average
+                      let weightedSum = 0;
+                      data.forEach((item: any) => {
+                        const index = metric.levels.findIndex(level => level === item.label);
+                        if (index >= 0) {
+                          weightedSum += (index + 1) * (Number(item.value) || 0);
+                        }
+                      });
+                      
+                      const average = total > 0 ? weightedSum / total : 0;
+                      const normalizedValue = (average - 1) / (metric.levels.length - 1);
+                      const percentage = Math.round(normalizedValue * 100);
+                      
+                      // Get description based on percentage
+                      let description = '';
+                      if (percentage < 20) description = metric.levels[0];
+                      else if (percentage < 40) description = metric.levels[1];
+                      else if (percentage < 60) description = metric.levels[2];
+                      else if (percentage < 80) description = metric.levels[3] || metric.levels[metric.levels.length - 1];
+                      else description = metric.levels[metric.levels.length - 1];
+
+                      return (
+                        <div key={metric.key} className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+                          <div className="flex flex-col items-center">
+                            <div className="relative w-24 h-24 mb-3">
+                              <svg className="w-full h-full" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path
+                                  d="M18 2.0845
+                                    a 15.9155 15.9155 0 0 1 0 31.831
+                                    a 15.9155 15.9155 0 0 1 0 -31.831"
+                                  fill="none"
+                                  stroke="#e5e7eb"
+                                  strokeWidth="3"
+                                  strokeDasharray="100, 100"
                                 />
-                                <YAxis hide domain={[0, (dataMax: number) => (typeof dataMax === 'number' ? dataMax : 0) * 1.18]} />
-                                <RTooltip content={<CustomTooltip />} wrapperStyle={{ padding: 0, border: 'none', background: 'transparent' }} />
-                                <Bar dataKey="value" radius={[8,8,8,8]} barSize={22} isAnimationActive animationDuration={600}>
-                                  {checkinLabelMode === 'percent' ? (
-                                    <LabelList dataKey="percent" position="top" fill="#6b7280" offset={4} formatter={(v: any) => `${Number(v||0)}%`} />
-                                  ) : (
-                                    <LabelList dataKey="value" position="top" fill="#6b7280" offset={4} formatter={(v: any) => `${Number(v||0)}`} />
-                                  )}
-                                  {d.map((entry, idx) => (
-                                    <Cell key={idx} fill={sec.key === 'mood' ? '#10b981' : sec.key === 'energy' ? '#3b82f6' : '#ef4444'} />
-                                  ))}
-                                </Bar>
-                              </BarChart>
-                            </ResponsiveContainer>
+                                <path
+                                  d="M18 2.0845
+                                    a 15.9155 15.9155 0 0 1 0 31.831
+                                    a 15.9155 15.9155 0 0 1 0 -31.831"
+                                  fill="none"
+                                  stroke={metric.color}
+                                  strokeWidth="3"
+                                  strokeDasharray={`${percentage}, 100`}
+                                  strokeLinecap="round"
+                                  className="transition-all duration-1000 ease-in-out"
+                                  style={{
+                                    filter: `drop-shadow(0 0 6px ${metric.color}40)`
+                                  }}
+                                />
+                                <text
+                                  x="18"
+                                  y="20"
+                                  textAnchor="middle"
+                                  fill="#1f2937"
+                                  className="text-xs font-medium"
+                                >
+                                  {percentage}%
+                                </text>
+                              </svg>
+                            </div>
+                            <h4 className="text-sm font-medium text-gray-700 mb-1">{metric.title}</h4>
+                            <p className="text-xs text-gray-500 text-center">{description}</p>
                           </div>
                         </div>
                       );
                     });
                   })()}
                 </div>
+                
+                {/* AI Summary Button Card */}
+                <div className="bg-[#f7fafd] rounded-xl p-3 flex flex-col">
+                  <div className="text-sm font-medium text-[#0d8c4f] mb-2">AI Analysis</div>
+                  <div className="flex-1 flex items-center justify-center">
+                    <button
+                      onClick={() => setShowAISummary(true)}
+                      className="w-full h-full flex flex-col items-center justify-center gap-3 p-4 bg-white rounded-lg border-2 border-dashed border-gray-300 hover:border-indigo-400 hover:bg-indigo-50 transition-all duration-200"
+                      title="Get AI Summary"
+                    >
+                      <Brain className="h-12 w-12 text-indigo-500" />
+                      <span className="text-indigo-600 font-medium">Generate AI Summary</span>
+                      <span className="text-xs text-gray-500 text-center max-w-[200px]">Click to analyze check-in data and get insights</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* AI Summary Modal */}
+                {showAISummary && (
+                  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-xl p-6 max-w-2xl w-full max-h-[80vh] flex flex-col">
+                      <div className="flex justify-between items-center mb-4">
+                        <h3 className="text-lg font-semibold text-gray-900">AI Sentiment Analysis</h3>
+                        <button 
+                          onClick={() => {
+                            setShowAISummary(false);
+                            setAICheckinSummary('');
+                          }}
+                          className="text-gray-500 hover:text-gray-700 text-xl"
+                        >
+                          &times;
+                        </button>
+                      </div>
+                      <div className="flex-1 overflow-y-auto mb-4">
+                        {aiCheckinSummary ? (
+                          <div className="prose max-w-none">
+                            <p>{aiCheckinSummary}</p>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-center h-32">
+                            <div className="animate-pulse text-gray-500">Generating analysis...</div>
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex justify-end space-x-3 pt-4 border-t">
+                        <button
+                          onClick={() => {
+                            setShowAISummary(false);
+                            setAICheckinSummary('');
+                          }}
+                          className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
+                        >
+                          Close
+                        </button>
+                        <button
+                          onClick={async () => {
+                            try {
+                              // Replace with your actual API call
+                              // const response = await api.get('/ai/checkin-summary');
+                              // setAICheckinSummary(response.data.summary);
+                              
+                              // Mock response for now
+                              setAICheckinSummary('');
+                              setTimeout(() => {
+                                setAICheckinSummary(
+                                  "Based on the check-in data, I'm seeing a generally positive trend in student well-being. " +
+                                  "Most students report being in the 'Good' to 'Happy' range for mood, with energy levels " +
+                                  "concentrated in the 'Moderate' to 'High' categories. Stress levels are mostly 'Low' to " +
+                                  "'Moderate', with a few students reporting higher stress levels that may need attention. " +
+                                  "The distribution suggests a healthy balance, but the few cases of high stress and low mood " +
+                                  "should be monitored."
+                                );
+                              }, 1000);
+                            } catch (error) {
+                              console.error('Error generating AI summary:', error);
+                            }
+                          }}
+                          className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700"
+                        >
+                          {aiCheckinSummary ? 'Regenerate' : 'Generate'} Analysis
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
-          {/* Project-style side rail: Activities Snapshot */}
-          <div className={`${styles.card} p-4 h-full`}>
-            <h3 className="font-semibold text-[#0d8c4f] text-lg mb-2">Appointment Activities</h3>
-            <div className="space-y-3 max-h-[18rem] overflow-y-auto pr-1">
-              {userActivities.length === 0 ? (
-                <div className="text-[#6b7280] text-sm">No recent activities.</div>
-              ) : (
-                userActivities.slice(0, 8).map((act) => (
-                  <div key={act.activity_id} className={`${styles.tileRow}`}>
-                    <div>
-                      <div className="text-sm font-semibold text-[#333]">{act.action}</div>
-                      <div className="text-xs text-[#6b7280]">Target: {act.target_type} #{act.target_id}</div>
-                      <div className="text-[11px] text-[#94a3b8]">{new Date(act.created_at || act.started_at).toLocaleString()}</div>
-                    </div>
-                    <span className="text-[#bdbdbd] text-xl">→</span>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* 🔹 Appointments & Logs */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className={`${styles.card} p-4`}>
-            <h2 className="text-lg font-semibold mb-4 text-[#0d8c4f]">Upcoming Appointments</h2>
-            <div className="grid md:grid-cols-2 gap-4">
-              {appointments.length === 0 ? (
-                <div className="text-[#6b7280] text-sm">No appointments scheduled.</div>
-              ) : (
-                appointments.slice(0, 6).map((apt) => (
-                  <div key={apt.id} className={styles.appointmentCard}>
-                    <div className="flex justify-between items-center">
-                      <span className="font-medium text-[#111827]">{apt.student}</span>
-                      <span className={styles.appointmentStatus}>{apt.status}</span>
-                    </div>
-                    <div className="text-xs text-[#6b7280]">ID: {apt.id}</div>
-                    <div className="mt-2 text-sm text-[#111827]">
-                      <Info className="h-4 w-4 inline mr-1 text-[#2563eb]" />
-                      {new Date(apt.date).toLocaleDateString()} • {apt.time}
-                    </div>
-                    <div className="text-sm mt-1 text-[#111827]">
-                      <Info className="h-4 w-4 inline mr-1 text-[#0d8c4f]" /> Counselor: {apt.counselor}
-                    </div>
-                    {apt.notes && (
-                      <div className="text-xs text-[#6b7280] mt-1">
-                        <Info className="h-4 w-4 inline mr-1 text-[#2563eb]" />
-                        {apt.notes}
-                      </div>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          <div className={`${styles.card} p-4`}>
+          {/* Right rail: Appointment Logs */}
+            <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow p-5 hover:shadow-md transition-all duration-300 border border-gray-100">
             <h2 className="text-lg font-semibold mb-4 text-[#0d8c4f]">Appointment Logs</h2>
             <div className="space-y-3 max-h-[24rem] overflow-y-auto pr-1">
               {appointmentLogs.length === 0 ? (
@@ -995,7 +1309,7 @@ export default function CounselorDashboard() {
                   <div key={log.log_id} className={`${styles.tileRow}`}>
                     <div className="min-w-0">
                       <div className="text-sm font-semibold text-[#111827]">{log.form_type || 'Form'} downloaded</div>
-                      <div className="text-xs text-[#6b7280]">User #{log.user_id} • {new Date(log.downloaded_at).toLocaleString()}</div>
+                      <div className="text-xs text-[#6b7280]">User #{log.user_id} • {formatDate(log.downloaded_at, true)}</div>
                       {log.remarks && <div className="text-[11px] text-[#94a3b8] truncate">{log.remarks}</div>}
                     </div>
                     <span className="text-[#bdbdbd] text-xl">↓</span>
@@ -1005,7 +1319,11 @@ export default function CounselorDashboard() {
             </div>
           </div>
         </div>
-      </motion.div>
-    </main>
+      </div>
+    </div>
   );
 }
+
+// Use shared layout so Sidebar renders under Inertia and pages pad consistently
+const Layout = (page: React.ReactNode) => <DashboardLayout>{page}</DashboardLayout>;
+Object.assign(CounselorDashboard, { layout: Layout });

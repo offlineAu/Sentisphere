@@ -1,4 +1,7 @@
+import React, { useEffect, useState } from 'react';
 import { useSidebar } from "./SidebarContext";
+import { router, usePage } from '@inertiajs/react';
+import { logoutFastApi, sessionStatus } from '../lib/auth';
 import {
   Home,
   MessageCircle,
@@ -15,14 +18,38 @@ import styles from "./Sidebar.module.css";
 const mainNavLinks = [
   { href: "/", label: "Dashboard", icon: <Home /> },
   { href: "/chat", label: "Chat", icon: <MessageCircle /> },
-  { href: "/appointments", label: "Appointments", icon: <CalendarDays /> },
   { href: "/reports", label: "Reports", icon: <FileText /> },
   { href: "/profile", label: "Profile", icon: <User /> },
+  { href: "/appointments", label: "Appointments (Soon)", icon: <CalendarDays /> },
 ];
 
 export default function Sidebar() {
   const { open, setOpen } = useSidebar();
   const currentPath = window.location.pathname;
+  const [isAuthed, setIsAuthed] = useState<boolean>(false);
+  const [checked, setChecked] = useState<boolean>(false);
+  const page: any = usePage();
+  const hideSidebar = Boolean(page?.props?.hideSidebar);
+
+  // Hide sidebar on login page entirely
+  if (currentPath === '/login' || hideSidebar) return null;
+
+  useEffect(() => {
+    let mounted = true;
+    sessionStatus().then(s => {
+      if (!mounted) return;
+      setIsAuthed(!!s.authenticated);
+      setChecked(true);
+    }).catch(() => {
+      if (!mounted) return;
+      setIsAuthed(false);
+      setChecked(true);
+    });
+    return () => { mounted = false; };
+  }, []);
+
+  // Only render after we checked the session; and only if authenticated
+  if (!checked || !isAuthed) return null;
 
   return (
     <motion.aside
@@ -78,7 +105,38 @@ export default function Sidebar() {
       <div className={styles.menuTitle}>MENU</div>
       <nav className={styles.nav}>
         {mainNavLinks.map((link) => {
-          const isActive = currentPath === link.href;
+          const isAppointments = link.href === "/appointments";
+          const isActive = !isAppointments && currentPath === link.href;
+
+          if (isAppointments) {
+            return (
+              <motion.div
+                key={link.href}
+                className={`${styles.navLink} ${styles.navLinkDisabled}`}
+                whileHover={{ scale: 1.0 }}
+                transition={{ duration: 0.15 }}
+                aria-disabled="true"
+                title="Coming soon"
+                tabIndex={-1}
+              >
+                <div className={`${styles.iconWrap}`}>
+                  {link.icon}
+                </div>
+                <AnimatePresence>
+                  {open && (
+                    <motion.span
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: -10 }}
+                      transition={{ duration: 0.2 }}
+                    >
+                      {link.label}
+                    </motion.span>
+                  )}
+                </AnimatePresence>
+              </motion.div>
+            );
+          }
 
           return (
             <motion.a
@@ -117,7 +175,21 @@ export default function Sidebar() {
 
       {/* General Section */}
       <div className={styles.menuTitle}>GENERAL</div>
-      <button className={styles.signoutBtn} tabIndex={open ? 0 : -1}>
+      {isAuthed && (
+        <div className="px-4 py-1 text-[11px] text-gray-500" aria-live="polite">Signed in</div>
+      )}
+      <button
+        className={styles.signoutBtn}
+        tabIndex={open ? 0 : -1}
+        onClick={async () => {
+          const res = await logoutFastApi();
+          if (res?.ok) {
+            router.visit('/login');
+          } else {
+            router.visit('/login');
+          }
+        }}
+      >
         <div className={styles.iconWrap}>
           <LogOut />
         </div>
