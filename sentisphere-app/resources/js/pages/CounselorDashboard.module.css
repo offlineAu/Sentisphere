@@ -97,12 +97,17 @@
   color: #0d8c4f;
 }
 
-/* Hover state for pills (e.g., messages icon button) */
-.pill:hover {
-  box-shadow: 0 6px 18px rgba(16, 24, 40, 0.08);
-  transform: translateY(-1px);
-  transition: box-shadow 0.15s ease, transform 0.15s ease;
-}
+  /* Hover state for pills (e.g., messages icon button) */
+  .pill:not(:disabled):hover {
+    box-shadow: 0 6px 18px rgba(16, 24, 40, 0.08);
+    transform: translateY(-1px);
+    transition: box-shadow 0.15s ease, transform 0.15s ease;
+    cursor: pointer;
+  }
+
+  .pill:disabled {
+    cursor: not-allowed;
+  }
 
 .tileRow {
   display: flex;
@@ -201,7 +206,7 @@
   height: 18px;
   display: inline-block;
   object-fit: contain;
-  cursor: help;
+  cursor: pointer;
   /* green tint filter for dark/black glyphs */
   filter: invert(41%) sepia(91%) saturate(481%) hue-rotate(94deg) brightness(92%) contrast(91%);
   /* subtle nudge for better visual alignment with text baseline */

@@ -543,9 +543,10 @@ def all_alerts():
 @app.get("/api/students-monitored")
 def students_monitored():
     query = """
-        SELECT COUNT(*) AS count
-        FROM user
-        WHERE role = 'student' AND is_active = TRUE
+        SELECT COUNT(DISTINCT u.user_id) AS count
+        FROM user u
+        JOIN emotional_checkin ec ON ec.user_id = u.user_id
+        WHERE u.role = 'student' AND u.is_active = TRUE
     """
     with engine.connect() as conn:
         result = conn.execute(text(query)).mappings().first()

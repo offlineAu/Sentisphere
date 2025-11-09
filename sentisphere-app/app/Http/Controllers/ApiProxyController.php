@@ -58,9 +58,15 @@ class ApiProxyController extends Controller
         $url = $this->fastApiBase() . '/api/' . ltrim($path, '/');
 
         $headers = ['Accept' => 'application/json'];
-        $token = Session::get('fastapi_token');
-        if ($token) {
-            $headers['Authorization'] = 'Bearer ' . $token;
+        // Prefer Authorization header coming from the client; if absent, fallback to session token
+        $incomingAuth = $request->header('Authorization');
+        if ($incomingAuth) {
+            $headers['Authorization'] = $incomingAuth;
+        } else {
+            $token = Session::get('fastapi_token');
+            if ($token) {
+                $headers['Authorization'] = 'Bearer ' . $token;
+            }
         }
 
         $options = [
