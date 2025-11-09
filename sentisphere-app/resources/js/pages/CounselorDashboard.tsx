@@ -276,6 +276,8 @@ export default function CounselorDashboard() {
   const [aiMoodSummary, setAiMoodSummary] = useState<string | null>(null);
   const [aiCheckinSummary, setAICheckinSummary] = useState('');
   const [showAISummary, setShowAISummary] = useState(false);
+  const [showScaleInfo, setShowScaleInfo] = useState(false);
+  const [showSentimentInfo, setShowSentimentInfo] = useState(false);
   // Persisted label mode for Check-in Breakdown: 'count' | 'percent'
   const [checkinLabelMode, setCheckinLabelMode] = useState<'count' | 'percent'>(() => {
     const v = localStorage.getItem('checkinLabelMode');
@@ -709,6 +711,85 @@ export default function CounselorDashboard() {
                   <User className="w-5 h-5 text-gray-600" />
                 )}
               </div>
+              {/* Sentiment Analysis Modal */}
+              {showSentimentInfo && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+                  <div className="bg-white rounded-2xl shadow-lg p-0 w-full max-w-md border border-gray-100">
+                    {/* Header */}
+                    <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
+                      <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
+                        <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-gray-100">🧠</span>
+                        Sentiment Analysis
+                      </h3>
+                      <button
+                        type="button"
+                        className="text-gray-500 hover:text-gray-700 text-xl"
+                        onClick={() => setShowSentimentInfo(false)}
+                        aria-label="Close"
+                      >
+                        &times;
+                      </button>
+                    </div>
+                    {/* Body */}
+                    <div className="px-5 py-4 max-h-[70vh] overflow-y-auto space-y-4">
+                      <p className="text-sm text-gray-600">Here's what we learned about recent check-ins.</p>
+
+                      {(() => {
+                        const order = ["positive", "neutral", "negative"] as const;
+                        const incoming: Record<string, number> = Object.fromEntries(
+                          (Array.isArray(sentimentBreakdown) ? sentimentBreakdown : []).map((d: any) => [String(d.name).toLowerCase(), Number(d.value) || 0])
+                        );
+                        const total = order.reduce((s, k) => s + (incoming[k] || 0), 0);
+                        const percent = (k: typeof order[number]) => total > 0 ? Math.round(((incoming[k] || 0) / total) * 100) : 0;
+                        const moodKey = Array.from(order).sort((a: typeof order[number], b: typeof order[number]) => (incoming[b] || 0) - (incoming[a] || 0))[0];
+                        const label = moodKey === 'positive' ? 'Positive' : moodKey === 'neutral' ? 'Neutral' : 'Negative';
+                        const pct = percent(moodKey);
+                        const color = moodKey === 'positive' ? 'emerald' : moodKey === 'neutral' ? 'amber' : 'rose';
+                        return (
+                          <div className={`rounded-xl border ${color==='rose'?'bg-rose-50/60 border-rose-100':'bg-emerald-50/60 border-emerald-100'} ${color==='amber'?'bg-amber-50/60 border-amber-100':''} p-4`}> 
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <span className="text-xl">{moodKey==='positive'?'😊':moodKey==='neutral'?'😐':'😞'}</span>
+                                <div className="font-semibold text-gray-800">Overall Mood</div>
+                              </div>
+                              <div className="text-sm text-gray-500">Sentiment Score</div>
+                            </div>
+                            <div className={`mt-1 text-sm ${moodKey==='positive'?'text-emerald-700':moodKey==='neutral'?'text-amber-700':'text-rose-700'}`}>{label}</div>
+                            <div className="mt-2 flex items-center gap-2">
+                              <div className="relative w-full h-2 rounded-full bg-gray-200 overflow-hidden">
+                                <div className={`${moodKey==='positive'?'bg-emerald-500':moodKey==='neutral'?'bg-amber-500':'bg-rose-500'} h-2`} style={{width: `${pct}%`}} />
+                              </div>
+                              <div className="text-sm font-semibold text-gray-800">{pct}%</div>
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                      <div className="space-y-3">
+                        <div className="font-medium text-gray-700 flex items-center gap-2"><span>♡</span> Detected Emotions</div>
+                        <div className="flex flex-wrap gap-2">
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-gray-50 border border-gray-200 text-sm text-gray-600">🙂 joy</span>
+                        </div>
+                      </div>
+
+                      <div className="space-y-1">
+                        <div className="font-medium text-gray-700 flex items-center gap-2"><span>⌁</span> Mood Shift</div>
+                        <div className="text-sm text-gray-600">Shift: 0.00</div>
+                      </div>
+
+                      <div className="space-y-1">
+                        <div className="font-medium text-gray-700 flex items-center gap-2"><span>◎</span> Risk Indicators</div>
+                        <div className="text-sm text-gray-600">Score: 0%</div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <div className="font-medium text-gray-700 flex items-center gap-2"><span>¶</span> Sentence Insights</div>
+                        <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700">No insights available.</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
               <div>
                 <div className={styles.profileName}>
                   {currentUser?.name || 'User'}
@@ -723,6 +804,33 @@ export default function CounselorDashboard() {
             </div>
           </div>
         </div>
+
+        {showScaleInfo && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+            <div className="bg-white rounded-2xl shadow-lg p-6 w-full max-w-md">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-lg font-semibold text-[#0d8c4f]">Mood Scale</h3>
+                <button
+                  type="button"
+                  className="text-gray-500 hover:text-gray-700 text-xl"
+                  onClick={() => setShowScaleInfo(false)}
+                  aria-label="Close"
+                >
+                  &times;
+                </button>
+              </div>
+              <div className="text-sm text-gray-700 space-y-1">
+                <div><span className="font-medium">1</span> = Very Sad</div>
+                <div><span className="font-medium">2</span> = Sad</div>
+                <div><span className="font-medium">3</span> = Neutral</div>
+                <div><span className="font-medium">4</span> = Good</div>
+                <div><span className="font-medium">5</span> = Happy</div>
+                <div><span className="font-medium">6</span> = Very Happy</div>
+                <div><span className="font-medium">7</span> = Excellent</div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Stats */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -754,19 +862,25 @@ export default function CounselorDashboard() {
         </div>
 
         {/* Weekly Mood Analytics - moved up and made more prominent */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6 items-start">
           {/* Weekly Mood Trend (2/3 width on desktop) */}
           <div className="lg:col-span-2 space-y-6">
             <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow p-5 hover:shadow-md transition-all duration-300 w-full border border-gray-100">
               <div className={`${styles.cardHeader}`}>
                 <div className="flex items-center gap-2">
                   <h2 className={styles.sectionTitle}>Weekly Mood Analytics</h2>
-                  <img
-                    src="https://cdn-icons-png.flaticon.com/512/8763/8763670.png"
-                    alt="summary"
-                    title={aiMoodSummary || getMoodSummary(paginatedMoodTrend)}
-                    className={styles.summaryIconImg}
-                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowSentimentInfo(true)}
+                    className="inline-flex items-center justify-center p-1 rounded-md hover:bg-gray-50 transition cursor-pointer"
+                    aria-label="Open sentiment analysis"
+                  >
+                    <img
+                      src="https://cdn-icons-png.flaticon.com/512/8763/8763670.png"
+                      alt="summary"
+                      className={styles.summaryIconImg}
+                    />
+                  </button>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
@@ -858,7 +972,14 @@ export default function CounselorDashboard() {
                   </ResponsiveContainer>
                 )}
               </div>
-              <div className="mt-2 text-xs text-[#6b7280]">Scale: 1 = Very Sad, 2 = Sad, 3 = Neutral, 4 = Good, 5 = Happy, 6 = Very Happy, 7 = Excellent</div>
+              <button
+                type="button"
+                onClick={() => setShowScaleInfo(true)}
+                className="mt-2 text-xs text-[#0d8c4f] underline hover:text-[#0a6d3d] cursor-pointer"
+                title="View mood scale"
+              >
+                View mood scale
+              </button>
             </div>
           </div>
 
@@ -897,7 +1018,7 @@ export default function CounselorDashboard() {
                 ))}
               </div>
               <button
-                className="w-full mt-4 py-2 rounded-xl border-2 border-[#0d8c4f] text-[#0d8c4f] font-semibold bg-gradient-to-r from-[#e0f7ef] to-[#f5faff] hover:scale-105 hover:shadow-lg transition-all duration-150 text-base flex items-center justify-center gap-2"
+                className="w-full mt-4 py-2 rounded-xl border-2 border-[#0d8c4f] text-[#0d8c4f] font-semibold bg-gradient-to-r from-[#e0f7ef] to-[#f5faff] hover:scale-105 hover:shadow-lg transition-all duration-150 text-base flex items-center justify-center gap-2 cursor-pointer"
                 onClick={() => setShowAllAlerts(true)}
               >
                 <Info className="h-5 w-5 text-[#0d8c4f]" />
@@ -908,39 +1029,44 @@ export default function CounselorDashboard() {
         </div>
 
         {showAllAlerts && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-transparent bg-opacity-30">
-            <div className="bg-white rounded-2xl shadow-lg p-6 max-w-lg w-full relative">
-              <button
-                className="absolute top-2 right-2 text-[#0d8c4f] text-xl"
-                onClick={() => setShowAllAlerts(false)}
-                aria-label="Close"
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+            <div className="bg-white rounded-2xl shadow-lg p-6 w-full max-w-lg">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-lg font-semibold text-[#0d8c4f]">All Alerts</h2>
+                <button
+                  className="text-gray-500 hover:text-gray-700 text-xl"
+                  onClick={() => setShowAllAlerts(false)}
+                  aria-label="Close"
+                >
+                  &times;
+                </button>
+              </div>
+              <div
+                className="max-h-[60vh] overflow-y-auto space-y-3"
+                style={{ scrollbarWidth: 'thin', WebkitOverflowScrolling: 'touch' }}
               >
-                &times;
-              </button>
-              <h2 className="text-lg font-semibold mb-4 text-[#0d8c4f]">All Alerts</h2>
-              <div className="max-h-[60vh] overflow-y-auto space-y-3">
-                {recentAlerts.length === 0 ? (
+                {allAlerts.length === 0 ? (
                   <div className="text-gray-500 text-sm">No alerts available.</div>
                 ) : (
-                  allAlerts.map((alert, idx) => (
+                  allAlerts.map((alert) => (
                     <div
                       key={alert.id}
-                      className="flex items-center justify-between bg-[#f7fafd] rounded-xl px-3 py-2"
+                      className="flex items-center justify-between rounded-xl px-3 py-2 bg-[#f7fafd] border border-[#e9eff6] hover:bg-white hover:shadow-sm transition"
                     >
-                      <div className="flex items-center gap-2">
-                        {alert.severity === "high" || alert.severity === "critical" ? (
+                      <div className="flex items-center gap-2 min-w-0">
+                        {alert.severity === 'high' || alert.severity === 'critical' ? (
                           <AlertTriangle className="h-4 w-4 text-red-500" />
-                        ) : alert.severity === "medium" ? (
+                        ) : alert.severity === 'medium' ? (
                           <AlertCircle className="h-4 w-4 text-yellow-500" />
                         ) : (
                           <Bell className="h-4 w-4 text-blue-500" />
                         )}
-                        <div>
-                          <div className="font-semibold text-[#333] flex items-center gap-2">
-                            {alert.name}
+                        <div className="min-w-0">
+                          <div className="font-semibold text-[#333] flex items-center gap-2 truncate">
+                            <span className="truncate">{alert.name}</span>
                             {severityBadge(alert.severity)}
                           </div>
-                          <div className="text-xs text-[#6b7280]">
+                          <div className="text-xs text-[#6b7280] truncate">
                             {alert.reason} • {formatDate(alert.created_at, true)}
                           </div>
                         </div>
@@ -961,21 +1087,18 @@ export default function CounselorDashboard() {
               <div className={`${styles.cardHeader}`}>
                 <div className="flex items-center gap-2">
                   <h2 className={styles.sectionTitle}>Sentiment Breakdown</h2>
-                  <img
-                    src="https://cdn-icons-png.flaticon.com/512/8763/8763670.png"
-                    alt="summary"
-                    title={(function(){
-                      const order = ["positive","neutral","negative"] as const;
-                      const incoming: Record<string, number> = Object.fromEntries(
-                        sentimentBreakdown.map((d: any) => [String(d.name).toLowerCase(), Number(d.value) || 0])
-                      );
-                      const total = order.reduce((s,k)=>s+(incoming[k]||0),0);
-                      if(!total) return 'No sentiment data.';
-                      const pct = (k: typeof order[number]) => Math.round(((incoming[k]||0)/total)*100);
-                      const fallback = `Overall this period: Positive ${pct('positive')}%, Neutral ${pct('neutral')}%, Negative ${pct('negative')}%`;
-                      return aiSentimentSummary || fallback;})()}
-                    className={styles.summaryIconImg}
-                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowSentimentInfo(true)}
+                    className="inline-flex items-center justify-center p-1 rounded-md hover:bg-gray-50 transition cursor-pointer"
+                    aria-label="Open sentiment analysis"
+                  >
+                    <img
+                      src="https://cdn-icons-png.flaticon.com/512/8763/8763670.png"
+                      alt="summary"
+                      className={styles.summaryIconImg}
+                    />
+                  </button>
                 </div>
                 <div className="flex justify-end gap-2">
                   {(["week", "month", "year"] as const).map((p) => (
@@ -1299,13 +1422,13 @@ export default function CounselorDashboard() {
             </div>
           </div>
           {/* Right rail: Appointment Logs */}
-            <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow p-5 hover:shadow-md transition-all duration-300 border border-gray-100">
+          <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow p-5 hover:shadow-md transition-all duration-300 border border-gray-100 flex flex-col self-start">
             <h2 className="text-lg font-semibold mb-4 text-[#0d8c4f]">Appointment Logs</h2>
-            <div className="space-y-3 max-h-[24rem] overflow-y-auto pr-1">
+            <div className="space-y-3 pr-1 overflow-y-auto max-h-[28rem]">
               {appointmentLogs.length === 0 ? (
                 <div className="text-[#6b7280] text-sm">No logs yet.</div>
               ) : (
-                appointmentLogs.slice(0, 12).map((log) => (
+                appointmentLogs.map((log) => (
                   <div key={log.log_id} className={`${styles.tileRow}`}>
                     <div className="min-w-0">
                       <div className="text-sm font-semibold text-[#111827]">{log.form_type || 'Form'} downloaded</div>
