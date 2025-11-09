@@ -420,7 +420,7 @@ export default function CounselorDashboard() {
         setAppointmentLogs(Array.isArray(appointmentLogsRes?.data) ? appointmentLogsRes.data : []);
         
         // Add a small delay to ensure all data is rendered before hiding the spinner
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await new Promise(resolve => setTimeout(resolve, 1000));
       } catch (error) {
         console.error('Error fetching dashboard data:', error);
       } finally {
