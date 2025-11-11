@@ -13,6 +13,7 @@ import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Link } from 'expo-router';
 import * as Haptics from 'expo-haptics';
+import { learnTopics } from './data';
 
 const stats = [
   { key: 'courses', label: 'Courses\nCompleted', value: '12', icon: 'book-open', bg: '#ECFDF5', color: '#10B981' },
@@ -31,40 +32,28 @@ type Course = {
   image?: any;
 };
 
-const courses: Course[] = [
-  {
-    id: 'stress-management',
-    title: 'Stress Management',
-    description: 'Learn effective techniques to manage and reduce stress in your daily life',
-    tags: ['Design', 'Product'],
-    lessons: 12,
-    comments: 4,
-  },
-  {
-    id: 'mindfulness-meditation',
-    title: 'Mindfulness & Meditation',
-    description: 'Discover the power of mindfulness and meditation for calm and focus',
-    tags: ['Design', 'Prototype'],
-    lessons: 8,
-    comments: 4,
-  },
-  {
-    id: 'sleep-rest',
-    title: 'Sleep & Rest',
-    description: 'Improve your sleep quality and establish healthy sleep habits',
-    tags: ['Design', 'Research'],
-    lessons: 10,
-    comments: 4,
-  },
-  {
-    id: 'academic-success',
-    title: 'Academic Success',
-    description: 'Navigate academic challenges and reduce study-related stress',
-    tags: ['Design', 'Product'],
-    lessons: 14,
-    comments: 6,
-  },
-];
+const deriveTopicTags = (topicArticles: typeof learnTopics[keyof typeof learnTopics]['articles']) => {
+  const tagSet = new Set<string>();
+  topicArticles.forEach((article) => {
+    article.tags.forEach((tag) => tagSet.add(tag));
+  });
+  const tags = Array.from(tagSet).slice(0, 3);
+  if (tags.length > 0) return tags;
+  return ['Wellness'];
+};
+
+const courses: Course[] = Object.entries(learnTopics).map(([id, topic]) => {
+  const totalMins = topic.articles.reduce((sum, article) => sum + (article.mins ?? 0), 0);
+  const approxComments = Math.max(2, Math.round(totalMins / 4));
+  return {
+    id,
+    title: topic.title,
+    description: topic.subtitle,
+    tags: deriveTopicTags(topic.articles),
+    lessons: topic.articles.length,
+    comments: approxComments,
+  };
+});
 
 const tabs = ['Topics', 'Saved'] as const;
 

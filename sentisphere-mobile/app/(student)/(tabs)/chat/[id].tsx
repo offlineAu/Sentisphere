@@ -200,7 +200,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
               accessibilityLabel="Go back"
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
               onPressIn={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} } }}
-              onPress={() => router.replace('/(student)/(tabs)/chat')}
+              onPress={() => router.replace('/(student)/(tabs)/dashboard')}
               style={({ pressed }) => ({ padding: 6, borderRadius: 10, opacity: pressed ? 0.7 : 1 })}
             >
               <Icon name="arrow-left" size={20} color={palette.text} />

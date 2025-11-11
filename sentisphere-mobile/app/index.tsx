@@ -1,6 +1,5 @@
 import React, { useRef, useEffect } from 'react'
 import { View, Text, StyleSheet, Pressable, Animated, Easing, Platform } from 'react-native'
-import { LinearGradient } from 'expo-linear-gradient'
 import { Asset } from 'expo-asset'
 import { router } from 'expo-router'
 import { Colors } from '@/constants/theme'
@@ -31,37 +30,44 @@ export default function SplashIntro() {
 
   const onStart = () => {
     try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium) } catch {}
-    router.replace('/(student)/(tabs)/dashboard')
+    router.replace('/auth')
   }
 
   return (
     <View style={styles.container}>
-      <LinearGradient
-        colors={['#F7FAFF', '#FFF5F7', '#F0FFF4']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={StyleSheet.absoluteFill}
-      />
+      {/* White background retained via styles.container */}
 
       {/* Decorative orbit icons */}
       <View pointerEvents="none" style={styles.iconsLayer}>
         <View style={[styles.badge, { top: 80, left: 28 }]}>
-          <Icon name="calendar" size={18} color="#7C3AED" />
+          <Icon name="calendar" size={26} color="#7C3AED" />
         </View>
         <View style={[styles.badge, { top: 130, right: 28 }]}>
-          <Icon name="map-pin" size={18} color="#F97316" />
+          <Icon name="map-pin" size={26} color="#F97316" />
         </View>
         <View style={[styles.badge, { top: 220, left: 36 }]}>
-          <Icon name="ticket" size={18} color="#2563EB" />
+          <Icon name="ticket" size={26} color="#2563EB" />
         </View>
         <View style={[styles.badge, { top: 270, right: 40 }]}>
-          <Icon name="party-popper" size={18} color="#EC4899" />
+          <Icon name="party-popper" size={26} color="#EC4899" />
         </View>
         <View style={[styles.badge, { top: 360, left: 70 }]}>
-          <Icon name="globe-2" size={18} color="#10B981" />
+          <Icon name="globe-2" size={26} color="#10B981" />
         </View>
         <View style={[styles.badge, { top: 380, right: 70 }]}>
-          <Icon name="smile" size={18} color="#A855F7" />
+          <Icon name="smile" size={26} color="#A855F7" />
+        </View>
+        <View style={[styles.badge, { top: 160, left: 120 }]}>
+          <Icon name="book-open" size={24} color="#0EA5E9" />
+        </View>
+        <View style={[styles.badge, { top: 320, right: 120 }]}>
+          <Icon name="heart" size={24} color="#EF4444" />
+        </View>
+        <View style={[styles.badge, { top: 440, left: 30 }]}>
+          <Icon name="sparkles" size={24} color="#F59E0B" />
+        </View>
+        <View style={[styles.badge, { top: 480, right: 40 }]}>
+          <Icon name="bell" size={24} color="#22C55E" />
         </View>
       </View>
 
@@ -77,9 +83,6 @@ export default function SplashIntro() {
       <View style={styles.copy}>
         <Text style={styles.brand}>sentisphere</Text>
         <Text style={styles.headline}>Delightful Wellness</Text>
-        <LinearGradient colors={[palette.tint, '#F59E0B']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.gradientTextMask}>
-          <Text style={styles.subheadline}>Start Here</Text>
-        </LinearGradient>
       </View>
 
       {/* CTA */}
@@ -119,15 +122,15 @@ const styles = StyleSheet.create({
     position: 'absolute',
   },
   centerWrap: {
-    marginTop: 36,
-    width: 240,
-    height: 240,
+    marginTop: 20,
+    width: 200,
+    height: 200,
     alignItems: 'center',
     justifyContent: 'center',
   },
   logoWrap: {
-    width: 200,
-    height: 200,
+    width: 160,
+    height: 160,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -152,7 +155,7 @@ const styles = StyleSheet.create({
     marginTop: -10,
   },
   brand: {
-    fontSize: 14,
+    fontSize: 18,
     letterSpacing: 1.2,
     color: '#9CA3AF',
     textTransform: 'lowercase',
@@ -160,22 +163,12 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_500Medium',
   },
   headline: {
-    fontSize: 28,
+    fontSize: 30,
     color: '#111827',
     fontFamily: 'Inter_700Bold',
   },
-  gradientTextMask: {
-    borderRadius: 6,
-    paddingHorizontal: 2,
-    marginTop: 6,
-  },
-  subheadline: {
-    fontSize: 22,
-    fontFamily: 'Inter_700Bold',
-    color: 'white',
-    // gradient text effect hack: use gradient background and set text color to transparent on web; on native keep high-contrast white
-    ...(Platform.OS === 'web' ? { color: 'transparent', backgroundClip: 'text' as any, WebkitBackgroundClip: 'text' as any } : {}),
-  },
+  gradientTextMask: {},
+  subheadline: {},
   ctaWrap: {
     width: '100%',
     paddingHorizontal: 20,
@@ -183,7 +176,7 @@ const styles = StyleSheet.create({
   cta: {
     height: 56,
     borderRadius: 16,
-    backgroundColor: '#111827',
+    backgroundColor: '#0d8c4f',
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000',
@@ -194,7 +187,7 @@ const styles = StyleSheet.create({
   },
   ctaText: {
     color: 'white',
-    fontSize: 16,
+    fontSize: 18,
     fontFamily: 'Inter_600SemiBold',
   },
 })
