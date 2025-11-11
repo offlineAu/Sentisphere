@@ -8,6 +8,8 @@ import { useColorScheme } from '@/hooks/use-color-scheme'
 import { Colors } from '@/constants/theme'
 import { router } from 'expo-router'
 import * as SecureStore from 'expo-secure-store'
+import { SuccessDialog } from '@/components/ui/success-dialog'
+import { LoadingSplash } from '@/components/ui/loading-splash'
 
 export default function AuthScreen() {
   const scheme = useColorScheme() ?? 'light'
@@ -20,17 +22,16 @@ export default function AuthScreen() {
   const [student, setStudent] = useState<any>(null)
   const [token, setToken] = useState<string | null>(null)
   const [toastMessage, setToastMessage] = useState<string | null>(null)
+  const [attempting, setAttempting] = useState(false)
+  const [successNickname, setSuccessNickname] = useState<string | null>(null)
+  const [showSplash, setShowSplash] = useState(false)
+  const [splashPhase, setSplashPhase] = useState<'loading' | 'success'>('loading')
   const toastOpacity = useRef(new Animated.Value(0)).current
   const toastTranslateY = useRef(new Animated.Value(-50)).current
   const segmentAnim = useRef(new Animated.Value(0)).current
   const formAnim = useRef(new Animated.Value(1)).current
   const [segmentWidth, setSegmentWidth] = useState(0)
   const AnimatedGradient = Animated.createAnimatedComponent(LinearGradient)
-  const [successMessage, setSuccessMessage] = useState<string | null>(null)
-  const [successVisible, setSuccessVisible] = useState(false)
-  const successOpacity = useRef(new Animated.Value(0)).current
-  const successScale = useRef(new Animated.Value(0.9)).current
-  const successTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   
 
   const post = async (path: string, body: any) => {
@@ -48,73 +49,11 @@ export default function AuthScreen() {
       const errorText = detail ? `${detail}` : `${path} failed: ${res.status}`
       throw new Error(errorText)
     }
-
-  const triggerSuccessDialog = (message: string, onFinish?: () => void) => {
-    if (successTimer.current) {
-      clearTimeout(successTimer.current)
-      successTimer.current = null
-    }
-    setSuccessMessage(message)
-    setSuccessVisible(true)
-    successOpacity.setValue(0)
-    successScale.setValue(0.9)
-    Animated.parallel([
-      Animated.timing(successOpacity, {
-        toValue: 1,
-        duration: 220,
-        easing: Easing.out(Easing.quad),
-        useNativeDriver: true,
-      }),
-      Animated.spring(successScale, {
-        toValue: 1,
-        damping: 12,
-        stiffness: 180,
-        mass: 0.7,
-        useNativeDriver: true,
-      }),
-    ]).start()
-
-    successTimer.current = setTimeout(() => {
-      hideSuccessDialog(onFinish)
-    }, 1800)
-  }
-
-  const hideSuccessDialog = (callback?: () => void) => {
-    if (!successVisible) return
-    if (successTimer.current) {
-      clearTimeout(successTimer.current)
-      successTimer.current = null
-    }
-    Animated.parallel([
-      Animated.timing(successOpacity, {
-        toValue: 0,
-        duration: 180,
-        easing: Easing.in(Easing.quad),
-        useNativeDriver: true,
-      }),
-      Animated.timing(successScale, {
-        toValue: 0.9,
-        duration: 180,
-        easing: Easing.in(Easing.quad),
-        useNativeDriver: true,
-      }),
-    ]).start(({ finished }) => {
-      if (finished) {
-        setSuccessVisible(false)
-        if (callback) callback()
-      }
-    })
-  }
     return res.json()
   }
 
   useEffect(() => {
-    return () => {
-      if (successTimer.current) {
-        clearTimeout(successTimer.current)
-        successTimer.current = null
-      }
-    }
+    // no-op for simplified email verification flow
   }, [])
 
   useEffect(() => {
@@ -189,17 +128,22 @@ export default function AuthScreen() {
         showToast('Please enter a nickname (min 3 characters)')
         return
       }
+      setAttempting(true)
       setStatus('Registering...')
+      setSplashPhase('loading')
+      setShowSplash(true)
       const d = await post('/api/auth/mobile/register', { nickname })
       setToken(d.access_token)
       await saveToken(d.access_token)
-      setStatus(null)
-      triggerSuccessDialog(d?.existing ? 'Welcome back! Redirecting…' : 'Signup complete! Redirecting…', () => {
-        router.replace('/(student)/(tabs)/dashboard')
-      })
+      setStatus('Registered and signed in')
+      setSuccessNickname(nickname.trim())
+      setSplashPhase('success')
     } catch (e: any) {
       setStatus(null)
       showToast(e?.message || 'Registration failed')
+      setShowSplash(false)
+    } finally {
+      setAttempting(false)
     }
   }
 
@@ -209,18 +153,19 @@ export default function AuthScreen() {
         showToast('Please enter your nickname')
         return
       }
+      setAttempting(true)
       setStatus('Signing in...')
       const d = await post('/api/auth/mobile/login', { nickname })
       const tok = d.access_token || d.token || null
       setToken(tok)
       if (tok) { await saveToken(tok) }
-      setStatus(null)
-      triggerSuccessDialog('Welcome back! Redirecting…', () => {
-        router.replace('/(student)/(tabs)/dashboard')
-      })
+      setStatus('Signed in')
+      router.replace('/(student)/(tabs)/dashboard')
     } catch (e: any) {
       setStatus(null)
       showToast(e?.message || 'Login failed')
+    } finally {
+      setAttempting(false)
     }
   }
 
@@ -292,6 +237,8 @@ export default function AuthScreen() {
               variant="primary"
               style={styles.buttonSmall}
               textStyle={{ fontSize: 16 }}
+              loading={attempting}
+              disabled={attempting}
             />
           </View>
           {status ? (
@@ -316,22 +263,34 @@ export default function AuthScreen() {
         </Animated.View>
       )}
 
-      {successVisible && successMessage ? (
-        <Pressable style={styles.successOverlay} onPress={hideSuccessDialog}>
-          <Animated.View
-            style={[
-              styles.successCard,
-              {
-                opacity: successOpacity,
-                transform: [{ scale: successScale }],
-              },
-            ]}
-          >
-            <ThemedText style={styles.successHeading}>All set!</ThemedText>
-            <ThemedText style={styles.successBody}>{successMessage}</ThemedText>
-          </Animated.View>
-        </Pressable>
-      ) : null}
+      <SuccessDialog
+        visible={Boolean(successNickname)}
+        title={`🎉 Welcome to Sentisphere, ${successNickname || ''}!`}
+        message={
+          <ThemedText style={{ textAlign: 'center', color: '#4B5563' }}>
+            You're all set. Tap continue to explore your dashboard.
+          </ThemedText>
+        }
+        onContinue={() => {
+          setSuccessNickname(null)
+          router.replace('/(student)/(tabs)/dashboard')
+        }}
+        onRequestClose={() => {
+          setSuccessNickname(null)
+        }}
+      />
+
+      <LoadingSplash
+        visible={showSplash}
+        nickname={nickname.trim() || undefined}
+        phase={splashPhase}
+        onFinished={() => {
+          if (splashPhase === 'success') {
+            setShowSplash(false)
+            // allow the success dialog to appear already visible
+          }
+        }}
+      />
     </ThemedView>
   )
 }
@@ -402,43 +361,6 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontFamily: 'Inter_500Medium',
-    textAlign: 'center',
-  },
-  successOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.2)',
-    paddingHorizontal: 24,
-  },
-  successCard: {
-    width: '100%',
-    maxWidth: 320,
-    borderRadius: 18,
-    paddingVertical: 24,
-    paddingHorizontal: 20,
-    backgroundColor: '#FFFFFF',
-    shadowColor: '#000',
-    shadowOpacity: 0.18,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 7,
-    alignItems: 'center',
-    gap: 8,
-  },
-  successHeading: {
-    fontSize: 18,
-    fontFamily: 'Inter_600SemiBold',
-    color: '#0d8c4f',
-  },
-  successBody: {
-    fontSize: 15,
-    fontFamily: 'Inter_500Medium',
-    color: '#111827',
     textAlign: 'center',
   },
 })

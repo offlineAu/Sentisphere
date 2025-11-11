@@ -1,9 +1,11 @@
 from fastapi import APIRouter, HTTPException, Depends, Request
-from sqlalchemy import text
-from sqlalchemy.exc import ProgrammingError
+from sqlalchemy import text, select, func, or_
+from sqlalchemy.exc import ProgrammingError, IntegrityError
 from app.schemas.auth import Token
 from app.services.jwt import create_access_token
-from app.db.database import engine
+from app.db.database import engine, ENGINE_INIT_ERROR_MSG
+from app.db.mobile_database import mobile_engine, MobileSessionLocal
+from app.models.mobile_user import MobileUser
 from datetime import datetime, timezone, timedelta
 from app.core.config import settings
 import httpx
@@ -214,77 +216,62 @@ async def mobile_register(request: Request):
     if len(nickname) < 3 or len(nickname) > 50:
         raise HTTPException(status_code=422, detail="Nickname must be 3-50 characters")
 
-    with engine.begin() as conn:
-        # Ensure post table exists for logging purposes
-        conn.execute(
-            text(
-                """
-                CREATE TABLE IF NOT EXISTS post (
-                    post_id INT PRIMARY KEY AUTO_INCREMENT,
-                    user_id INT NOT NULL,
-                    title VARCHAR(255) NOT NULL,
-                    content TEXT,
-                    status VARCHAR(50) DEFAULT 'draft',
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    INDEX idx_post_user_id (user_id),
-                    CONSTRAINT fk_post_user FOREIGN KEY (user_id) REFERENCES user(user_id)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-                """
+    created_user = None
+    with MobileSessionLocal() as db:
+        try:
+            existing = db.execute(
+                select(MobileUser).where(
+                    or_(
+                        func.lower(MobileUser.nickname) == func.lower(nickname),
+                        func.lower(MobileUser.name) == func.lower(nickname),
+                    )
+                ).limit(1)
+            ).scalars().first()
+
+            if existing:
+                if (existing.role or "student") != "student":
+                    raise HTTPException(status_code=400, detail="Nickname already used by another role")
+                token = create_access_token(
+                    subject=str(existing.user_id),
+                    expires_delta=timedelta(minutes=settings.JWT_EXPIRE_MINUTES),
+                    user_data={
+                        "email": existing.email or "",
+                        "name": existing.nickname or existing.name or nickname,
+                        "role": "student",
+                    },
+                )
+                return {"ok": True, "user_id": existing.user_id, "access_token": token, "existing": True}
+
+            new_user = MobileUser(
+                email=None,
+                name=nickname,
+                role="student",
+                nickname=nickname,
+                is_active=True,
             )
-        )
+            db.add(new_user)
+            db.commit()
+            db.refresh(new_user)
+            created_user = new_user
+        except HTTPException:
+            db.rollback()
+            raise
+        except IntegrityError as exc:
+            db.rollback()
+            raise HTTPException(status_code=400, detail="Nickname already exists") from exc
+        except Exception as exc:
+            db.rollback()
+            raise HTTPException(status_code=500, detail=f"Failed to register: {str(exc)}") from exc
 
-        existing = conn.execute(
-            text(
-                "SELECT user_id, role, nickname, email, name FROM user "
-                "WHERE LOWER(nickname)=LOWER(:n) OR LOWER(name)=LOWER(:n) LIMIT 1"
-            ),
-            {"n": nickname},
-        ).mappings().first()
-
-        if existing:
-            if (existing.get("role") or existing["role"]) != "student":
-                raise HTTPException(status_code=400, detail="Nickname already used by another role")
-            existing_user_id = existing["user_id"]
-            existing_email = existing.get("email") or ""
-            existing_name = existing.get("nickname") or existing.get("name") or nickname
-        else:
-            result = conn.execute(
-                text(
-                    "INSERT INTO user (email, name, role, nickname, is_active, created_at) "
-                    "VALUES (NULL, :name, 'student', :nickname, 1, NOW())"
-                ),
-                {"name": nickname, "nickname": nickname},
-            )
-            new_user_id = result.lastrowid
-
-            # Create related post/log entry for the signup event
-            conn.execute(
-                text(
-                    "INSERT INTO post (user_id, title, content, status, created_at) "
-                    "VALUES (:user_id, :title, :content, 'published', NOW())"
-                ),
-                {
-                    "user_id": new_user_id,
-                    "title": f"New student signup: {nickname}",
-                    "content": "Signup completed via mobile app",
-                },
-            )
-
-    if existing:
-        token = create_access_token(
-            subject=str(existing_user_id),
-            expires_delta=timedelta(minutes=settings.JWT_EXPIRE_MINUTES),
-            user_data={"email": existing_email, "name": existing_name, "role": "student"},
-        )
-        return {"ok": True, "user_id": existing_user_id, "access_token": token, "existing": True}
+    if not created_user:
+        raise HTTPException(status_code=500, detail="Failed to register user")
 
     token = create_access_token(
-        subject=str(new_user_id),
+        subject=str(created_user.user_id),
         expires_delta=timedelta(minutes=settings.JWT_EXPIRE_MINUTES),
-        user_data={"name": nickname, "role": "student"},
+        user_data={"name": created_user.nickname or nickname, "role": "student"},
     )
-    return {"ok": True, "user_id": new_user_id, "access_token": token, "existing": False}
-
+    return {"ok": True, "user_id": created_user.user_id, "access_token": token, "existing": False}
 
 @router.post("/mobile/login")
 async def mobile_login(request: Request):
@@ -297,26 +284,27 @@ async def mobile_login(request: Request):
     if not nickname:
         raise HTTPException(status_code=422, detail="Nickname required")
 
-    with engine.connect() as conn:
-        row = conn.execute(
-            text(
-                "SELECT user_id, role, nickname, email, name FROM user "
-                "WHERE LOWER(nickname)=LOWER(:n) OR LOWER(name)=LOWER(:n) LIMIT 1"
-            ),
-            {"n": nickname},
-        ).mappings().first()
+    with MobileSessionLocal() as db:
+        user = db.execute(
+            select(MobileUser).where(
+                or_(
+                    func.lower(MobileUser.nickname) == func.lower(nickname),
+                    func.lower(MobileUser.name) == func.lower(nickname),
+                )
+            ).limit(1)
+        ).scalars().first()
 
-        if not row or (row.get("role") or row["role"]) != "student":
+        if not user or (user.role or "student") != "student":
             raise HTTPException(status_code=404, detail="Not registered")
 
-        user_id = str(row["user_id"])
-        user_email = (row.get("email") or "")
-        user_name = row.get("nickname") or row.get("name") or nickname
-
         token = create_access_token(
-            subject=user_id,
+            subject=str(user.user_id),
             expires_delta=timedelta(minutes=settings.JWT_EXPIRE_MINUTES),
-            user_data={"email": user_email, "name": user_name, "role": "student"},
+            user_data={
+                "email": user.email or "",
+                "name": user.nickname or user.name or nickname,
+                "role": "student",
+            },
         )
         return {"access_token": token}
 

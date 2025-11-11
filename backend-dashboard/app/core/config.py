@@ -14,6 +14,14 @@ class Settings(BaseSettings):
     DB_NAME: str = os.getenv("DB_NAME", "sentisphere_app")
     DB_DRIVER: str = os.getenv("DB_DRIVER", "mysql+mysqlconnector")
 
+    # Dedicated mobile database (falls back to main credentials unless overridden)
+    MOBILE_DB_USER: str = os.getenv("MOBILE_DB_USER") or DB_USER
+    MOBILE_DB_PASS: str = os.getenv("MOBILE_DB_PASS") or DB_PASS
+    MOBILE_DB_HOST: str = os.getenv("MOBILE_DB_HOST") or DB_HOST
+    MOBILE_DB_PORT: str = os.getenv("MOBILE_DB_PORT") or DB_PORT
+    MOBILE_DB_NAME: str = os.getenv("MOBILE_DB_NAME", "mobile_app_db")
+    MOBILE_DB_DRIVER: str = os.getenv("MOBILE_DB_DRIVER") or DB_DRIVER
+
     # CORS
     CORS_ORIGINS: List[str] = []
 
