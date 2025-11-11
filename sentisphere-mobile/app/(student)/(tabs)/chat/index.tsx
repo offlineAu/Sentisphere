@@ -36,13 +36,13 @@ export default function ChatScreen() {
   const { width } = useWindowDimensions();
   const isTablet = width >= 900;
   const insets = useSafeAreaInsets();
-  const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8000';
+  const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8010';
 
   useEffect(() => {
-    fetch(`${API_BASE_URL}/api/test`)
+    fetch(`${API_BASE_URL}/health`)
       .then((res) => res.json())
-      .then((data) => console.log('API test:', data))
-      .catch((err) => console.error('API test error:', err));
+      .then((data) => console.log('health:', data))
+      .catch((err) => console.error('health error:', err));
   }, []);
 
   const doHaptic = async (kind: 'light' | 'selection' | 'success' = 'light') => {

@@ -50,6 +50,14 @@ export default function EnhancedDashboardScreen() {
   const [weeklyMoodAverage] = useState(7.2)
   const [currentStreak] = useState(5)
   const [gridW, setGridW] = useState(0)
+  const API = process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8010'
+
+  useEffect(() => {
+    fetch(`${API}/health`)
+      .then((r) => r.json())
+      .then((d) => console.log('health:', d))
+      .catch((e) => console.error('health error:', e))
+  }, [])
   const measuredTileW = gridW > 0 ? (gridW - QUICK_GAP) / 2 : 0
   const quickActionTileSize: any = measuredTileW
     ? {

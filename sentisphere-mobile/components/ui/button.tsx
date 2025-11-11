@@ -29,13 +29,13 @@ export function Button({ title, onPress, variant = 'primary', style, textStyle, 
 
   const styles = StyleSheet.create({
     base: {
-      borderRadius: 10,
-      paddingVertical: 12,
+      borderRadius: 12,
+      paddingVertical: 16,
       paddingHorizontal: 16,
       alignItems: 'center',
       justifyContent: 'center',
       borderWidth: variant === 'outline' ? 1 : 0,
-      borderColor: palette.border,
+      borderColor: variant === 'outline' ? '#0d8c4f' : 'transparent',
       backgroundColor: 'transparent',
     },
     text: {
@@ -72,13 +72,19 @@ export function Button({ title, onPress, variant = 'primary', style, textStyle, 
 
   const computedBackground = (() => {
     if (variant === 'primary') {
-      if (disabled) return '#9BA1A6';
-      const base = palette.tint as string;
-      if (pressed) return adjustLightness(base, -7);
-      if (hovered) return adjustLightness(base, -4);
-      return base;
+      if (disabled) return 'rgba(155, 161, 166, 0.3)';
+      // Fuller color with slight variations for interaction
+      if (pressed) return '#0a7043';
+      if (hovered) return '#0b7d47';
+      return '#0d8c4f';
     }
-    // outline/ghost subtle backgrounds
+    if (variant === 'outline') {
+      // Glass effect for outline variant
+      if (pressed) return 'rgba(13, 140, 79, 0.15)';
+      if (hovered) return 'rgba(13, 140, 79, 0.08)';
+      return 'rgba(13, 140, 79, 0.05)';
+    }
+    // ghost subtle backgrounds
     if (pressed) return '#E5E7EB';
     if (hovered) return '#F3F4F6';
     return 'transparent';

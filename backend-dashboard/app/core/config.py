@@ -1,5 +1,5 @@
 import os
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List
 
 class Settings(BaseSettings):
@@ -21,10 +21,17 @@ class Settings(BaseSettings):
     JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "super-dev-secret-please-change-later")
     JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
     JWT_EXPIRE_MINUTES: int = int(os.getenv("JWT_EXPIRE_MINUTES", "60"))
-
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
+    
+    # Microsoft verification
+    ALLOWED_EMAIL_DOMAINS: List[str] = [d.strip() for d in (os.getenv("ALLOWED_EMAIL_DOMAINS", "ustp.edu.ph").split(",")) if d.strip()]
+    MS_TENANT_ID: str = os.getenv("MS_TENANT_ID", "")
+    MS_CLIENT_ID: str = os.getenv("MS_CLIENT_ID", "")
+    MS_CLIENT_SECRET: str = os.getenv("MS_CLIENT_SECRET", "")
+    MS_VERIFY_STRICT: bool = os.getenv("MS_VERIFY_STRICT", "0") in ("1", "true", "True")
+    ALLOW_PASSWORDLESS_STUDENT_LOGIN: bool = os.getenv("ALLOW_PASSWORDLESS_STUDENT_LOGIN", "1") in ("1", "true", "True")
+    
+    # Pydantic v2 settings config
+    model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
 
 def _load_settings() -> "Settings":
     s = Settings()
@@ -37,6 +44,10 @@ def _load_settings() -> "Settings":
             "http://localhost:8000",
             "http://127.0.0.1:5173",
             "http://127.0.0.1:8000",
+            "http://localhost:8081",
+            "http://127.0.0.1:8081",
+            "http://localhost:8010",
+            "http://127.0.0.1:8010",
         ]
     return s
 
