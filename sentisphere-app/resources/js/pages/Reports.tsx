@@ -1,11 +1,14 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, TrendingUp, AlertTriangle, UserRound, CalendarDays, Activity, Download, Filter } from "lucide-react";
-import { ResponsiveContainer, LineChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip } from "recharts";
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, Legend } from "recharts";
 import { motion, AnimatePresence } from "framer-motion";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { LoadingSpinner } from "../components/loading-spinner";
 import api from "../lib/api";
 import styles from "./Reports.module.css";
+import Slider from "react-slick";
+import "slick-carousel/slick/slick.css";
+import "slick-carousel/slick/slick-theme.css";
 
 type TopStat = {
   label: string;
@@ -30,13 +33,6 @@ type Alert = {
 };
 type ApiAlert = { severity: string; created_at: string };
 
-type SecondaryStat = {
-  label: string;
-  value: string;
-  delta?: string;
-  deltaColor?: string;
-};
-
 type Concern = {
   label: string;
   students: number;
@@ -60,9 +56,64 @@ type AttentionStudent = {
   userId: number;
 };
 
-type MoodTrendPoint = {
-  week: string;
-  avgMood: number;
+type TrendPoint = {
+  week_start: string;
+  week_end: string;
+  index: number;
+  avg_mood: number;
+  avg_energy: number;
+  avg_stress: number;
+  event_name?: string | null;
+  event_type?: string | null;
+};
+
+type WeeklyInsight = {
+  week_start: string;
+  week_end: string;
+  event_name?: string | null;
+  event_type?: string | null;
+  title: string;
+  description: string;
+  recommendation: string;
+};
+
+type BehaviorInsight = {
+  title: string;
+  description: string;
+  metrics?: Array<{ label: string; value: number | string }>;
+};
+
+type CalendarEvent = { name: string; start: string; end: string; type?: string };
+
+type TrendsResponseNew = {
+  dates: string[];
+  mood: number[];
+  energy: number[];
+  stress: number[];
+  wellness_index: number[];
+  current_index: number;
+  previous_index: number;
+  change_percent: number;
+  numerical_change: number;
+};
+
+type ReportSummary = {
+  week_start: string;
+  week_end: string;
+  current_wellness_index: number;
+  previous_wellness_index: number;
+  change: number;
+  event_name?: string | null;
+  event_type?: string | null;
+  insight: string;
+  insights: WeeklyInsight[];
+};
+
+type EngagementMetrics = {
+  active_students_this_week: number;
+  active_students_last_week: number;
+  avg_checkins_per_student: number;
+  participation_change: string;
 };
 
 function CustomWeekTick({ x, y, payload }: any) {
@@ -81,7 +132,6 @@ function CustomWeekTick({ x, y, payload }: any) {
 function Reports() {
 
   const [loading, setLoading] = useState(true);
-
   const [topStats, setTopStats] = useState<TopStat[]>([]);
   const [riskLevels, setRiskLevels] = useState<RiskLevel[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
@@ -93,35 +143,107 @@ function Reports() {
   const [allAlertsApi, setAllAlertsApi] = useState<ApiAlert[]>([]);
   const [alertsLoading, setAlertsLoading] = useState<boolean>(false);
   const [alertsError, setAlertsError] = useState<string | null>(null);
-  const [secondaryStats, setSecondaryStats] = useState<SecondaryStat[]>([]);
   const [concerns, setConcerns] = useState<Concern[]>([]);
   const [interventions, setInterventions] = useState<Intervention[]>([]);
   const [interventionSummary, setInterventionSummary] = useState<{ total_alerts: number; resolved_alerts: number; success_rate: number } | null>(null);
   const [chatKpi, setChatKpi] = useState<{ overall_success_rate: number; total_sessions: number; successful_sessions: number; average_conversation_duration_minutes: number; average_messages_per_conversation: number } | null>(null);
   const [attentionStudents, setAttentionStudents] = useState<AttentionStudent[]>([]);
-  const [moodTrendData, setMoodTrendData] = useState<MoodTrendPoint[]>([]);
-  const [currentAvg, setCurrentAvg] = useState(0);
-  const [trend, setTrend] = useState(0);
+  const [trendWeeks, setTrendWeeks] = useState<TrendPoint[]>([]);
   const [participation, setParticipation] = useState(0);
+  const [summary, setSummary] = useState<ReportSummary | null>(null);
+  const [insights, setInsights] = useState<WeeklyInsight[]>([]);
+  const [engagement, setEngagement] = useState<EngagementMetrics | null>(null);
+  const [calendarMonth, setCalendarMonth] = useState(() => {
+    const d = new Date();
+    d.setDate(1);
+    return d;
+  });
 
   const [page, setPage] = useState(0);
 
-  const itemsPerPage = 3;
+  // Carousels refs
+  const weeklySliderRef = useRef<any>(null);
+  const behaviorSliderRef = useRef<any>(null);
 
-  // --- Fetch mood trend ---
-  useEffect(() => {
-    api.get<any[]>(`/mood-trend`)
-      .then(({ data }) => {
-        setMoodTrendData(data || []);
-        if ((data || []).length > 0) {
-          const lastWeek = data[data.length - 1];
-          const prevWeek = data.length > 1 ? data[data.length - 2] : lastWeek;
-          setCurrentAvg(lastWeek.avgMood || 0);
-          setTrend(Math.round((lastWeek.avgMood - prevWeek.avgMood) * 10) / 10);
-        }
-      })
-      .catch(err => console.error(err));
-  }, []);
+  // Behavior insights and events
+  const [behaviorInsights, setBehaviorInsights] = useState<BehaviorInsight[]>([]);
+  const [events, setEvents] = useState<CalendarEvent[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  const calendarDays = useMemo(() => {
+    const monthStart = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1);
+    const monthEnd = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 0);
+    const startOffset = monthStart.getDay();
+    const totalDays = monthEnd.getDate();
+    const totalCells = Math.ceil((startOffset + totalDays) / 7) * 7;
+
+    const parseDate = (val: string) => {
+      const dt = new Date(val);
+      return Number.isNaN(dt.getTime()) ? null : dt;
+    };
+
+    const dayCells: Array<{ date: Date; inMonth: boolean; events: CalendarEvent[] }> = [];
+
+    for (let cell = 0; cell < totalCells; cell += 1) {
+      const day = new Date(monthStart);
+      day.setDate(day.getDate() + (cell - startOffset));
+
+      const dayEvents = events.filter((ev) => {
+        const start = parseDate(ev.start);
+        const end = parseDate(ev.end ?? ev.start);
+        if (!start || !end) return false;
+        const dayDate = new Date(day.getFullYear(), day.getMonth(), day.getDate());
+        const startDate = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+        const endDate = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+        return dayDate >= startDate && dayDate <= endDate;
+      });
+
+      dayCells.push({
+        date: day,
+        inMonth: day.getMonth() === calendarMonth.getMonth(),
+        events: dayEvents,
+      });
+    }
+
+    return dayCells;
+  }, [calendarMonth, events]);
+
+  const uploadCalendar = async (file: File) => {
+    try {
+      setUploading(true);
+      setUploadError(null);
+      const form = new FormData();
+      form.append("file", file);
+      const res = await api.post(`/api/calendar/upload`, form, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      const newEvents = Array.isArray(res.data) ? res.data : [];
+      setEvents(newEvents);
+    } catch (e) {
+      setUploadError("Failed to upload calendar. Please try again.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const insightSliderSettings = useMemo(() => ({
+    dots: true,
+    infinite: insights.length > 1,
+    arrows: false,
+    autoplay: insights.length > 1,
+    autoplaySpeed: 6000,
+    speed: 500,
+    slidesToShow: 1,
+    slidesToScroll: 1,
+    adaptiveHeight: false,
+    appendDots: (dots: React.ReactNode) => (
+      <div className="absolute bottom-3 left-0 right-0">
+        <ul className="flex justify-center gap-2">{dots}</ul>
+      </div>
+    ),
+    customPaging: () => <span className="block h-2 w-2 rounded-full bg-gray-300" />,
+  }), [insights.length]);
 
   // --- Fetch participation ---
   useEffect(() => {
@@ -134,6 +256,42 @@ function Reports() {
   useEffect(() => {
     const fetchReports = async () => {
       try {
+        const [summaryRes, trendsRes, weeklyInsightsRes, behaviorRes, eventsRes, engagementRes] = await Promise.all([
+          api.get<ReportSummary>(`/reports/summary`),
+          api.get<any>(`/reports/trends`),
+          api.get<WeeklyInsight[]>(`/reports/weekly-insights`),
+          api.get<BehaviorInsight[]>(`/reports/behavior-insights`),
+          api.get<Array<{ name: string; start: string; end: string; type?: string }>>(`/events`),
+          api.get<EngagementMetrics>(`/reports/engagement`),
+        ]);
+        setSummary(summaryRes.data || null);
+        // Prefer dedicated weekly-insights endpoint if available
+        if (Array.isArray(weeklyInsightsRes.data) && weeklyInsightsRes.data.length) {
+          setInsights(weeklyInsightsRes.data);
+        } else {
+          setInsights(summaryRes.data?.insights || []);
+        }
+
+        // Normalize trends data to TrendPoint[] if server returns the new arrays shape
+        if (trendsRes.data && Array.isArray(trendsRes.data.dates)) {
+          const d = trendsRes.data as TrendsResponseNew;
+          const pts: TrendPoint[] = d.dates.map((dt, i) => ({
+            week_start: dt,
+            week_end: dt,
+            index: d.wellness_index[i] ?? 0,
+            avg_mood: d.mood[i] ?? 0,
+            avg_energy: d.energy[i] ?? 0,
+            avg_stress: d.stress[i] ?? 0,
+          }));
+          setTrendWeeks(pts);
+        } else {
+          setTrendWeeks(trendsRes.data?.weeks || []);
+        }
+
+        setBehaviorInsights(Array.isArray(behaviorRes.data) ? behaviorRes.data : []);
+        setEvents(Array.isArray(eventsRes.data) ? eventsRes.data : []);
+        setEngagement(engagementRes.data || null);
+
         const topRes = await api.get<any>(`/reports/top-stats`);
         const topData = topRes.data;
 
@@ -175,16 +333,6 @@ function Reports() {
         } finally {
           setAlertsLoading(false);
         }
-
-        const moodRes = await api.get<any[]>(`/mood-trend`);
-        const moodData = moodRes.data || [];
-        const latestMood = moodData[moodData.length - 1]?.avgMood || 0;
-        const previousMood = moodData[moodData.length - 2]?.avgMood || 0;
-        const moodDelta = latestMood - previousMood;
-
-        setSecondaryStats([
-          { label: "Overall Mood", value: `${latestMood}/10`, delta: `${moodDelta >= 0 ? "+" : ""}${moodDelta.toFixed(1)}`, deltaColor: moodDelta >= 0 ? "text-green-600" : "text-red-600" },
-        ]);
 
         const concernsRes = await api.get<any[]>(`/reports/concerns`);
         const concernsData = concernsRes.data || [];
@@ -229,10 +377,21 @@ function Reports() {
     </div>
   );
 
-  const sortedMoodTrend = [...moodTrendData].sort((a, b) => a.week.localeCompare(b.week));
-  const maxPage = Math.ceil(sortedMoodTrend.length / itemsPerPage) - 1;
+  const itemsPerPage = 6;
+  const sortedTrendWeeks = [...trendWeeks].sort((a, b) => new Date(b.week_start).getTime() - new Date(a.week_start).getTime());
+  const maxPage = Math.max(0, Math.ceil(sortedTrendWeeks.length / itemsPerPage) - 1);
   const startIndex = page * itemsPerPage;
-  const paginatedMoodTrend = sortedMoodTrend.slice(startIndex, startIndex + itemsPerPage);
+  const paginatedTrendData = sortedTrendWeeks.slice(startIndex, startIndex + itemsPerPage).map((wk) => ({
+    week_label: `${new Date(wk.week_start).toLocaleDateString(undefined, { month: "short", day: "2-digit" })} - ${new Date(wk.week_end).toLocaleDateString(undefined, { month: "short", day: "2-digit" })}`,
+    wellness: wk.index,
+    mood: wk.avg_mood,
+    energy: wk.avg_energy,
+    stress: wk.avg_stress,
+  }));
+
+  const latestIndex = sortedTrendWeeks[0]?.index ?? 0;
+  const prevIndex = sortedTrendWeeks[1]?.index ?? latestIndex;
+  const changePct = prevIndex !== 0 ? Math.round(((latestIndex - prevIndex) / Math.max(prevIndex, 1e-9)) * 100) : 0;
 
   return (
     <main
@@ -286,9 +445,9 @@ function Reports() {
         })}
       </div>
 
-      {/* Wellness Trend */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2">
+      {/* Wellness Trend + Academic Calendar */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <div className="space-y-4">
           <div className="bg-white rounded-2xl shadow p-4 w-full max-w-full">
             <div className="flex justify-between items-center mb-2">
               <h2 className={styles.sectionTitle}>Wellness Trends</h2>
@@ -311,42 +470,26 @@ function Reports() {
             </div>
 
             <div className="h-[350px] flex items-center justify-center">
-              {paginatedMoodTrend.length === 0 ? (
+              {paginatedTrendData.length === 0 ? (
                 <span className="text-gray-500 text-sm">No wellness data available.</span>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart
-                    data={paginatedMoodTrend}
-                    margin={{ top: 20, right: 35, bottom: 40, left: 20 }}
-                  >
+                  <LineChart data={paginatedTrendData} margin={{ top: 20, right: 35, bottom: 40, left: 20 }}>
                     <defs>
-                      <linearGradient id="moodGradientReports" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#16a34a" stopOpacity={0.85} />
-                        <stop offset="100%" stopColor="#0d8c4f" stopOpacity={0.25} />
+                      <linearGradient id="lineWellness" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#0d8c4f" stopOpacity={0.85} />
+                        <stop offset="100%" stopColor="#86efac" stopOpacity={0.25} />
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="week" interval={0} tick={<CustomWeekTick />} stroke="#0d8c4f" />
-                    <YAxis domain={["auto", "auto"]} stroke="#0d8c4f" />
-                    <RTooltip />
-                    <Area
-                      type="monotone"
-                      dataKey="avgMood"
-                      baseValue="dataMin"
-                      fill="url(#moodGradientReports)"
-                      stroke="transparent"
-                      fillOpacity={1}
-                      connectNulls
-                      isAnimationActive={false}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="avgMood"
-                      stroke="#0d8c4f"
-                      strokeWidth={3}
-                      dot={{ r: 6, stroke: "#0d8c4f", strokeWidth: 2, fill: "#fff" }}
-                      activeDot={{ r: 8, fill: "#0d8c4f" }}
-                    />
+                    <XAxis dataKey="week_label" interval={0} stroke="#0d8c4f" angle={0} height={60} tick={{ fill: "#0f172a", fontSize: 12 }} />
+                    <YAxis domain={[0, 100]} tick={{ fill: "#0f172a", fontSize: 12 }} stroke="#0d8c4f" />
+                    <RTooltip formatter={(value: number) => `${value}%`} labelFormatter={(label) => `Week ${label}`} />
+                    <Legend verticalAlign="top" height={32} wrapperStyle={{ fontSize: "0.75rem" }} />
+                    <Line type="monotone" dataKey="wellness" name="Wellness Index" stroke="#0d8c4f" strokeWidth={3} dot={{ r: 5, strokeWidth: 2 }} activeDot={{ r: 7 }} />
+                    <Line type="monotone" dataKey="mood" name="Mood" stroke="#22c55e" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                    <Line type="monotone" dataKey="energy" name="Energy" stroke="#3b82f6" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                    <Line type="monotone" dataKey="stress" name="Stress" stroke="#ef4444" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
                   </LineChart>
                 </ResponsiveContainer>
               )}
@@ -354,110 +497,261 @@ function Reports() {
 
             {/* Stats Row */}
             <div className="flex flex-col sm:flex-row justify-between mt-4 gap-2">
-              {[
-                { label: "Overall Mood", value: secondaryStats[0]?.value || "0/10", delta: secondaryStats[0]?.delta, deltaColor: secondaryStats[0]?.deltaColor },
-                { label: "Current Average", value: `${currentAvg}/10` },
-                { label: "Trend", value: trend >= 0 ? `+${trend}` : trend, deltaColor: trend >= 0 ? "text-green-600" : "text-red-600" },
-                { label: "Participation", value: `${participation}%` },
-              ].map((s, i) => (
-                <div key={i} className="flex-1 bg-gray-50 rounded-xl p-3 text-center">
-                  <div className="text-[#6b7280] text-xs font-medium">{s.label}</div>
-                  <div className="text-lg font-bold text-[#333]">{s.value}</div>
-                  {s.delta && <div className={`text-xs mt-1 ${s.deltaColor || "text-gray-500"}`}>{s.delta}</div>}
-                </div>
-              ))}
+              {(() => {
+                const chText = `${changePct >= 0 ? "+" : ""}${changePct}%`;
+                const items = [
+                  { label: "Current Index", value: `${Math.round(latestIndex)}%` },
+                  { label: "Change vs Last Week", value: chText, className: changePct >= 0 ? "text-green-600" : "text-red-600" },
+                  { label: "Active Event", value: summary?.event_name ? `${summary.event_name}` : "None" },
+                ];
+                return items.map((s, i) => (
+                  <div key={i} className="flex-1 bg-gray-50 rounded-xl p-3 text-center">
+                    <div className="text-[#6b7280] text-xs font-medium">{s.label}</div>
+                    <div className={`text-lg font-bold ${s.className || "text-[#333]"}`}>{s.value}</div>
+                  </div>
+                ));
+              })()}
             </div>
+          </div>
+
+          <div className="bg-white rounded-2xl shadow p-4 relative">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h2 className={styles.sectionTitle}>Weekly Insights</h2>
+                <p className="text-xs text-[#6b7280] mt-1">Data-informed highlights across wellness and engagement.</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button className="p-1 rounded-full border hover:bg-gray-100" onClick={() => weeklySliderRef.current?.slickPrev()} aria-label="Previous insight">
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                <button className="p-1 rounded-full border hover:bg-gray-100" onClick={() => weeklySliderRef.current?.slickNext()} aria-label="Next insight">
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+            {insights.length === 0 ? (
+              <div className="text-sm text-gray-500">No insights available.</div>
+            ) : (
+              <div className="relative pb-10">
+                <Slider ref={weeklySliderRef} {...insightSliderSettings} className="weekly-insights-slider">
+                  {insights.map((insight, idx) => (
+                    <div key={`${insight.week_start}-${idx}`} className="px-1 h-full">
+                      <div className="rounded-2xl shadow-sm border bg-gray-50 p-4 text-sm flex h-full flex-col space-y-3 transition hover:shadow-md">
+                        <div className="flex items-center justify-between text-xs text-[#6b7280]">
+                          <span>{new Date(insight.week_start).toLocaleDateString()} - {new Date(insight.week_end).toLocaleDateString()}</span>
+                          <span className="font-medium text-[#111827]">{insight.event_name ?? "No Event"}</span>
+                        </div>
+                        <div>
+                          <h3 className="text-base font-semibold text-[#111827]">{insight.title}</h3>
+                          <p className="text-[#374151] mt-1 leading-relaxed">{insight.description}</p>
+                        </div>
+                        <div className="bg-white rounded-lg p-3 border border-dashed border-[#0d8c4f]/40">
+                          <div className="text-xs uppercase tracking-wide text-[#0d8c4f] font-semibold mb-1">Recommendation</div>
+                          <p className="text-sm text-[#0f172a] leading-relaxed">{insight.recommendation}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </Slider>
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white rounded-2xl shadow p-4 min-h-[260px] flex flex-col">
+            <h3 className="text-[#333] font-semibold mb-3 text-sm">Engagement Metrics</h3>
+            {!engagement ? (
+              <div className="text-sm text-gray-500 flex-1 flex items-center justify-center">No engagement data available.</div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-center flex-1">
+                <div className="bg-gray-50 rounded-xl p-3 flex flex-col justify-center">
+                  <div className="text-[#6b7280] text-xs">Active Students (This Week)</div>
+                  <div className="text-xl font-bold text-[#111827]">{engagement.active_students_this_week}</div>
+                  <div className="text-xs text-[#6b7280]">Last Week: {engagement.active_students_last_week}</div>
+                </div>
+                <div className="bg-gray-50 rounded-xl p-3 flex flex-col justify-center">
+                  <div className="text-[#6b7280] text-xs">Avg Check-ins / Student</div>
+                  <div className="text-xl font-bold text-[#111827]">{engagement.avg_checkins_per_student}</div>
+                </div>
+                <div className="bg-gray-50 rounded-xl p-3 flex flex-col justify-center">
+                  <div className="text-[#6b7280] text-xs">Participation Change</div>
+                  <div className={`text-xl font-bold ${String(engagement.participation_change).startsWith('-') ? 'text-red-600' : 'text-green-600'}`}>{engagement.participation_change}</div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Risk Assessment / Alerts */}
-        <div className="bg-white rounded-2xl shadow p-4">
-          <h2 className={styles.sectionTitle + " mb-2"}>Risk Assessment</h2>
-          {/* Severity grouping computed from all alerts (all-alerts) */}
-          {alertsLoading ? (
-            <div className="text-sm text-gray-500 text-center py-2">Loading risk data…</div>
-          ) : alertsError ? (
-            <div className="text-sm text-red-600 text-center py-2">{alertsError}</div>
-          ) : allAlertsApi.length === 0 ? (
-            <div className="text-sm text-gray-500">No alerts yet.</div>
-          ) : (
-            <>
-              {(() => {
-                const counts = { High: 0, Medium: 0, Low: 0 } as Record<string, number>;
-                const norm = (sev: string) => {
-                  const s = (sev || '').toLowerCase();
-                  if (s === 'critical' || s === 'high') return 'High';
-                  if (s === 'medium') return 'Medium';
-                  return 'Low';
-                };
-                allAlertsApi.forEach(a => { counts[norm(a.severity)]++; });
+        <div className="space-y-4">
+          <div className="bg-white rounded-2xl shadow-sm border p-4 xl:max-w-md xl:mx-auto">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className={styles.sectionTitle}>Academic Calendar</h2>
+                <p className="text-xs text-[#6b7280] mt-1">Uploaded events, exams, and holidays appear directly on the calendar.</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  className="p-2 rounded-full border hover:bg-gray-100"
+                  onClick={() => setCalendarMonth(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}
+                  aria-label="Previous month"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                <span className="text-sm font-semibold text-[#111827] w-28 text-center">
+                  {calendarMonth.toLocaleDateString(undefined, { month: "long", year: "numeric" })}
+                </span>
+                <button
+                  className="p-2 rounded-full border hover:bg-gray-100"
+                  onClick={() => setCalendarMonth(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}
+                  aria-label="Next month"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-7 gap-1 text-[11px] font-semibold text-[#6b7280]">
+              {"Sun Mon Tue Wed Thu Fri Sat".split(" ").map((day) => (
+                <div key={day} className="text-center py-1 uppercase tracking-wide">{day}</div>
+              ))}
+            </div>
+            <div className="grid grid-cols-7 gap-1 mt-1">
+              {calendarDays.map(({ date, inMonth, events: dayEvents }, idx) => {
+                const isToday = (() => {
+                  const now = new Date();
+                  return date.getDate() === now.getDate() && date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
+                })();
                 return (
-                  <div className="space-y-2">
+                  <div
+                    key={`${date.toISOString()}-${idx}`}
+                    className={`rounded-xl border p-2 min-h-[56px] flex flex-col gap-1 text-[10px] ${inMonth ? "bg-gray-50" : "bg-gray-100/60 text-gray-400"} ${isToday ? "border-[#0d8c4f]" : "border-gray-200"}`}
+                  >
                     <div className="flex items-center justify-between">
-                      <span className="px-2 py-1 rounded text-xs font-medium bg-red-100 text-red-700">High Risk</span>
-                      <span className="text-[#333] font-medium">{counts.High} students</span>
+                      <span className={`font-semibold text-base ${inMonth ? "text-[#111827]" : "text-gray-400"}`}>{date.getDate()}</span>
+                      {dayEvents.length > 0 && <span className="text-[10px] text-[#0d8c4f] font-semibold">{dayEvents.length}</span>}
                     </div>
-                    <div className="flex items-center justify-between">
-                      <span className="px-2 py-1 rounded text-xs font-medium bg-yellow-100 text-yellow-700">Medium Risk</span>
-                      <span className="text-[#333] font-medium">{counts.Medium} students</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="px-2 py-1 rounded text-xs font-medium bg-green-100 text-green-700">Low Risk</span>
-                      <span className="text-[#333] font-medium">{counts.Low} students</span>
-                    </div>
+                    {dayEvents.slice(0, 2).map((ev, i) => (
+                      <div key={i} className="rounded-md bg-[#0d8c4f]/10 px-1 py-0.5 text-[10px] text-[#0d8c4f] truncate">
+                        {ev.name}
+                      </div>
+                    ))}
+                    {dayEvents.length > 2 && (
+                      <div className="text-[9px] text-[#6b7280]">+{dayEvents.length - 2} more</div>
+                    )}
                   </div>
                 );
-              })()}
+              })}
+            </div>
 
-              <div className="mt-4">
-                <h3 className="text-sm font-semibold text-[#333] mb-2">Recent Alerts</h3>
-                <div className="space-y-1 max-h-64 overflow-y-auto">
-                  <AnimatePresence initial={false}>
-                    {alertsApi
-                      .slice(0, 8)
-                      .map((a, i) => {
-                        const level = ((sev: string) => {
-                          const s = (sev || '').toLowerCase();
-                          if (s === 'critical' || s === 'high') return { tag: 'High', cls: 'bg-red-100 text-red-700' };
-                          if (s === 'medium') return { tag: 'Medium', cls: 'bg-yellow-100 text-yellow-700' };
-                          return { tag: 'Low', cls: 'bg-green-100 text-green-700' };
-                        })(a.severity);
-                        const dt = new Date(a.created_at);
-                        const formatted = new Intl.DateTimeFormat(undefined, {
-                          month: 'short', day: '2-digit', year: 'numeric',
-                          hour: 'numeric', minute: '2-digit'
-                        }).format(dt);
-                        return (
-                          <motion.div
-                            key={`${dt.getTime()}-${i}`}
-                            initial={{ opacity: 0, y: 6 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: -6 }}
-                            transition={{ duration: 0.18 }}
-                            className={`flex justify-between items-center px-2 py-1 rounded`}
-                          >
-                            <span className={`text-xs font-bold px-2 py-0.5 rounded ${level.cls}`}>{level.tag}</span>
-                            <span className="text-xs text-[#6b7280]">{formatted}</span>
-                          </motion.div>
-                        );
-                      })}
-                  </AnimatePresence>
-                </div>
-                <div className="mt-2 text-right">
-                  <button
-                    className="text-[#2563eb] text-xs font-medium"
-                    onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-                  >
-                    View Recent Alerts
-                  </button>
-                </div>
+            <div className="mt-4 space-y-2">
+              <div
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={async (e) => {
+                  e.preventDefault();
+                  const file = e.dataTransfer.files?.[0];
+                  if (file) await uploadCalendar(file);
+                }}
+                className="border-2 border-dashed rounded-2xl p-4 text-center text-xs hover:bg-gray-50 transition"
+              >
+                <p className="text-[#374151]">Drag & drop your academic calendar file anywhere in this panel.</p>
               </div>
-            </>
-          )}
-        </div>
-        </div>
+              <div className="flex flex-col gap-2">
+                <div className="text-[11px] text-[#6b7280]">
+                  Supported files: PNG, JPG, PDF, CSV, XLSX. Parsed events feed the calendar above.
+                </div>
+                <label className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-full bg-[#0d8c4f] text-white text-sm cursor-pointer hover:opacity-90">
+                  <CalendarDays className="h-4 w-4" /> Browse calendar file
+                  <input
+                    type="file"
+                    accept=".png,.jpg,.jpeg,.pdf,.xlsx,.csv"
+                    className="hidden"
+                    onChange={async (e) => {
+                      const f = e.target.files?.[0];
+                      if (f) await uploadCalendar(f);
+                    }}
+                  />
+                </label>
+              </div>
+              {uploading && <div className="text-[11px] text-[#6b7280]">Processing calendar...</div>}
+              {uploadError && <div className="text-[11px] text-red-600">{uploadError}</div>}
+            </div>
 
+            <div className="mt-4">
+              <h3 className="text-sm font-semibold text-[#111827] mb-2">Detected Events</h3>
+              {events.length === 0 ? (
+                <div className="text-sm text-gray-500">No events detected yet.</div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {events.map((ev, i) => (
+                    <div key={i} className="rounded-xl border p-2 bg-gray-50">
+                      <div className="text-sm font-semibold text-[#111827]">{ev.name}</div>
+                      <div className="text-xs text-[#6b7280]">
+                        {new Date(ev.start).toLocaleDateString()} – {new Date(ev.end ?? ev.start).toLocaleDateString()}
+                      </div>
+                      {ev.type && (
+                        <div className="mt-1 inline-flex items-center rounded-full bg-[#0d8c4f]/10 px-2 py-0.5 text-[11px] text-[#0d8c4f]">
+                          {ev.type}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
 
+          <div className="bg-white rounded-2xl shadow-sm border p-4 min-h-[260px] flex flex-col">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className={styles.sectionTitle}>Behavioral & Pattern Insights</h2>
+              <div className="flex items-center gap-2">
+                <button className="p-1 rounded-full border hover:bg-gray-100" onClick={() => behaviorSliderRef.current?.slickPrev()} aria-label="Previous behavior insight">
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                <button className="p-1 rounded-full border hover:bg-gray-100" onClick={() => behaviorSliderRef.current?.slickNext()} aria-label="Next behavior insight">
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+            {behaviorInsights.length === 0 ? (
+              <div className="text-sm text-gray-500 flex-1 flex items-center justify-center">No behavioral insights available.</div>
+            ) : (
+              <div className="relative pb-10 flex-1">
+                <Slider
+                  ref={behaviorSliderRef}
+                  dots
+                  arrows={false}
+                  infinite={behaviorInsights.length > 1}
+                  autoplay={behaviorInsights.length > 1}
+                  autoplaySpeed={7000}
+                  adaptiveHeight={false}
+                  appendDots={(dots: React.ReactNode) => (
+                    <div className="absolute bottom-3 left-0 right-0"><ul className="flex justify-center gap-2">{dots}</ul></div>
+                  )}
+                  customPaging={() => <span className="block h-2 w-2 rounded-full bg-gray-300" />}
+                >
+                  {behaviorInsights.map((bi, idx) => (
+                    <div key={idx} className="px-1">
+                      <div className="rounded-2xl shadow-sm border bg-gray-50 p-4 text-sm">
+                        <h3 className="text-base font-semibold text-[#111827] mb-1">{bi.title}</h3>
+                        <p className="text-[#374151] leading-relaxed mb-3">{bi.description}</p>
+                        {Array.isArray(bi.metrics) && bi.metrics.length > 0 && (
+                          <div className="grid grid-cols-2 gap-2">
+                            {bi.metrics.map((m, i) => (
+                              <div key={i} className="bg-white rounded-lg border p-2 text-center">
+                                <div className="text-[11px] text-[#6b7280]">{m.label}</div>
+                                <div className="text-lg font-bold text-[#111827]">{m.value}</div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </Slider>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
       {/* Concerns & Interventions */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="bg-white rounded-2xl shadow p-4">
