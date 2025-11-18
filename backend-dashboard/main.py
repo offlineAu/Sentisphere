@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Query, HTTPException, Depends, status, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import text
+from sqlalchemy import case, func, select, text
+from sqlalchemy.orm import Session
 from datetime import datetime, timedelta, date
 import os
 from pathlib import Path
@@ -17,8 +18,46 @@ from fastapi.security import OAuth2PasswordBearer
 from app.core.config import settings
 from app.db.database import engine, ENGINE_INIT_ERROR_MSG
 from app.db.mobile_database import mobile_engine
+from app.db.session import get_db
 from app.api.routes.auth import router as auth_router
+from app.models.alert import Alert, AlertSeverity, AlertStatus
+from app.models.appointment_log import AppointmentLog
+from app.models.checkin_sentiment import CheckinSentiment
+from app.models.conversations import Conversation, ConversationStatus
+from app.models.emotional_checkin import EmotionalCheckin, EnergyLevel, MoodLevel, StressLevel
+from app.models.journal import Journal
+from app.models.journal_sentiment import JournalSentiment
+from app.models.messages import Message
+from app.schemas.alert import Alert as AlertSchema, AlertCreate, AlertUpdate
+from app.schemas.checkin import (
+    EmotionalCheckin as EmotionalCheckinSchema,
+    EmotionalCheckinCreate,
+    EmotionalCheckinUpdate,
+)
+from app.schemas.conversation import (
+    Conversation as ConversationSchema,
+    ConversationCreate,
+    ConversationStart,
+    ConversationUpdate,
+    Message as MessageSchema,
+    MessageCreate,
+    MessageSend,
+)
+from app.schemas.journal import (
+    Journal as JournalSchema,
+    JournalCreate,
+    JournalUpdate,
+)
+from app.models.notification import Notification
+from app.models.user import User, UserRole
+from app.models.user_activity import UserActivity
+from app.services.alert_service import AlertService
+from app.services.checkin_service import CheckinService
+from app.services.conversation_service import ConversationService
+from app.services.journal_service import JournalService
 from app.services.jwt import decode_token
+from app.services.narrative_insight_service import NarrativeInsightService
+from app.services.report_service import ReportService
 
 BASE_DIR = Path(__file__).resolve().parent
 EVENTS_FILE = BASE_DIR / "events.json"
@@ -40,16 +79,195 @@ app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
 
-def get_current_user(token: str = Depends(oauth2_scheme)) -> str:
+def _extract_user_id(token: str) -> int:
     try:
         payload = decode_token(token)
         sub = payload.get("sub")
         if not sub:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
-        return str(sub)
-    except Exception:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
+            raise ValueError("Invalid token payload")
+        return int(sub)
+    except Exception as exc:  # pragma: no cover - defensive
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+        ) from exc
 
+
+def get_current_user(
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+) -> User:
+    user_id = _extract_user_id(token)
+    user = db.get(User, user_id)
+    if not user or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User inactive or missing")
+    return user
+
+
+def require_counselor(current_user: User = Depends(get_current_user)) -> User:
+    if current_user.role != UserRole.COUNSELOR:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Counselor access required")
+    return current_user
+
+
+def require_student(current_user: User = Depends(get_current_user)) -> User:
+    if current_user.role != UserRole.STUDENT:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Student access required")
+    return current_user
+
+
+# --- Mobile ingestion: Emotional check-ins ---
+
+
+@app.get("/api/checkins", response_model=List[EmotionalCheckinSchema])
+def list_my_checkins(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    current_user: User = Depends(require_student),
+    db: Session = Depends(get_db),
+):
+    return CheckinService.list_checkins(db, user_id=current_user.user_id, skip=skip, limit=limit)
+
+
+@app.post("/api/checkins", response_model=EmotionalCheckinSchema, status_code=status.HTTP_201_CREATED)
+def create_checkin(
+    checkin_in: EmotionalCheckinCreate,
+    current_user: User = Depends(require_student),
+    db: Session = Depends(get_db),
+):
+    payload = checkin_in
+    if checkin_in.user_id is None or checkin_in.user_id != current_user.user_id:
+        payload = EmotionalCheckinCreate(
+            **checkin_in.model_dump(exclude_unset=True),
+            user_id=current_user.user_id,
+        )
+    created = CheckinService.create_checkin(db, payload)
+    return created
+
+
+@app.get("/api/checkins/{checkin_id}", response_model=EmotionalCheckinSchema)
+def get_checkin(
+    checkin_id: int,
+    current_user: User = Depends(require_student),
+    db: Session = Depends(get_db),
+):
+    checkin = CheckinService.get_checkin(db, checkin_id)
+    if not checkin or checkin.user_id != current_user.user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Check-in not found")
+    return checkin
+
+
+@app.patch("/api/checkins/{checkin_id}", response_model=EmotionalCheckinSchema)
+def update_checkin(
+    checkin_id: int,
+    checkin_in: EmotionalCheckinUpdate,
+    current_user: User = Depends(require_student),
+    db: Session = Depends(get_db),
+):
+    checkin = CheckinService.get_checkin(db, checkin_id)
+    if not checkin or checkin.user_id != current_user.user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Check-in not found")
+    updated = CheckinService.update_checkin(db, checkin, checkin_in)
+    return updated
+
+
+@app.delete("/api/checkins/{checkin_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_checkin(
+    checkin_id: int,
+    current_user: User = Depends(require_student),
+    db: Session = Depends(get_db),
+):
+    checkin = CheckinService.get_checkin(db, checkin_id)
+    if not checkin or checkin.user_id != current_user.user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Check-in not found")
+    CheckinService.delete_checkin(db, checkin)
+    return None
+
+
+# --- Mobile ingestion: Journals ---
+
+
+@app.get("/api/journals", response_model=List[JournalSchema])
+def list_my_journals(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    current_user: User = Depends(require_student),
+    db: Session = Depends(get_db),
+):
+    return JournalService.list_journals(db, user_id=current_user.user_id, skip=skip, limit=limit)
+
+
+@app.post("/api/journals", response_model=JournalSchema, status_code=status.HTTP_201_CREATED)
+def create_journal(
+    journal_in: JournalCreate,
+    current_user: User = Depends(require_student),
+    db: Session = Depends(get_db),
+):
+    payload = journal_in
+    if journal_in.user_id is None or journal_in.user_id != current_user.user_id:
+        payload = JournalCreate(
+            **journal_in.model_dump(exclude_unset=True),
+            user_id=current_user.user_id,
+        )
+    created = JournalService.create_journal(db, payload)
+    return created
+
+
+@app.get("/api/journals/{journal_id}", response_model=JournalSchema)
+def get_journal(
+    journal_id: int,
+    current_user: User = Depends(require_student),
+    db: Session = Depends(get_db),
+):
+    journal = JournalService.get_journal(db, journal_id)
+    if not journal or journal.user_id != current_user.user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Journal not found")
+    return journal
+
+
+@app.patch("/api/journals/{journal_id}", response_model=JournalSchema)
+def update_journal(
+    journal_id: int,
+    journal_in: JournalUpdate,
+    current_user: User = Depends(require_student),
+    db: Session = Depends(get_db),
+):
+    journal = JournalService.get_journal(db, journal_id)
+    if not journal or journal.user_id != current_user.user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Journal not found")
+    updated = JournalService.update_journal(db, journal, journal_in)
+    return updated
+
+
+@app.delete("/api/journals/{journal_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_journal(
+    journal_id: int,
+    current_user: User = Depends(require_student),
+    db: Session = Depends(get_db),
+):
+    journal = JournalService.get_journal(db, journal_id)
+    if not journal or journal.user_id != current_user.user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Journal not found")
+    JournalService.delete_journal(db, journal)
+    return None
+
+
+# --- Mobile ingestion: Alerts ---
+
+
+@app.post("/alerts", response_model=AlertSchema, status_code=status.HTTP_201_CREATED)
+def create_alert(
+    alert_in: AlertCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    payload_data = alert_in.model_dump(exclude_unset=True)
+    if current_user.role == UserRole.STUDENT:
+        if alert_in.user_id and alert_in.user_id != current_user.user_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot report for another user")
+        payload_data["user_id"] = current_user.user_id
+    alert = AlertService.create_alert(db, AlertCreate(**payload_data))
+    return alert
 @app.get("/api/auth/me")
 def auth_me(token: str = Depends(oauth2_scheme)):
     """Return the current authenticated user id from JWT (subject)."""
@@ -63,8 +281,12 @@ def auth_me(token: str = Depends(oauth2_scheme)):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
 
 @app.get("/api/mood-trend")
-def mood_trend():
-    query = """
+def mood_trend(
+    _user: User = Depends(require_counselor),
+    db: Session = Depends(get_db),
+):
+    query = text(
+        """
         SELECT
             YEAR(created_at) AS year,
             MONTH(created_at) AS month_num,
@@ -85,206 +307,144 @@ def mood_trend():
         FROM emotional_checkin
         GROUP BY year, month_num, month_name, week_in_month
         ORDER BY year, month_num, week_in_month
-    """
-    with engine.connect() as conn:
-        result = conn.execute(text(query)).mappings()
-        data = [
-            {
-                "week": f"{row['year']}-{row['month_name']}-Week{row['week_in_month']}",
-                "avgMood": float(row["avgMood"] or 0)
-            }
-            for row in result
-        ]
-    return data
-
-@app.get("/api/alerts")
-def list_alerts(limit: int = Query(100, ge=1, le=1000)):
-    """Return alerts with only severity and created_at for UI risk assessment.
-    Sorted newest first, limited by `limit`.
-    """
-    query = text(
-        """
-        SELECT severity, created_at
-        FROM alert
-        WHERE severity IN ('low','medium','high','critical')
-        ORDER BY created_at DESC
-        LIMIT :limit
         """
     )
-    with engine.connect() as conn:
-        rows = conn.execute(query, {"limit": limit}).mappings()
-        return [
-            {
-                "severity": r["severity"],
-                "created_at": r["created_at"].strftime("%Y-%m-%dT%H:%M:%S") if r["created_at"] else None,
-            }
-            for r in rows
-        ]
-
-class CounselorProfileUpdate(BaseModel):
-    name: Optional[str] = None
-    email: Optional[str] = None
-    department: Optional[str] = None  # maps to organization on UI
-    contact_number: Optional[str] = None
-    availability: Optional[str] = None
-    year_experience: Optional[int] = None
-    # Extra optional fields that may or may not exist in schema; ignored if columns missing
-    phone: Optional[str] = None
-    license_number: Optional[str] = None
-    specializations: Optional[str] = None
-    education: Optional[str] = None
-    bio: Optional[str] = None
-    experience_years: Optional[str] = None
-    languages: Optional[str] = None
-
-
-@app.put("/api/counselor-profile")
-def update_counselor_profile(
-    payload: CounselorProfileUpdate,
-    user_id: Optional[int] = Query(None),
-    current_user: str = Depends(get_current_user),
-):
-    """Update counselor profile data. Updates `user` (name/email) and, if present,
-    `counselorprofile` fields (title/department/etc). Only updates columns that exist.
-    If a counselorprofile row doesn't exist yet, it will be inserted.
-    """
-    try:
-        uid = int(user_id) if user_id is not None else int(current_user)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid user id")
-
-    with engine.connect() as conn:
-        # Update base user table
-        if payload.name is not None or payload.email is not None:
-            fields = []
-            params = {"uid": uid}
-            if payload.name is not None:
-                fields.append("name = :name")
-                params["name"] = payload.name
-            if payload.email is not None:
-                fields.append("email = :email")
-                params["email"] = payload.email
-            if fields:
-                conn.execute(text(f"UPDATE user SET {', '.join(fields)} WHERE user_id = :uid"), params)
-
-        # Check if counselor_profile table exists
-        exists = conn.execute(text(
-            """
-            SELECT COUNT(*) AS cnt
-            FROM information_schema.tables
-            WHERE table_schema = DATABASE() AND table_name = 'counselor_profile'
-            """
-        )).mappings().first()["cnt"] > 0
-
-        if exists:
-            # Discover available columns
-            cols = {r["COLUMN_NAME"] for r in conn.execute(text(
-                """
-                SELECT COLUMN_NAME FROM information_schema.columns
-                WHERE table_schema = DATABASE() AND table_name = 'counselor_profile'
-                """
-            )).mappings()}
-
-            # Build update set for available fields
-            updates = []
-            params = {"uid": uid}
-            def add(col: str, val: Optional[str]):
-                if val is not None and col in cols:
-                    updates.append(f"{col} = :{col}")
-                    params[col] = val
-
-            add("department", payload.department)
-            # New counselor_profile fields
-            add("contact_number", payload.contact_number or payload.phone)
-            add("availability", payload.availability)
-            # Optional extras if present in schema
-            add("phone", payload.phone)
-            add("license_number", payload.license_number)
-            add("specializations", payload.specializations)
-            add("education", payload.education)
-            add("bio", payload.bio)
-            add("experience_years", payload.experience_years)
-            add("languages", payload.languages)
-            # Numeric year_experience
-            if payload.year_experience is not None and "year_experience" in cols:
-                updates.append("year_experience = :year_experience")
-                params["year_experience"] = int(payload.year_experience)
-            elif payload.experience_years and payload.experience_years.isdigit() and "year_experience" in cols:
-                updates.append("year_experience = :year_experience")
-                params["year_experience"] = int(payload.experience_years)
-
-            # Ensure a row exists, attempt update first
-            if updates:
-                result = conn.execute(text(
-                    f"UPDATE counselor_profile SET {', '.join(updates)} WHERE user_id = :uid"
-                ), params)
-                if result.rowcount == 0:
-                    # Insert minimal row first, then update with fields
-                    insert_cols = ["user_id"] + [k for k in params.keys() if k != "uid"]
-                    insert_vals = [":uid"] + [f":{k}" for k in params.keys() if k != "uid"]
-                    conn.execute(text(
-                        f"INSERT INTO counselor_profile ({', '.join(insert_cols)}) VALUES ({', '.join(insert_vals)})"
-                    ), params)
-
-        conn.commit()
-
-    return {"ok": True}
-
-# Fetch counselor profile (joined with user)
-@app.get("/api/counselor-profile")
-def get_counselor_profile(
-    user_id: Optional[int] = Query(None),
-    current_user: str = Depends(get_current_user),
-):
-    try:
-        uid = int(user_id) if user_id is not None else int(current_user)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid user id")
-
-    with engine.connect() as conn:
-        # Left join to include user info even if counselor_profile row missing
-        q = text(
-            """
-            SELECT 
-              u.user_id, u.name, u.email, u.role,
-              cp.department, cp.contact_number, cp.availability,
-              cp.year_experience, cp.phone, cp.license_number, cp.specializations,
-              cp.education, cp.bio, cp.experience_years, cp.languages, cp.created_at
-            FROM user u
-            LEFT JOIN counselor_profile cp ON cp.user_id = u.user_id
-            WHERE u.user_id = :uid
-            LIMIT 1
-            """
-        )
-        row = conn.execute(q, {"uid": uid}).mappings().first()
-        if not row:
-            raise HTTPException(status_code=404, detail="User not found")
-        return {
-            "user_id": row["user_id"],
-            "name": row["name"],
-            "email": row["email"],
-            "role": row["role"],
-            "department": row.get("department") if hasattr(row, "get") else row["department"],
-            "contact_number": row.get("contact_number") if hasattr(row, "get") else row["contact_number"],
-            "availability": row.get("availability") if hasattr(row, "get") else row["availability"],
-            "year_experience": row.get("year_experience") if hasattr(row, "get") else row["year_experience"],
-            "phone": row.get("phone") if hasattr(row, "get") else row["phone"],
-            "license_number": row.get("license_number") if hasattr(row, "get") else row["license_number"],
-            "specializations": row.get("specializations") if hasattr(row, "get") else row["specializations"],
-            "education": row.get("education") if hasattr(row, "get") else row["education"],
-            "bio": row.get("bio") if hasattr(row, "get") else row["bio"],
-            "experience_years": row.get("experience_years") if hasattr(row, "get") else row["experience_years"],
-            "languages": row.get("languages") if hasattr(row, "get") else row["languages"],
-            "created_at": (
-                row.get("created_at").strftime("%Y-%m-%d %H:%M:%S") if hasattr(row, "get") and row.get("created_at") else (
-                    row["created_at"].strftime("%Y-%m-%d %H:%M:%S") if "created_at" in row and row["created_at"] else None
-                )
-            ),
+    rows = db.execute(query).mappings()
+    return [
+        {
+            "week": f"{row['year']}-{row['month_name']}-Week{row['week_in_month']}",
+            "avgMood": float(row["avgMood"] or 0),
         }
+        for row in rows
+    ]
 
-@app.get("/api/sentiments")
-def sentiment_breakdown(period: str = Query("month", enum=["week", "month", "year"])):
-    # Choose SQL filter based on calendar period
+
+@app.get("/alerts")
+def list_alerts(
+    limit: int = Query(100, ge=1, le=1000),
+    _user: User = Depends(require_counselor),
+    db: Session = Depends(get_db),
+):
+    alerts = CounselorReportService.list_alerts(db, limit=limit)
+    return [
+        {
+            "severity": item["severity"],
+            "created_at": item["created_at"].isoformat() if item["created_at"] else None,
+        }
+        for item in alerts
+    ]
+
+
+@app.get("/recent-alerts")
+def recent_alerts(
+    limit: int = Query(10, ge=1, le=100),
+    _user: User = Depends(require_counselor),
+    db: Session = Depends(get_db),
+):
+    alerts = CounselorReportService.recent_alerts(db, limit=limit)
+    return [
+        {
+            "id": item["id"],
+            "name": item["name"],
+            "severity": item["severity"],
+            "status": item["status"],
+            "created_at": item["created_at"].isoformat() if item["created_at"] else None,
+        }
+        for item in alerts
+    ]
+
+
+@app.get("/all-alerts")
+def all_alerts(
+    limit: int = Query(1000, ge=1, le=2000),
+    _user: User = Depends(require_counselor),
+    db: Session = Depends(get_db),
+):
+    alerts = CounselorReportService.list_alerts(db, limit=limit)
+    return [
+        {
+            "severity": item["severity"],
+            "created_at": item["created_at"].isoformat() if item["created_at"] else None,
+        }
+        for item in alerts
+    ]
+
+
+@app.get("/students-monitored")
+def students_monitored(
+    _user: User = Depends(require_counselor),
+    db: Session = Depends(get_db),
+):
+    count = db.scalar(
+        select(func.count(func.distinct(EmotionalCheckin.user_id))).join(User, EmotionalCheckin.user_id == User.user_id)
+        .where(User.role == UserRole.STUDENT, User.is_active.is_(True))
+    ) or 0
+    return {"count": int(count)}
+
+
+@app.get("/this-week-checkins")
+def this_week_checkins(
+    _user: User = Depends(require_counselor),
+    db: Session = Depends(get_db),
+):
+    start, end = CounselorReportService._week_bounds(datetime.utcnow().date())
+    count = db.scalar(
+        select(func.count(EmotionalCheckin.checkin_id)).where(
+            EmotionalCheckin.created_at >= start, EmotionalCheckin.created_at <= end
+        )
+    ) or 0
+    return {"count": int(count)}
+
+
+@app.get("/open-appointments")
+def open_appointments(
+    _user: User = Depends(require_counselor),
+    db: Session = Depends(get_db),
+):
+    cutoff = datetime.utcnow() - timedelta(days=7)
+    count = db.scalar(
+        select(func.count(func.distinct(UserActivity.user_id))).where(
+            UserActivity.action == "downloaded_form",
+            UserActivity.target_type == "form",
+            UserActivity.created_at >= cutoff,
+        )
+    ) or 0
+    return {"count": int(count)}
+
+
+@app.get("/high-risk-flags")
+def high_risk_flags(
+    _user: User = Depends(require_counselor),
+    db: Session = Depends(get_db),
+):
+    cutoff = datetime.utcnow() - timedelta(days=7)
+    alert_count = db.scalar(
+        select(func.count(Alert.alert_id)).where(
+            Alert.severity.in_([AlertSeverity.HIGH, AlertSeverity.CRITICAL]),
+            Alert.status.in_([AlertStatus.OPEN, AlertStatus.IN_PROGRESS]),
+        )
+    ) or 0
+    journal_count = db.scalar(
+        select(func.count(JournalSentiment.journal_id)).where(
+            JournalSentiment.sentiment == "negative",
+            JournalSentiment.analyzed_at >= cutoff,
+        )
+    ) or 0
+    checkin_count = db.scalar(
+        select(func.count(CheckinSentiment.checkin_id)).where(
+            CheckinSentiment.sentiment == "negative",
+            CheckinSentiment.analyzed_at >= cutoff,
+        )
+    ) or 0
+    return {"count": int(alert_count + journal_count + checkin_count)}
+
+
+@app.get("/sentiments")
+def sentiment_breakdown(
+    period: str = Query("month", enum=["week", "month", "year"]),
+    _user: User = Depends(require_counselor),
+    db: Session = Depends(get_db),
+):
     if period == "week":
         condition = "YEARWEEK(analyzed_at, 1) = YEARWEEK(CURDATE(), 1)"
     elif period == "month":
@@ -294,8 +454,8 @@ def sentiment_breakdown(period: str = Query("month", enum=["week", "month", "yea
     else:
         condition = "TRUE"
 
-    # Combined query using MySQL calendar logic
-    query = f"""
+    query = text(
+        f"""
         SELECT sentiment, COUNT(*) AS value FROM (
             SELECT sentiment, analyzed_at FROM checkin_sentiment
             UNION ALL
@@ -303,16 +463,18 @@ def sentiment_breakdown(period: str = Query("month", enum=["week", "month", "yea
         ) AS combined
         WHERE {condition}
         GROUP BY sentiment
-    """
+        """
+    )
+    rows = db.execute(query).mappings()
+    return [{"name": row["sentiment"], "value": row["value"]} for row in rows]
 
-    with engine.connect() as conn:
-        result = conn.execute(text(query)).mappings()
-        data = [{"name": row["sentiment"], "value": row["value"]} for row in result]
-        return data
 
-@app.get("/api/checkin-breakdown")
-def checkin_breakdown(period: str = Query("month", enum=["week", "month", "year"])):
-    # Use MySQL calendar-based filtering
+@app.get("/checkin-breakdown")
+def checkin_breakdown(
+    period: str = Query("month", enum=["week", "month", "year"]),
+    _user: User = Depends(require_counselor),
+    db: Session = Depends(get_db),
+):
     if period == "week":
         condition = "YEARWEEK(created_at, 1) = YEARWEEK(CURDATE(), 1)"
     elif period == "month":
@@ -341,16 +503,14 @@ def checkin_breakdown(period: str = Query("month", enum=["week", "month", "year"
         GROUP BY stress_level
     """)
 
-    with engine.connect() as conn:
-        mood_rows = conn.execute(q_mood).mappings()
-        energy_rows = conn.execute(q_energy).mappings()
-        stress_rows = conn.execute(q_stress).mappings()
-
-        return {
-            "mood": [{"label": r["label"], "value": r["value"]} for r in mood_rows],
-            "energy": [{"label": r["label"], "value": r["value"]} for r in energy_rows],
-            "stress": [{"label": r["label"], "value": r["value"]} for r in stress_rows],
-        }
+    mood_rows = db.execute(q_mood).mappings()
+    energy_rows = db.execute(q_energy).mappings()
+    stress_rows = db.execute(q_stress).mappings()
+    return {
+        "mood": [{"label": r["label"], "value": r["value"]} for r in mood_rows],
+        "energy": [{"label": r["label"], "value": r["value"]} for r in energy_rows],
+        "stress": [{"label": r["label"], "value": r["value"]} for r in stress_rows],
+    }
 
 class CheckinIn(BaseModel):
     mood_level: str
@@ -484,289 +644,305 @@ def get_journal(journal_id: int, token: str = Depends(oauth2_scheme)):
             "created_at": row["created_at"].strftime("%Y-%m-%dT%H:%M:%S") if row["created_at"] else None,
         }
 
-# -----------------------------
-# AI Summaries (heuristic fallback)
-# -----------------------------
+@app.get("/reports/top-stats")
+def get_top_stats(
+    _user: User = Depends(require_counselor),
+    db: Session = Depends(get_db),
+):
+    return CounselorReportService.top_stats(db)
 
-def _period_start(now: datetime, period: str) -> datetime:
+
+@app.get("/reports/summary")
+def reports_summary(
+    _user: User = Depends(require_counselor),
+    db: Session = Depends(get_db),
+):
+    return CounselorReportService.summary(db)
+
+
+@app.get("/reports/trends")
+def reports_trends(
+    _user: User = Depends(require_counselor),
+    db: Session = Depends(get_db),
+):
+    data = CounselorReportService.trends(db)
+    return {
+        **data,
+        "dates": data["dates"],
+        "mood": data["mood"],
+        "energy": data["energy"],
+        "stress": data["stress"],
+        "wellness_index": data["wellness_index"],
+        "current_index": data["current_index"],
+        "previous_index": data["previous_index"],
+        "change_percent": data["change_percent"],
+        "numerical_change": data["numerical_change"],
+    }
+
+
+@app.get("/reports/engagement")
+def reports_engagement(
+    _user: User = Depends(require_counselor),
+    db: Session = Depends(get_db),
+):
+    return CounselorReportService.engagement_metrics(db)
+
+
+@app.get("/reports/weekly-insights")
+def weekly_insights(
+    _user: User = Depends(require_counselor),
+    db: Session = Depends(get_db),
+):
+    return CounselorReportService.weekly_insights(db)
+
+
+@app.get("/reports/behavior-insights")
+def behavior_insights(
+    _user: User = Depends(require_counselor),
+    db: Session = Depends(get_db),
+):
+    return CounselorReportService.behavior_insights(db)
+
+
+@app.get("/reports/attention")
+def get_attention_students(
+    _user: User = Depends(require_counselor),
+    db: Session = Depends(get_db),
+):
+    return CounselorReportService.attention_students(db)
+
+
+@app.get("/reports/concerns")
+def get_concerns(
+    period: str = Query("month", enum=["week", "month"]),
+    _user: User = Depends(require_counselor),
+    db: Session = Depends(get_db),
+):
+    now = datetime.utcnow()
     if period == "week":
-        return now - timedelta(days=7)
-    if period == "year":
-        return now.replace(month=1, day=1)
-    return now.replace(day=1)
+        start = now - timedelta(days=7)
+    else:
+        start = now.replace(day=1)
+    return CounselorReportService.concerns(db, start=start)
 
-def _top_keywords(texts, k=3):
-    STOP = set("""
-    the a an and or but if while to for from of in on at with by is are was were be been being i you he she it we they them us our your their my mine ours yours theirs this that these those as not no yes do does did have has had can could should would will just very about into over under more most less least than then so because also one two three four five six seven eight nine ten
-    """.split())
-    words = []
-    for t in texts:
-        for w in re.findall(r"[A-Za-z][A-Za-z\-']{2,}", t or ""):
-            wl = w.lower()
-            if wl not in STOP:
-                words.append(wl)
-    common = [w for w,_ in Counter(words).most_common(k)]
-    return common
 
-def _maybe_llm_summary(prompt: str) -> str | None:
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        return None
+@app.get("/reports/interventions")
+def get_interventions(
+    period: str = Query("month", enum=["week", "month"]),
+    _user: User = Depends(require_counselor),
+    db: Session = Depends(get_db),
+):
+    now = datetime.utcnow()
+    if period == "week":
+        start = now - timedelta(days=7)
+    else:
+        start = now.replace(day=1)
+    return CounselorReportService.interventions(db, start=start)
+
+
+@app.get("/reports/participation")
+def get_participation(
+    _user: User = Depends(require_counselor),
+    db: Session = Depends(get_db),
+):
+    return CounselorReportService.participation(db)
+
+
+@app.get("/analytics/intervention-success")
+def intervention_success(
+    _user: User = Depends(require_counselor),
+    db: Session = Depends(get_db),
+):
+    return CounselorReportService.intervention_success(db)
+
+
+@app.get("/events")
+def list_events(
+    _user: User = Depends(require_counselor),
+):
+    return CounselorReportService.load_academic_events()
+
+
+@app.post("/calendar/upload")
+async def upload_calendar(
+    file: UploadFile,
+    _user: User = Depends(require_counselor),
+):
+    content = await file.read()
+
+    def _extract_events_from_file(filename: str, content: bytes) -> List[Dict[str, Any]]:
+        name = filename.lower()
+        if name.endswith(".csv"):
+            try:
+                text_data = content.decode("utf-8-sig")
+                import csv
+
+                reader = csv.DictReader(text_data.splitlines())
+                parsed: List[Dict[str, Any]] = []
+                for row in reader:
+                    start_val = row.get("start") or row.get("start_date")
+                    end_val = row.get("end") or row.get("end_date") or start_val
+                    if not start_val or not end_val:
+                        continue
+                    parsed.append(
+                        {
+                            "name": row.get("name") or row.get("event") or "Unknown Event",
+                            "type": row.get("type"),
+                            "start_date": start_val,
+                            "end_date": end_val,
+                        }
+                    )
+                return parsed
+            except Exception:
+                return []
+        return []
+
+    new_events = _extract_events_from_file(file.filename, content)
+    if not new_events:
+        return {"status": "uploaded", "events_extracted": 0}
+
     try:
-        import openai  # type: ignore
-        openai.api_key = api_key
-        resp = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
-            messages=[{"role":"system","content":"You are a concise school counseling dashboard summarizer."},
-                      {"role":"user","content": prompt}],
-            temperature=0.2,
-            max_tokens=120,
-        )
-        return resp.choices[0].message["content"].strip()
-    except Exception:
-        return None
+        with EVENTS_FILE.open("w", encoding="utf-8") as fh:
+            json.dump(new_events, fh, indent=2)
+    except Exception as exc:  # pragma: no cover - file IO failure
+        raise HTTPException(status_code=500, detail="Failed to persist events") from exc
 
-@app.get("/api/ai/sentiment-summary")
-def ai_sentiment_summary(period: str = Query("month", enum=["week","month","year"])):
-    now = datetime.now()
-    start = _period_start(now, period)
-    # Pull sentiment counts (exclude 'mixed')
-    q = text(
-        """
-        SELECT LOWER(sentiment) AS name, COUNT(*) AS value
-        FROM checkin_sentiment cs
-        JOIN emotional_checkin ec ON ec.checkin_id = cs.checkin_id
-        WHERE ec.created_at >= :date AND sentiment IN ('positive','negative','neutral')
-        GROUP BY sentiment
-        """
+    return {"status": "uploaded", "events_extracted": len(new_events)}
+
+
+# --- Conversations API (service-backed) ---
+
+
+def _ensure_conversation_access(
+    conversation: Optional[Conversation],
+    current_user: User,
+) -> Conversation:
+    if conversation is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+    if current_user.role == UserRole.STUDENT and conversation.initiator_user_id != current_user.user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+    return conversation
+
+
+@app.get("/api/conversations", response_model=List[ConversationSchema])
+def list_conversations(
+    include_messages: bool = Query(False),
+    initiator_user_id: Optional[int] = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    filter_user_id: Optional[int] = None
+    if current_user.role == UserRole.STUDENT:
+        filter_user_id = current_user.user_id
+    elif initiator_user_id is not None:
+        filter_user_id = initiator_user_id
+
+    return ConversationService.list_conversations(
+        db,
+        initiator_user_id=filter_user_id,
+        include_messages=include_messages,
     )
-    # Pull recent journals/comments text
-    q_texts = text(
-        """
-        (
-          SELECT comment AS txt, created_at FROM emotional_checkin
-          WHERE created_at >= :date AND comment IS NOT NULL AND comment <> ''
-          ORDER BY created_at DESC LIMIT 50
-        )
-        UNION ALL
-        (
-          SELECT content AS txt, created_at FROM journal
-          WHERE created_at >= :date AND content IS NOT NULL AND content <> ''
-          ORDER BY created_at DESC LIMIT 50
-        )
-        ORDER BY created_at DESC LIMIT 60
-        """
+
+
+@app.post("/api/conversations", response_model=ConversationSchema, status_code=status.HTTP_201_CREATED)
+def start_conversation(
+    conversation_in: ConversationStart,
+    current_user: User = Depends(require_student),
+    db: Session = Depends(get_db),
+):
+    payload = ConversationCreate(
+        initiator_user_id=current_user.user_id,
+        initiator_role=current_user.role.value,
+        subject=conversation_in.subject,
+        status=ConversationStatus.OPEN,
     )
-    with engine.connect() as conn:
-        rows = list(conn.execute(q, {"date": start.strftime('%Y-%m-%d %H:%M:%S')}).mappings())
-        totals = {r["name"]: int(r["value"]) for r in rows}
-        texts = [r["txt"] for r in conn.execute(q_texts, {"date": start.strftime('%Y-%m-%d %H:%M:%S')}).mappings()]
-    positive = totals.get("positive", 0)
-    neutral = totals.get("neutral", 0)
-    negative = totals.get("negative", 0)
-    all_total = positive + neutral + negative
-    p = lambda n: round((n / all_total) * 100) if all_total else 0
-    keywords = _top_keywords(texts, 3)
-    heuristic = f"Overall this period: Positive {p(positive)}%, Neutral {p(neutral)}%, Negative {p(negative)}%. Common themes include: {', '.join(keywords) if keywords else 'no clear recurring terms'}."
-    # Optional LLM
-    llm = _maybe_llm_summary(
-        f"Summarize student sentiment this {period}. Positive={positive}, Neutral={neutral}, Negative={negative}."
-        f" Mention the trend and reference common themes from journals/comments: {keywords}. Keep it under 2 sentences."
+    return ConversationService.create_conversation(db, payload)
+
+
+@app.get("/api/conversations/{conversation_id}", response_model=ConversationSchema)
+def get_conversation(
+    conversation_id: int,
+    include_messages: bool = Query(False),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    conversation = ConversationService.get_conversation(
+        db,
+        conversation_id,
+        include_messages=include_messages,
     )
-    return {"summary": llm or heuristic}
+    return _ensure_conversation_access(conversation, current_user)
 
-@app.get("/api/ai/mood-summary")
-def ai_mood_summary(period: str = Query("month", enum=["week","month","year"])):
-    now = datetime.now()
-    start = _period_start(now, period)
-    # Weekly averages via ENUM mapping
-    q = text(
-        """
-        SELECT DATE(ec.created_at) AS d,
-               ROUND(AVG(CASE ec.mood_level
-                    WHEN 'Very Sad' THEN 1 WHEN 'Sad' THEN 2 WHEN 'Neutral' THEN 3
-                    WHEN 'Good' THEN 4 WHEN 'Happy' THEN 5 WHEN 'Very Happy' THEN 6 WHEN 'Excellent' THEN 7 END),2) AS avgMood
-        FROM emotional_checkin ec
-        WHERE ec.created_at >= :date
-        GROUP BY DATE(ec.created_at)
-        ORDER BY d
-        """
+
+@app.patch("/api/conversations/{conversation_id}", response_model=ConversationSchema)
+def update_conversation(
+    conversation_id: int,
+    conversation_in: ConversationUpdate,
+    current_user: User = Depends(require_student),
+    db: Session = Depends(get_db),
+):
+    if conversation_in.last_activity_at is not None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="last_activity_at cannot be updated")
+    conversation = _ensure_conversation_access(
+        ConversationService.get_conversation(db, conversation_id),
+        current_user,
     )
-    q_texts = text(
-        """
-        SELECT comment AS txt FROM emotional_checkin
-        WHERE created_at >= :date AND comment IS NOT NULL AND comment <> ''
-        ORDER BY created_at DESC LIMIT 60
-        """
+    updated = ConversationService.update_conversation(db, conversation, conversation_in)
+    return updated
+
+
+@app.get("/api/conversations/{conversation_id}/messages", response_model=List[MessageSchema])
+def list_conversation_messages(
+    conversation_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _ensure_conversation_access(
+        ConversationService.get_conversation(db, conversation_id),
+        current_user,
     )
-    with engine.connect() as conn:
-        rows = list(conn.execute(q, {"date": start.strftime('%Y-%m-%d %H:%M:%S')}).mappings())
-        texts = [r["txt"] for r in conn.execute(q_texts, {"date": start.strftime('%Y-%m-%d %H:%M:%S')}).mappings()]
-    vals = [float(r["avgMood"] or 0) for r in rows]
-    trend = "stable"
-    if len(vals) >= 2:
-        diff = vals[-1] - vals[0]
-        if diff > 0.4: trend = "improving"
-        elif diff < -0.4: trend = "declining"
-    keywords = _top_keywords(texts, 3)
-    heuristic = f"Weekly mood appears {trend}. Notable themes from comments: {', '.join(keywords) if keywords else 'no clear recurring terms'}."
-    llm = _maybe_llm_summary(
-        f"Given a 1-7 mood scale (1=Very Sad..7=Excellent), summarize the mood trend this {period} as a counselor dashboard note."
-        f" Daily averages: {vals}. Trend should be one word (improving/declining/stable) and cite themes from comments: {keywords}."
+    return ConversationService.list_messages(db, conversation_id)
+
+
+@app.post(
+    "/api/conversations/{conversation_id}/messages",
+    response_model=MessageSchema,
+    status_code=status.HTTP_201_CREATED,
+)
+def send_message(
+    conversation_id: int,
+    message_in: MessageSend,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    conversation = _ensure_conversation_access(
+        ConversationService.get_conversation(db, conversation_id),
+        current_user,
     )
-    return {"summary": llm or heuristic}
+    message_payload = MessageCreate(
+        sender_id=current_user.user_id,
+        content=message_in.content,
+        is_read=message_in.is_read,
+    )
+    return ConversationService.add_message(db, conversation, message_payload)
 
-# Removed deprecated /api/appointments endpoint (Upcoming Appointments feature deprecated)
 
-@app.get("/api/recent-alerts")
-def recent_alerts():
-    query = """
-        SELECT
-            a.alert_id AS id,
-            u.name AS name,
-            a.reason,
-            a.severity,
-            a.status,
-            a.created_at
-        FROM alert a
-        JOIN user u ON a.user_id = u.user_id
-        WHERE a.status IN ('open', 'in_progress', 'resolved')
-        ORDER BY a.created_at DESC
-    """
-    with engine.connect() as conn:
-        result = conn.execute(text(query)).mappings()
-        data = [
-            {
-                "id": row["id"],
-                "name": row["name"],
-                "reason": row["reason"],
-                "severity": row["severity"],
-                "status": row["status"],
-                "created_at": row["created_at"].strftime("%Y-%m-%d %H:%M:%S") if row["created_at"] else "",
-            }
-            for row in result
-        ]
-    return data
-
-@app.get("/api/all-alerts")
-def all_alerts():
-    query = """
-        SELECT
-            a.alert_id AS id,
-            u.name AS name,
-            a.reason,
-            a.severity,
-            a.status,
-            a.created_at
-        FROM alert a
-        JOIN user u ON a.user_id = u.user_id
-        WHERE a.status IN ('open', 'in_progress', 'resolved')
-        ORDER BY a.created_at DESC
-    """
-    with engine.connect() as conn:
-        result = conn.execute(text(query)).mappings()
-        data = [
-            {
-                "id": row["id"],
-                "name": row["name"],
-                "reason": row["reason"],
-                "severity": row["severity"],
-                "status": row["status"],
-                "created_at": row["created_at"].strftime("%Y-%m-%d %H:%M:%S") if row["created_at"] else "",
-            }
-            for row in result
-        ]
-    return data
-
-@app.get("/api/students-monitored")
-def students_monitored():
-    query = """
-        SELECT COUNT(DISTINCT u.user_id) AS count
-        FROM user u
-        JOIN emotional_checkin ec ON ec.user_id = u.user_id
-        WHERE u.role = 'student' AND u.is_active = TRUE
-    """
-    with engine.connect() as conn:
-        result = conn.execute(text(query)).mappings().first()
-        return {"count": result["count"]}
-
-# --- This Week Check-ins ---
-@app.get("/api/this-week-checkins")
-def this_week_checkins():
-    query = """
-        SELECT COUNT(*) AS count
-        FROM emotional_checkin
-        WHERE YEARWEEK(created_at, 3) = YEARWEEK(CURDATE(), 3);
-    """
-    with engine.connect() as conn:
-        result = conn.execute(text(query)).mappings().first()
-        return {"count": result["count"]}
-
-# --- Open Appointments (User Activities) ---
-@app.get("/api/open-appointments")
-def open_appointments():
-    query = """
-        SELECT COUNT(DISTINCT user_id) AS count
-        FROM user_activities
-        WHERE action IN ('downloaded_form')
-          AND target_type = 'form'
-          AND created_at >= DATE_SUB(NOW(), INTERVAL 1 WEEK)
-    """
-    with engine.connect() as conn:
-        result = conn.execute(text(query)).mappings().first()
-        return {"count": result["count"]}
-
-# --- High-Risk Flags (Alerts + Sentiments) ---
-@app.get("/api/high-risk-flags")
-def high_risk_flags():
-    query_alert = """
-        SELECT COUNT(*) AS count
-        FROM alert
-        WHERE severity IN ('high', 'critical')
-            AND status IN ('open', 'in_progress');
-    """
-    query_journal = """
-        SELECT COUNT(*) AS count
-        FROM journal_sentiment
-        WHERE sentiment = 'negative'
-          AND analyzed_at >= DATE_SUB(NOW(), INTERVAL 1 WEEK)
-    """
-    query_checkin = """
-        SELECT COUNT(*) AS count
-        FROM checkin_sentiment
-        WHERE sentiment = 'negative'
-          AND analyzed_at >= DATE_SUB(NOW(), INTERVAL 1 WEEK)
-    """
-    with engine.connect() as conn:
-        alert_count = conn.execute(text(query_alert)).mappings().first()["count"]
-        journal_count = conn.execute(text(query_journal)).mappings().first()["count"]
-        checkin_count = conn.execute(text(query_checkin)).mappings().first()["count"]
-        total = alert_count + journal_count + checkin_count
-        return {"count": total}
-
-# --- Conversations list ---
-@app.get("/api/conversations")
-def get_conversations(user_id: int = Query(...), current_user: str = Depends(get_current_user)):
-    query = """
-        SELECT DISTINCT
-            c.conversation_id AS id,
-            c.initiator_user_id,
-            c.initiator_role,
-            c.subject,
-            c.status,
-            c.created_at,
-            c.last_activity_at,
-            u.nickname AS initiator_nickname
-        FROM conversations c
-        LEFT JOIN messages m ON c.conversation_id = m.conversation_id
-        JOIN user u ON c.initiator_user_id = u.user_id
-        WHERE c.initiator_user_id = :uid   -- student initiated
-           OR m.sender_id = :uid           -- counselor/admin/student sent messages
-        ORDER BY c.last_activity_at DESC, c.created_at DESC
-    """
-    with engine.connect() as conn:
-        result = conn.execute(text(query), {"uid": user_id}).mappings()
-        return [dict(row) for row in result]
+@app.post("/api/conversations/{conversation_id}/read")
+def mark_conversation_read(
+    conversation_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    conversation = _ensure_conversation_access(
+        ConversationService.get_conversation(db, conversation_id),
+        current_user,
+    )
+    updated = ConversationService.mark_conversation_read(
+        db,
+        conversation.conversation_id,
+        current_user.user_id,
+    )
+    return {"updated": updated}
 
 
 # --- Analytics: Chat-based Intervention Success ---
