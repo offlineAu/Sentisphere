@@ -14,6 +14,13 @@ class Settings(BaseSettings):
     DB_NAME: str = os.getenv("DB_NAME", "sentisphere_app")
     DB_DRIVER: str = os.getenv("DB_DRIVER", "mysql+mysqlconnector")
 
+    @property
+    def DATABASE_URL(self) -> str:
+        return (
+            f"{self.DB_DRIVER}://{self.DB_USER}:{self.DB_PASS}"
+            f"@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
+        )
+
     # Dedicated mobile database (falls back to main credentials unless overridden)
     MOBILE_DB_USER: str = os.getenv("MOBILE_DB_USER") or DB_USER
     MOBILE_DB_PASS: str = os.getenv("MOBILE_DB_PASS") or DB_PASS
