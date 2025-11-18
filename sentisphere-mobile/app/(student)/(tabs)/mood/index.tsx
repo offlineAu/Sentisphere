@@ -1,5 +1,5 @@
-import { StyleSheet, View, ScrollView, Pressable, Animated, Easing, Platform } from 'react-native';
-import { useState } from 'react';
+import { StyleSheet, View, ScrollView, Pressable, Animated, Easing, Platform, Image } from 'react-native';
+import { useState, useEffect } from 'react';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
 import { Textarea } from '@/components/ui/textarea';
@@ -10,6 +10,8 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors } from '@/constants/theme';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
+import * as SecureStore from 'expo-secure-store';
+import { router } from 'expo-router';
 
 type MoodOption = { key: string; emoji: string; label: string };
 
@@ -19,8 +21,22 @@ export default function MoodScreen() {
   const [selectedStress, setSelectedStress] = useState<string | null>(null);
   const [note, setNote] = useState('');
   const [submitted, setSubmitted] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const scheme = useColorScheme() ?? 'light';
   const palette = Colors[scheme] as any;
+  const API = process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8010';
+  const successAnim = (useState(() => new Animated.Value(0))[0]);
+  const successOpacity = successAnim;
+  const successScale = successAnim.interpolate({ inputRange: [0, 1], outputRange: [0.92, 1] });
+
+  useEffect(() => {
+    if (submitted) {
+      successAnim.setValue(0);
+      Animated.timing(successAnim, { toValue: 1, duration: 420, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+      if (Platform.OS !== 'web') { try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success) } catch {} }
+    }
+  }, [submitted]);
 
   const hexToRgb = (hex: string) => {
     const h = hex?.replace('#', '');
@@ -157,10 +173,49 @@ export default function MoodScreen() {
     );
   };
 
-  const handleSubmit = () => {
-    if (!note.trim()) return;
-    // TODO: Persist check-in
-    setSubmitted(true);
+  const getAuthToken = async (): Promise<string | null> => {
+    if (Platform.OS === 'web') {
+      try { return (window as any)?.localStorage?.getItem('auth_token') || null } catch { return null }
+    }
+    try { return await SecureStore.getItemAsync('auth_token') } catch { return null }
+  };
+
+  const handleSubmit = async () => {
+    setError(null);
+    if (!selectedMood || !selectedEnergy || !selectedStress) {
+      setError('Please select mood, energy, and stress');
+      return;
+    }
+    setSaving(true);
+    try {
+      const tok = await getAuthToken();
+      if (!tok) {
+        setError('Not signed in');
+        setSaving(false);
+        return;
+      }
+      const payload = {
+        mood_level: selectedMood,
+        energy_level: selectedEnergy,
+        stress_level: selectedStress,
+        comment: note && note.trim() ? note.trim() : undefined,
+      };
+      const res = await fetch(`${API}/api/emotional-checkins`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        let detail = '';
+        try { const d = await res.json(); detail = d?.detail || d?.message || '' } catch {}
+        throw new Error(detail || `Save failed: ${res.status}`);
+      }
+      setSubmitted(true);
+    } catch (e: any) {
+      setError(e?.message || 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const reset = () => {
@@ -174,11 +229,18 @@ export default function MoodScreen() {
   if (submitted) {
     return (
       <ThemedView style={[styles.container, { alignItems: 'center', justifyContent: 'center' }]}> 
-        <ThemedText style={{ marginBottom: 8 }}>Thanks for checking in today!</ThemedText>
-        <ThemedText style={{ color: palette.muted, textAlign: 'center', marginBottom: 12 }}>
-          Your mood has been recorded. Remember that it's okay to not be okay.
-        </ThemedText>
-        <Button title="Check in again" variant="outline" onPress={reset} />
+        <LinearGradient colors={["#FFFFFF", "#FFFFFF"]} style={styles.pageBackground} pointerEvents="none" />
+        <Animated.View style={{ alignItems: 'center', gap: 8, opacity: successOpacity, transform: [{ scale: successScale }] }}>
+          <Image source={require('../../../../assets/images/verified.png')} style={{ width: 96, height: 96 }} accessibilityLabel="Success" />
+          <ThemedText style={{ marginTop: 4, fontSize: 21, fontFamily: 'Inter_700Bold', color: palette.text }}>Thanks for checking in!</ThemedText>
+          <ThemedText style={{ color: palette.muted, textAlign: 'center', marginHorizontal: 24, marginTop: -5, fontSize: 15 }}>
+            Your mood has been recorded.
+          </ThemedText>
+          <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
+            <Button title="Back to Dashboard" onPress={() => router.push('/(student)/(tabs)/dashboard')} style={{ paddingVertical: 8, paddingHorizontal: 12, borderWidth: 0 }} textStyle={{ fontSize: 13 }} />
+            <Button title="Check in again" variant="ghost" onPress={reset} style={{ paddingVertical: 8, paddingHorizontal: 12, backgroundColor: 'rgba(13,140,79,0.08)', borderWidth: 0 }} textStyle={{ fontSize: 13 }} />
+          </View>
+        </Animated.View>
       </ThemedView>
     );
   }
@@ -274,8 +336,11 @@ export default function MoodScreen() {
                 <Icon name="check-circle" size={16} color="#10B981" />
                 <ThemedText style={[styles.privacyText, { color: palette.muted }]}>Your privacy is protected</ThemedText>
               </View>
-              <Button title="Record Mood" onPress={handleSubmit} disabled={!note.trim()} />
+              <Button title="Record Mood" onPress={handleSubmit} disabled={!(selectedMood && selectedEnergy && selectedStress) || saving} />
             </View>
+            {error ? (
+              <ThemedText style={{ marginTop: 8, color: '#DC2626', fontSize: 12 }}>{error}</ThemedText>
+            ) : null}
           </CardContent>
         </Card>
 

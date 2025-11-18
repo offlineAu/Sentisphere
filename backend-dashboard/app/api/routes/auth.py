@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends, Request
 from sqlalchemy import text, select, func, or_
 from sqlalchemy.exc import ProgrammingError, IntegrityError
 from app.schemas.auth import Token
-from app.services.jwt import create_access_token
+from app.services.jwt import create_access_token, decode_token
 from app.db.database import engine, ENGINE_INIT_ERROR_MSG
 from app.db.mobile_database import mobile_engine, MobileSessionLocal
 from app.models.mobile_user import MobileUser
@@ -10,6 +10,7 @@ from datetime import datetime, timezone, timedelta
 from app.core.config import settings
 import httpx
 import re
+from fastapi.security import OAuth2PasswordBearer
 
 router = APIRouter()
 
@@ -308,6 +309,30 @@ async def mobile_login(request: Request):
         )
         return {"access_token": token}
 
+@router.get("/mobile/me")
+async def mobile_me(token: str = Depends(OAuth2PasswordBearer(tokenUrl="/api/auth/token"))):
+    try:
+        payload = decode_token(token)
+        sub = payload.get("sub")
+        if not sub:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        uid = int(sub)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    with MobileSessionLocal() as db:
+        user = db.execute(
+            select(MobileUser).where(MobileUser.user_id == uid).limit(1)
+        ).scalars().first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        return {
+            "user_id": user.user_id,
+            "name": user.name,
+            "nickname": user.nickname,
+            "email": user.email,
+            "role": user.role,
+        }
 
 @router.post("/register")
 async def register_student(request: Request):

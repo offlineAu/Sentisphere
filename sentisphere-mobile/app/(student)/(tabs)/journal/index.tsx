@@ -13,6 +13,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Link, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as SecureStore from 'expo-secure-store';
 
 import { analyzeSentiment, makeCoachIntro, coachReply, Analysis } from '@/utils/sentiment';
 
@@ -22,6 +23,8 @@ export default function JournalListScreen() {
   const scheme = useColorScheme() ?? 'light';
   const palette = Colors[scheme] as any;
   const { height: winH, width: winW } = useWindowDimensions();
+  const API = process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8010';
+  const router = useRouter();
 
   // Tabs: 0 = Write Entry, 1 = My Entries
   const [tab, setTab] = useState<0 | 1>(0);
@@ -145,6 +148,7 @@ export default function JournalListScreen() {
   const wordCount = useMemo(() => (body.trim() ? body.trim().split(/\s+/).length : 0), [body]);
   const charCount = body.length;
   const [isSaving, setIsSaving] = useState(false);
+  const [loadingEntries, setLoadingEntries] = useState(false);
   // Saved toast animation
   const toast = useRef(new Animated.Value(0)).current; // 0 hidden, 1 visible
   const showSavedToast = () => {
@@ -153,6 +157,21 @@ export default function JournalListScreen() {
         Animated.timing(toast, { toValue: 0, duration: 220, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
       }, 1200);
     });
+  };
+
+  const getAuthToken = async (): Promise<string | null> => {
+    if (Platform.OS === 'web') {
+      try { return (window as any)?.localStorage?.getItem('auth_token') || null } catch { return null }
+    }
+    try { return await SecureStore.getItemAsync('auth_token') } catch { return null }
+  };
+
+  const clearAuthToken = async () => {
+    if (Platform.OS === 'web') {
+      try { (window as any)?.localStorage?.removeItem('auth_token') } catch {}
+      return;
+    }
+    try { await SecureStore.deleteItemAsync('auth_token') } catch {}
   };
 
   // Analysis & coach chat state
@@ -183,11 +202,33 @@ export default function JournalListScreen() {
     });
     setCoachInput('');
   };
-  // Sample entries (replace with data source later)
-  const [entries, setEntries] = useState<Entry[]>([
-    { id: '1', title: 'Grateful for small wins', body: 'Today I felt more present and calm after a short walk.', date: '2025-09-22' },
-    { id: '2', title: 'A challenging day', body: 'Work was tough but I asked for help and that felt good.', date: '2025-09-18' },
-  ]);
+  const [entries, setEntries] = useState<Entry[]>([]);
+
+  const fetchEntries = useCallback(async () => {
+    try {
+      setLoadingEntries(true);
+      const tok = await getAuthToken();
+      if (!tok) { setLoadingEntries(false); return; }
+      const res = await fetch(`${API}/api/journals`, { headers: { Authorization: `Bearer ${tok}` } });
+      if (!res.ok) { setLoadingEntries(false); return; }
+      const arr = await res.json();
+      const mapped: Entry[] = (arr || []).map((r: any) => {
+        const content = String(r?.content || '');
+        const firstLine = content.trim().split(/\n+/)[0]?.trim() || '';
+        const title = firstLine.slice(0, 60) || 'Journal Entry';
+        const body = content.slice(0, 160);
+        const date = (r?.created_at || '').slice(0, 10) || '';
+        return { id: String(r?.journal_id), title, body, date };
+      });
+      setEntries(mapped);
+    } catch {
+    } finally {
+      setLoadingEntries(false);
+    }
+  }, [API]);
+
+  useEffect(() => { fetchEntries(); }, []);
+  useEffect(() => { if (tab === 1) fetchEntries(); }, [tab, fetchEntries]);
 
   // Segmented indicator translate
   const indicatorStyle = (() => {
@@ -215,7 +256,7 @@ export default function JournalListScreen() {
   // Active border color per-field
   const focusBlue = '#3B82F6';
 
-  // Save handler (local state demo)
+  // Save handler (POST to backend)
   const handleSave = async () => {
     if (isSaving) return;
     const text = body.trim();
@@ -228,22 +269,49 @@ export default function JournalListScreen() {
       try { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {}
     }
     setIsSaving(true);
-    // small delay to give a saving feel; replace with real API call later
-    await new Promise((r) => setTimeout(r, 700));
-    const newEntry: Entry = {
-      id: String(Date.now()),
-      title: title.trim(),
-      body: text,
-      date: new Date().toISOString().slice(0, 10),
-    };
-    setEntries((prev) => [newEntry, ...prev]);
-    setBody('');
-    setTitle('');
-    onTabChange(1);
-    setIsSaving(false);
-    showSavedToast();
-    if (Platform.OS !== 'web') {
-      try { await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
+    try {
+      const tok = await getAuthToken();
+      if (!tok) {
+        setIsSaving(false);
+        Alert.alert('Not signed in', 'Please sign in again.');
+        return;
+      }
+      const res = await fetch(`${API}/api/journals`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` },
+        body: JSON.stringify({ content: text }),
+      });
+      if (res.status === 401) {
+        await clearAuthToken();
+        Alert.alert('Session expired', 'Please sign in again to continue.', [
+          { text: 'OK', onPress: () => router.replace('/auth') }
+        ]);
+        return;
+      }
+      if (!res.ok) {
+        let detail = '';
+        try { const d = await res.json(); detail = d?.detail || d?.message || '' } catch {}
+        throw new Error(detail || `Save failed: ${res.status}`);
+      }
+      const d = await res.json();
+      const newEntry: Entry = {
+        id: String(d?.journal_id ?? Date.now()),
+        title: title.trim(),
+        body: text,
+        date: new Date().toISOString().slice(0, 10),
+      };
+      setEntries((prev) => [newEntry, ...prev]);
+      setBody('');
+      setTitle('');
+      onTabChange(1);
+      showSavedToast();
+      if (Platform.OS !== 'web') {
+        try { await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
+      }
+    } catch (e: any) {
+      Alert.alert('Save failed', e?.message || 'Please try again.');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -373,15 +441,21 @@ export default function JournalListScreen() {
         )
       ) : (
         <Animated.View style={{ gap: 8, marginTop: 12, opacity: contentOpacity, transform: [{ translateY: contentTranslateY }] }}>
-          {entries.map((e) => (
-            <EntryRow
-              key={e.id}
-              entry={e}
-              onDelete={(id) => setEntries((prev) => prev.filter((it) => it.id !== id))}
-              getOpenRef={() => openSwipeRef.current}
-              setOpenRef={(inst) => (openSwipeRef.current = inst)}
-            />
-          ))}
+          {entries.length > 0 ? (
+            entries.map((e) => (
+              <EntryRow
+                key={e.id}
+                entry={e}
+                onDelete={(id) => setEntries((prev) => prev.filter((it) => it.id !== id))}
+                getOpenRef={() => openSwipeRef.current}
+                setOpenRef={(inst) => (openSwipeRef.current = inst)}
+              />
+            ))
+          ) : (
+            <ThemedText style={{ textAlign: 'center', color: palette.muted, marginTop: 12 }}>
+              {loadingEntries ? 'Loading entries...' : 'No entries yet'}
+            </ThemedText>
+          )}
         </Animated.View>
       )}
         </ScrollView>
