@@ -1,13 +1,16 @@
-from fastapi import FastAPI, Query, HTTPException, Depends, status
+from fastapi import FastAPI, Query, HTTPException, Depends, status, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import os
+from pathlib import Path
+import json
 from collections import Counter
 import re
 import typing
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
+import csv
 import logging
 from fastapi.security import OAuth2PasswordBearer
 
@@ -16,6 +19,9 @@ from app.db.database import engine, ENGINE_INIT_ERROR_MSG
 from app.db.mobile_database import mobile_engine
 from app.api.routes.auth import router as auth_router
 from app.services.jwt import decode_token
+
+BASE_DIR = Path(__file__).resolve().parent
+EVENTS_FILE = BASE_DIR / "events.json"
 
 app = FastAPI(title=settings.APP_NAME)
 
@@ -963,6 +969,563 @@ def mark_conversation_read(conversation_id: int, user_id: int = Query(...), curr
         return {"updated": result.rowcount}
     
 # --- Reports APIs ---
+
+class WeeklyInsight(BaseModel):
+    week_start: str
+    week_end: str
+    event_name: Optional[str] = None
+    event_type: Optional[str] = None
+    title: str
+    description: str
+    recommendation: str
+
+
+class ReportSummary(BaseModel):
+    week_start: str
+    week_end: str
+    current_wellness_index: int
+    previous_wellness_index: int
+    change: int
+    event_name: Optional[str] = None
+    event_type: Optional[str] = None
+    insight: str
+    insights: List[WeeklyInsight]
+
+
+class TrendWeek(BaseModel):
+    week_start: str
+    week_end: str
+    index: int
+    avg_mood: float
+    avg_energy: float
+    avg_stress: float
+    event_name: Optional[str] = None
+    event_type: Optional[str] = None
+
+class TrendsResponse(BaseModel):
+    weeks: List[TrendWeek]
+
+class EngagementMetrics(BaseModel):
+    active_students_this_week: int
+    active_students_last_week: int
+    avg_checkins_per_student: float
+    participation_change: str
+
+def _week_bounds(today: date) -> tuple[datetime, datetime]:
+    start = datetime.combine(today - timedelta(days=today.weekday()), datetime.min.time())
+    end = start + timedelta(days=6, hours=23, minutes=59, seconds=59)
+    return start, end
+
+def _load_academic_events() -> list[dict]:
+    try:
+        events_path = Path(__file__).parent / "data" / "school_calendar.json"
+        if events_path.exists():
+            with open(events_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    return data
+    except Exception:
+        pass
+    return [
+        {"name": "Midterm Exams", "type": "exam", "start_date": "2025-11-10", "end_date": "2025-11-16"},
+        {"name": "Final Exams", "type": "exam", "start_date": "2025-12-08", "end_date": "2025-12-14"},
+        {"name": "Enrollment Week", "type": "enrollment", "start_date": "2025-06-10", "end_date": "2025-06-16"},
+        {"name": "Project Week", "type": "project", "start_date": "2025-10-20", "end_date": "2025-10-26"},
+    ]
+
+ACADEMIC_EVENTS = _load_academic_events()
+
+def _parse_ymd(s: str) -> date:
+    return datetime.strptime(s, "%Y-%m-%d").date()
+
+def _event_for_range(start_d: date, end_d: date) -> tuple[Optional[str], Optional[str]]:
+    for ev in ACADEMIC_EVENTS:
+        try:
+            ev_start = _parse_ymd(ev.get("start_date"))
+            ev_end = _parse_ymd(ev.get("end_date"))
+        except Exception:
+            continue
+        if ev_start <= end_d and ev_end >= start_d:
+            return ev.get("name"), ev.get("type")
+    return None, None
+
+def _weekly_wellness_index(start_dt: datetime, end_dt: datetime) -> int:
+    q = text(
+        """
+        SELECT ROUND(AVG(
+            0.4 * (CASE mood_level
+                WHEN 'Very Sad' THEN 0
+                WHEN 'Sad' THEN 17
+                WHEN 'Neutral' THEN 33
+                WHEN 'Good' THEN 50
+                WHEN 'Happy' THEN 67
+                WHEN 'Very Happy' THEN 83
+                WHEN 'Excellent' THEN 100
+                ELSE NULL END)
+          + 0.3 * (CASE energy_level
+                WHEN 'Very Low' THEN 0
+                WHEN 'Low' THEN 25
+                WHEN 'Moderate' THEN 50
+                WHEN 'High' THEN 75
+                WHEN 'Very High' THEN 100
+                ELSE NULL END)
+          + 0.3 * (100 - (CASE stress_level
+                WHEN 'No Stress' THEN 0
+                WHEN 'Low Stress' THEN 25
+                WHEN 'Moderate' THEN 50
+                WHEN 'High Stress' THEN 75
+                WHEN 'Very High Stress' THEN 100
+                ELSE NULL END))
+        ), 0) AS idx
+        FROM emotional_checkin
+        WHERE created_at >= :start AND created_at < :end
+        """
+    )
+    with engine.connect() as conn:
+        row = conn.execute(q, {
+            "start": start_dt.strftime('%Y-%m-%d %H:%M:%S'),
+            "end": (end_dt + timedelta(seconds=1)).strftime('%Y-%m-%d %H:%M:%S')
+        }).mappings().first()
+        val = row["idx"] if row else None
+        try:
+            return int(val or 0)
+        except Exception:
+            return 0
+
+
+def _trend_detail(start_dt: datetime, end_dt: datetime) -> Dict[str, float]:
+    query = text(
+        """
+        SELECT
+            AVG(CASE mood_level
+                WHEN 'Very Sad' THEN 1
+                WHEN 'Sad' THEN 2
+                WHEN 'Neutral' THEN 3
+                WHEN 'Good' THEN 4
+                WHEN 'Happy' THEN 5
+                WHEN 'Very Happy' THEN 6
+                WHEN 'Excellent' THEN 7
+                ELSE NULL END) AS avg_mood,
+            AVG(CASE energy_level
+                WHEN 'Very Low' THEN 1
+                WHEN 'Low' THEN 2
+                WHEN 'Moderate' THEN 3
+                WHEN 'High' THEN 4
+                WHEN 'Very High' THEN 5
+                ELSE NULL END) AS avg_energy,
+            AVG(CASE stress_level
+                WHEN 'No Stress' THEN 1
+                WHEN 'Low Stress' THEN 2
+                WHEN 'Moderate' THEN 3
+                WHEN 'High Stress' THEN 4
+                WHEN 'Very High Stress' THEN 5
+                ELSE NULL END) AS avg_stress
+        FROM emotional_checkin
+        WHERE created_at >= :start AND created_at < :end
+        """
+    )
+    end_exclusive = end_dt + timedelta(seconds=1)
+    with engine.connect() as conn:
+        row = conn.execute(query, {
+            "start": start_dt.strftime('%Y-%m-%d %H:%M:%S'),
+            "end": end_exclusive.strftime('%Y-%m-%d %H:%M:%S'),
+        }).mappings().first()
+        if not row:
+            return {"avg_mood": 0.0, "avg_energy": 0.0, "avg_stress": 0.0}
+        mood_raw = row["avg_mood"]
+        energy_raw = row["avg_energy"]
+        stress_raw = row["avg_stress"]
+
+        def _scale(val: Optional[float], min_val: float, max_val: float) -> float:
+            if val is None:
+                return 0.0
+            return round(((float(val) - min_val) / (max_val - min_val)) * 100, 1)
+
+        return {
+            "avg_mood": _scale(mood_raw, 1, 7),
+            "avg_energy": _scale(energy_raw, 1, 5),
+            "avg_stress": _scale(stress_raw, 1, 5),
+        }
+
+
+def _journal_themes(start_dt: datetime, end_dt: datetime, limit: int = 3) -> List[str]:
+    q = text(
+        """
+        SELECT sentiment
+        FROM journal_sentiment js
+        JOIN journal j ON j.journal_id = js.journal_id
+        WHERE j.created_at >= :start AND j.created_at < :end
+        ORDER BY j.created_at DESC
+        LIMIT 200
+        """
+    )
+    with engine.connect() as conn:
+        sentiments = [row["sentiment"] for row in conn.execute(q, {
+            "start": start_dt.strftime('%Y-%m-%d %H:%M:%S'),
+            "end": end_dt.strftime('%Y-%m-%d %H:%M:%S'),
+        }).mappings()]
+    counts = Counter(sentiments)
+    return [name for name, _ in counts.most_common(limit)]
+
+
+def _build_recommendation(change: int, themes: List[str]) -> str:
+    if change >= 5:
+        base = "Momentum is positive. Continue reinforcing healthy routines."
+    elif change <= -5:
+        base = "Consider proactive outreach—students may need extra support this week."
+    else:
+        base = "Wellness is stable. Maintain regular check-ins."
+    if themes:
+        theme_notes = ", ".join(themes[:2])
+        return f"{base} Watch for recurring sentiments: {theme_notes}."
+    return base
+
+
+def _load_events() -> List[Dict[str, Any]]:
+    if not EVENTS_FILE.exists():
+        return []
+    try:
+        with EVENTS_FILE.open("r", encoding="utf-8") as fh:
+            data = json.load(fh)
+            return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _event_overlaps(event: Dict[str, Any], start: date, end: date) -> bool:
+    try:
+        ev_start = datetime.strptime(event["start"], "%Y-%m-%d").date()
+        ev_end = datetime.strptime(event["end"], "%Y-%m-%d").date()
+    except Exception:
+        return False
+    return ev_start <= end and ev_end >= start
+
+
+def _extract_events_from_file(filename: str, content: bytes) -> List[Dict[str, Any]]:
+    name = filename.lower()
+    if name.endswith(".csv"):
+        try:
+            text_data = content.decode("utf-8-sig")
+            reader = csv.DictReader(text_data.splitlines())
+            events = []
+            for row in reader:
+                events.append({
+                    "name": row.get("name") or row.get("event") or "Unknown Event",
+                    "start": row.get("start") or row.get("start_date"),
+                    "end": row.get("end") or row.get("end_date"),
+                    "type": row.get("type")
+                })
+            return [ev for ev in events if ev.get("start") and ev.get("end")]
+        except Exception:
+            return []
+    # Other formats would require OCR or structured parsing; return empty for now.
+    return []
+@app.get("/api/reports/summary", response_model=ReportSummary)
+def reports_summary(current_user: str = Depends(get_current_user)):
+    today = datetime.now().date()
+    start_dt, end_dt = _week_bounds(today)
+
+    insight_weeks = 4
+    offsets = list(range(insight_weeks - 1, -1, -1))
+    insight_records: List[Dict[str, typing.Any]] = []
+    previous_index: Optional[int] = None
+    last_index: Optional[int] = None
+
+    for offset in offsets:
+        week_start_dt = start_dt - timedelta(weeks=offset)
+        week_end_dt = week_start_dt + timedelta(days=6, hours=23, minutes=59, seconds=59)
+        index_val = _weekly_wellness_index(week_start_dt, week_end_dt)
+        change = 0 if last_index is None else index_val - last_index
+        last_index = index_val
+
+        ev_name, ev_type = _event_for_range(week_start_dt.date(), week_end_dt.date())
+        themes = _journal_themes(week_start_dt, week_end_dt)
+        recommendation = _build_recommendation(change, themes)
+
+        if change > 5:
+            title = "Wellness Surge"
+            direction = f"rose by {change} points"
+        elif change < -5:
+            title = "Wellness Dip"
+            direction = f"fell by {abs(change)} points"
+        elif change > 0:
+            title = "Positive Momentum"
+            direction = f"rose by {change} point{'' if change == 1 else 's'}"
+        elif change < 0:
+            title = "Downward Shift"
+            direction = f"fell by {abs(change)} point{'' if change == -1 else 's'}"
+        else:
+            title = "Stable Wellness"
+            direction = "held steady"
+
+        description = f"Wellness index {direction} to {index_val}."
+        if ev_name:
+            description += f" During {ev_name.lower()}, watch for stress triggers."
+
+        insight_obj = WeeklyInsight(
+            week_start=week_start_dt.strftime('%Y-%m-%d'),
+            week_end=(week_start_dt + timedelta(days=6)).strftime('%Y-%m-%d'),
+            event_name=ev_name,
+            event_type=ev_type,
+            title=title,
+            description=description,
+            recommendation=recommendation,
+        )
+
+        insight_records.append({
+            "insight": insight_obj,
+            "change": change,
+            "index": index_val,
+        })
+
+    insight_records = list(reversed(insight_records))  # most recent first
+    insights = [record["insight"] for record in insight_records]
+
+    current_record = insight_records[0]
+    previous_record = insight_records[1] if len(insight_records) > 1 else insight_records[0]
+
+    return ReportSummary(
+        week_start=current_record["insight"].week_start,
+        week_end=current_record["insight"].week_end,
+        current_wellness_index=current_record["index"],
+        previous_wellness_index=previous_record["index"],
+        change=current_record["index"] - previous_record["index"],
+        event_name=current_record["insight"].event_name,
+        event_type=current_record["insight"].event_type,
+        insight=current_record["insight"].description,
+        insights=insights,
+    )
+
+def _collect_weekly_trends(weeks: int = 12) -> List[Dict[str, Any]]:
+    today = datetime.now().date()
+    this_start, _ = _week_bounds(today)
+    base_monday = this_start.date()
+    items: List[Dict[str, Any]] = []
+    for i in range(weeks - 1, -1, -1):
+        wk_start_date = base_monday - timedelta(weeks=i)
+        wk_end_date = wk_start_date + timedelta(days=6)
+        start_dt = datetime.combine(wk_start_date, datetime.min.time())
+        end_dt = datetime.combine(wk_end_date, datetime.max.time())
+        idx = _weekly_wellness_index(start_dt, end_dt)
+        metrics = _trend_detail(start_dt, end_dt)
+        items.append({
+            "week_start": wk_start_date,
+            "week_end": wk_end_date,
+            "index": idx,
+            "avg_mood": metrics["avg_mood"],
+            "avg_energy": metrics["avg_energy"],
+            "avg_stress": metrics["avg_stress"],
+        })
+    return items
+
+
+@app.get("/api/reports/trends")
+def reports_trends(current_user: str = Depends(get_current_user)):
+    data = _collect_weekly_trends()
+    dates = [item["week_start"].strftime('%Y-%m-%d') for item in data]
+    mood = [item["avg_mood"] for item in data]
+    energy = [item["avg_energy"] for item in data]
+    stress = [item["avg_stress"] for item in data]
+    wellness = [item["index"] for item in data]
+
+    current_index = wellness[-1] if wellness else 0
+    previous_index = wellness[-2] if len(wellness) > 1 else current_index
+    change_percent = 0
+    if previous_index:
+        change_percent = round(((current_index - previous_index) / max(previous_index, 1e-9)) * 100)
+    numerical_change = current_index - previous_index
+
+    return {
+        "dates": dates,
+        "mood": mood,
+        "energy": energy,
+        "stress": stress,
+        "wellness_index": wellness,
+        "current_index": current_index,
+        "previous_index": previous_index,
+        "change_percent": change_percent,
+        "numerical_change": numerical_change,
+    }
+
+@app.get("/api/reports/engagement", response_model=EngagementMetrics)
+def reports_engagement(current_user: str = Depends(get_current_user)):
+    today = datetime.now().date()
+    this_start_dt, this_end_dt = _week_bounds(today)
+    last_start_dt = this_start_dt - timedelta(days=7)
+    last_end_dt = this_end_dt - timedelta(days=7)
+
+    q_counts = text(
+        """
+        SELECT 
+          COUNT(DISTINCT user_id) AS active,
+          COUNT(*) AS total
+        FROM emotional_checkin
+        WHERE created_at >= :start AND created_at < :end
+        """
+    )
+    q_total_students = text("SELECT COUNT(*) AS total FROM user WHERE role = 'student'")
+
+    with engine.connect() as conn:
+        this_rows = conn.execute(q_counts, {
+            "start": this_start_dt.strftime('%Y-%m-%d %H:%M:%S'),
+            "end": (this_end_dt + timedelta(seconds=1)).strftime('%Y-%m-%d %H:%M:%S')
+        }).mappings().first()
+        last_rows = conn.execute(q_counts, {
+            "start": last_start_dt.strftime('%Y-%m-%d %H:%M:%S'),
+            "end": (last_end_dt + timedelta(seconds=1)).strftime('%Y-%m-%d %H:%M:%S')
+        }).mappings().first()
+        total_students = conn.execute(q_total_students).mappings().first()["total"]
+
+    active_this = int(this_rows["active"] or 0)
+    total_this = int(this_rows["total"] or 0)
+    active_last = int(last_rows["active"] or 0)
+    total_last = int(last_rows["total"] or 0)
+
+    avg_this = round((total_this / active_this), 1) if active_this > 0 else 0.0
+    part_this = (active_this / total_students) if total_students else 0.0
+    part_last = (active_last / total_students) if total_students else 0.0
+    if part_last > 0:
+        change_pct = round(((part_this - part_last) * 100) / max(part_last, 1e-9))
+        sign = "+" if change_pct >= 0 else ""
+        part_change = f"{sign}{change_pct}%"
+    else:
+        part_change = "0%"
+
+    return EngagementMetrics(
+        active_students_this_week=active_this,
+        active_students_last_week=active_last,
+        avg_checkins_per_student=avg_this,
+        participation_change=part_change,
+    )
+
+@app.get("/api/reports/weekly-insights")
+def weekly_insights(current_user: str = Depends(get_current_user)):
+    trends = _collect_weekly_trends(6)
+    insights: List[Dict[str, Any]] = []
+    events = _load_events()
+
+    for idx, item in enumerate(trends):
+        prev_idx = trends[idx - 1]["index"] if idx > 0 else item["index"]
+        change = item["index"] - prev_idx
+        change_abs = abs(change)
+        start_label = item["week_start"].strftime('%Y-%m-%d')
+        end_label = item["week_end"].strftime('%Y-%m-%d')
+
+        title = "Stable Wellness"
+        if change > 5:
+            title = "Wellness Surge"
+        elif change < -5:
+            title = "Wellness Dip"
+
+        description = f"Wellness index {('rose' if change >=0 else 'fell')} by {change_abs} points to {item['index']}."
+        recommendation = _build_recommendation(change, _journal_themes(
+            datetime.combine(item["week_start"], datetime.min.time()),
+            datetime.combine(item["week_end"], datetime.max.time()),
+        ))
+
+        matched_event = next((ev for ev in events if _event_overlaps(ev, item["week_start"], item["week_end"])) , None)
+
+        insights.append({
+            "week_start": start_label,
+            "week_end": end_label,
+            "event_name": matched_event["name"] if matched_event else None,
+            "event_type": matched_event.get("type") if matched_event else None,
+            "title": title,
+            "description": description,
+            "recommendation": recommendation,
+        })
+
+    return insights
+
+
+@app.get("/api/reports/behavior-insights")
+def behavior_insights(current_user: str = Depends(get_current_user)):
+    today = datetime.now().date()
+    this_start, this_end = _week_bounds(today)
+    last_start = this_start - timedelta(days=7)
+    last_end = this_end - timedelta(days=7)
+
+    def _stress_cases(start_dt: datetime, end_dt: datetime) -> int:
+        q = text(
+            """
+            SELECT COUNT(*) FROM emotional_checkin
+            WHERE created_at >= :start AND created_at < :end
+              AND stress_level IN ('High Stress', 'Very High Stress')
+            """
+        )
+        with engine.connect() as conn:
+            return conn.execute(q, {
+                "start": start_dt.strftime('%Y-%m-%d %H:%M:%S'),
+                "end": (end_dt + timedelta(seconds=1)).strftime('%Y-%m-%d %H:%M:%S')
+            }).scalar() or 0
+
+    this_stress = _stress_cases(this_start, this_end)
+    last_stress = _stress_cases(last_start, last_end)
+
+    journaling_q = text(
+        """
+        SELECT COUNT(*) FROM journal
+        WHERE created_at >= :start AND created_at < :end
+        """
+    )
+    with engine.connect() as conn:
+        journals_this = conn.execute(journaling_q, {
+            "start": this_start.strftime('%Y-%m-%d %H:%M:%S'),
+            "end": (this_end + timedelta(seconds=1)).strftime('%Y-%m-%d %H:%M:%S')
+        }).scalar() or 0
+        journals_last = conn.execute(journaling_q, {
+            "start": last_start.strftime('%Y-%m-%d %H:%M:%S'),
+            "end": (last_end + timedelta(seconds=1)).strftime('%Y-%m-%d %H:%M:%S')
+        }).scalar() or 0
+
+    stress_change = this_stress - last_stress
+    stress_change_pct = round(((this_stress - last_stress) / max(last_stress, 1e-9)) * 100) if last_stress else 0
+
+    return [
+        {
+            "title": "Stress Spike Patterns",
+            "description": "Weekly comparison of high-stress check-ins shows how acute events affect students.",
+            "metrics": [
+                {"label": "High stress cases (current)", "value": this_stress},
+                {"label": "High stress cases (last)", "value": last_stress},
+                {"label": "Change", "value": f"{stress_change:+}"},
+                {"label": "% Change", "value": f"{stress_change_pct:+}%"},
+            ],
+        },
+        {
+            "title": "Journaling Correlation",
+            "description": "Journal activity often mirrors engagement and emotional processing.",
+            "metrics": [
+                {"label": "Journals (current week)", "value": journals_this},
+                {"label": "Journals (last week)", "value": journals_last},
+                {"label": "Change", "value": f"{journals_this - journals_last:+}"},
+            ],
+        },
+    ]
+
+
+@app.get("/api/events")
+def list_events(current_user: str = Depends(get_current_user)):
+    return _load_events()
+
+
+@app.post("/api/calendar/upload")
+async def upload_calendar(file: UploadFile):
+
+    content = await file.read()
+
+    events = _extract_events_from_file(file.filename, content)
+    if not events:
+        return {"status": "uploaded", "events_extracted": 0}
+
+    try:
+        with EVENTS_FILE.open("w", encoding="utf-8") as f:
+            json.dump(events, f, indent=2)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to persist events")
+
+    return {"status": "uploaded", "events_extracted": len(events)}
+
 
 @app.get("/api/reports/top-stats")
 def get_top_stats(current_user: str = Depends(get_current_user)):
