@@ -352,6 +352,137 @@ def checkin_breakdown(period: str = Query("month", enum=["week", "month", "year"
             "stress": [{"label": r["label"], "value": r["value"]} for r in stress_rows],
         }
 
+class CheckinIn(BaseModel):
+    mood_level: str
+    energy_level: str
+    stress_level: str
+    comment: Optional[str] = None
+
+@app.post("/api/emotional-checkins")
+def create_emotional_checkin(payload: CheckinIn, token: str = Depends(oauth2_scheme)):
+    try:
+        data = decode_token(token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    # For mobile: subject is the Mobile DB user_id
+    try:
+        uid = int(data.get("sub"))
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token subject")
+
+    # Normalize stress label to match schema
+    stress = payload.stress_level
+    if stress == "Very High":
+        stress = "Very High Stress"
+
+    # Insert into the MOBILE database
+    with mobile_engine.connect() as conn:
+        try:
+            ins = conn.execute(text(
+                """
+                INSERT INTO emotional_checkin (user_id, mood_level, energy_level, stress_level, comment, created_at)
+                VALUES (:uid, :mood, :energy, :stress, :comment, NOW())
+                """
+            ), {
+                "uid": uid,
+                "mood": payload.mood_level,
+                "energy": payload.energy_level,
+                "stress": stress,
+                "comment": (payload.comment or None),
+            })
+            conn.commit()
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Failed to save check-in: {exc.__class__.__name__}")
+
+    return {"ok": True, "checkin_id": int(ins.lastrowid)}
+
+
+class JournalIn(BaseModel):
+    content: str
+
+
+@app.post("/api/journals")
+def create_journal(payload: JournalIn, token: str = Depends(oauth2_scheme)):
+    try:
+        data = decode_token(token)
+        uid = int(data.get("sub"))
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    content = (payload.content or "").strip()
+    if not content:
+        raise HTTPException(status_code=422, detail="Content required")
+
+    with mobile_engine.connect() as conn:
+        try:
+            ins = conn.execute(
+                text(
+                    """
+                    INSERT INTO journal (user_id, content, created_at)
+                    VALUES (:uid, :content, NOW())
+                    """
+                ),
+                {"uid": uid, "content": content},
+            )
+            conn.commit()
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Failed to save journal: {exc.__class__.__name__}")
+
+    return {"ok": True, "journal_id": int(ins.lastrowid)}
+
+@app.get("/api/journals")
+def list_journals(limit: int = Query(50, ge=1, le=200), token: str = Depends(oauth2_scheme)):
+    try:
+        data = decode_token(token)
+        uid = int(data.get("sub"))
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    q = text(
+        """
+        SELECT journal_id, content, created_at
+        FROM journal
+        WHERE user_id = :uid AND (deleted_at IS NULL)
+        ORDER BY created_at DESC
+        LIMIT :lim
+        """
+    )
+    with mobile_engine.connect() as conn:
+        rows = conn.execute(q, {"uid": uid, "lim": limit}).mappings()
+        return [
+            {
+                "journal_id": r["journal_id"],
+                "content": r["content"],
+                "created_at": r["created_at"].strftime("%Y-%m-%dT%H:%M:%S") if r["created_at"] else None,
+            }
+            for r in rows
+        ]
+
+@app.get("/api/journals/{journal_id}")
+def get_journal(journal_id: int, token: str = Depends(oauth2_scheme)):
+    try:
+        data = decode_token(token)
+        uid = int(data.get("sub"))
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    q = text(
+        """
+        SELECT journal_id, content, created_at
+        FROM journal
+        WHERE journal_id = :jid AND user_id = :uid AND (deleted_at IS NULL)
+        LIMIT 1
+        """
+    )
+    with mobile_engine.connect() as conn:
+        row = conn.execute(q, {"jid": journal_id, "uid": uid}).mappings().first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Journal not found")
+        return {
+            "journal_id": row["journal_id"],
+            "content": row["content"],
+            "created_at": row["created_at"].strftime("%Y-%m-%dT%H:%M:%S") if row["created_at"] else None,
+        }
 
 # -----------------------------
 # AI Summaries (heuristic fallback)

@@ -13,6 +13,7 @@ import { Icon } from "@/components/ui/icon"
 import { LinearGradient } from "expo-linear-gradient"
 
 import * as Haptics from "expo-haptics"
+import * as SecureStore from "expo-secure-store"
 import { useFocusEffect } from '@react-navigation/native'
 
 const { width } = Dimensions.get("window")
@@ -51,6 +52,38 @@ export default function EnhancedDashboardScreen() {
   const [currentStreak] = useState(5)
   const [gridW, setGridW] = useState(0)
   const API = process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8010'
+  const [displayName, setDisplayName] = useState<string>("")
+  const getAuthToken = useCallback(async (): Promise<string | null> => {
+    if (Platform.OS === 'web') {
+      try { return (window as any)?.localStorage?.getItem('auth_token') || null } catch { return null }
+    }
+    try { return await SecureStore.getItemAsync('auth_token') } catch { return null }
+  }, [])
+  const decodeJwtName = useCallback((t: string): string | null => {
+    try {
+      const p = t.split('.')[1]
+      if (!p) return null
+      const s = p.replace(/-/g, '+').replace(/_/g, '/')
+      const pad = s.length % 4 ? s + '='.repeat(4 - (s.length % 4)) : s
+      const json = typeof atob === 'function' ? atob(pad) : ''
+      if (!json) return null
+      const obj = JSON.parse(json)
+      return obj?.nickname || obj?.name || null
+    } catch { return null }
+  }, [])
+  const fetchCurrentUser = useCallback(async () => {
+    try {
+      const tok = await getAuthToken()
+      if (!tok) return
+      const localName = Platform.OS === 'web' ? decodeJwtName(tok) : null
+      if (localName) setDisplayName((prev) => prev || localName)
+      const res = await fetch(`${API}/api/auth/mobile/me`, { headers: { Authorization: `Bearer ${tok}` } })
+      if (!res.ok) return
+      const d = await res.json()
+      setDisplayName(d?.nickname || d?.name || localName || "Student")
+    } catch {}
+  }, [API, getAuthToken, decodeJwtName])
+  useEffect(() => { fetchCurrentUser() }, [fetchCurrentUser])
 
   useEffect(() => {
     fetch(`${API}/health`)
@@ -351,7 +384,7 @@ export default function EnhancedDashboardScreen() {
                 {greeting.text}
               </ThemedText>
               <ThemedText type="title" style={styles.greetingTitle}>
-                Hyun
+                {displayName || "Student"}
               </ThemedText>
               <ThemedText style={[styles.dateText, { color: palette.muted }]}>
                 {now.toLocaleDateString("en-US", {

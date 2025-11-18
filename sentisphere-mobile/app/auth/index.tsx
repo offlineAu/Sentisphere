@@ -82,7 +82,15 @@ export default function AuthScreen() {
   }, [mode])
 
   const saveToken = async (t: string) => {
-    try { await SecureStore.setItemAsync('auth_token', t) } catch {}
+    try {
+      await SecureStore.setItemAsync('auth_token', t)
+    } catch {}
+    // Also persist for web
+    try {
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.localStorage?.setItem('auth_token', t)
+      }
+    } catch {}
   }
 
   const showToast = (message: string) => {
