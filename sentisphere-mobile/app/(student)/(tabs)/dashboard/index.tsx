@@ -1,12 +1,12 @@
 "use client"
 
-import { StyleSheet, View, ScrollView, Dimensions, Pressable, Animated, Easing, Platform, useWindowDimensions, Share, Linking } from "react-native"
+import { StyleSheet, View, ScrollView, Dimensions, Pressable, Animated, Easing, Platform, useWindowDimensions, Share, Linking, Image } from "react-native"
 import { useEffect, useState, useRef, useCallback } from "react"
 import { ThemedView } from "@/components/themed-view"
 import { ThemedText } from "@/components/themed-text"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Link } from "expo-router"
+import { Link, router } from "expo-router"
 import { useColorScheme } from "@/hooks/use-color-scheme"
 import { Colors } from "@/constants/theme"
 import { Icon } from "@/components/ui/icon"
@@ -59,6 +59,9 @@ export default function EnhancedDashboardScreen() {
     }
     try { return await SecureStore.getItemAsync('auth_token') } catch { return null }
   }, [])
+
+  // Logout confirmation overlay
+  // Legacy overlay removed in favor of dedicated /logout page
   const decodeJwtName = useCallback((t: string): string | null => {
     try {
       const p = t.split('.')[1]
@@ -84,6 +87,18 @@ export default function EnhancedDashboardScreen() {
     } catch {}
   }, [API, getAuthToken, decodeJwtName])
   useEffect(() => { fetchCurrentUser() }, [fetchCurrentUser])
+
+  const logout = useCallback(async () => {
+    try {
+      if (Platform.OS === 'web') {
+        try { (window as any)?.localStorage?.removeItem('auth_token') } catch {}
+      } else {
+        try { await SecureStore.deleteItemAsync('auth_token') } catch {}
+      }
+    } finally {
+      router.replace('/auth')
+    }
+  }, [])
 
   useEffect(() => {
     fetch(`${API}/health`)
@@ -394,14 +409,25 @@ export default function EnhancedDashboardScreen() {
                 })}
               </ThemedText>
             </View>
-            <Pressable
-              accessibilityLabel="Notifications"
-              onPressIn={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} } }}
-              hitSlop={8}
-              style={({ pressed }) => [styles.notifBtn, pressed && { opacity: 0.85 }]}
-            >
-              <Icon name="bell" size={20} color={palette.text} />
-            </Pressable>
+            <View style={styles.headerActions}>
+              <Pressable
+                accessibilityLabel="Notifications"
+                onPressIn={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} } }}
+                hitSlop={8}
+                style={({ pressed }) => [styles.notifBtn, pressed && { opacity: 0.85 }]}
+              >
+                <Icon name="bell" size={20} color={palette.text} />
+              </Pressable>
+              <Pressable
+                accessibilityLabel="Log out"
+                onPressIn={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} } }}
+                onPress={() => router.push('/logout')}
+                hitSlop={8}
+                style={({ pressed }) => [styles.notifBtn, pressed && { opacity: 0.85 }]}
+              >
+                <Icon name="log-out" size={20} color={palette.text} />
+              </Pressable>
+            </View>
           </View>
         </Animated.View>
         <View style={styles.sectionSpacer} />
@@ -800,8 +826,8 @@ export default function EnhancedDashboardScreen() {
           </Card>
         )}
 
-        
-      </ScrollView>
+              </ScrollView>
+      {/* Logout overlay removed; handled by /logout route */}
     </ThemedView>
   )
 }
@@ -846,6 +872,11 @@ const styles = StyleSheet.create({
   greetingText: {
     flex: 1,
   },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   greetingTitle: {
     fontSize: 28,
     fontFamily: "Inter_700Bold",
@@ -866,6 +897,23 @@ const styles = StyleSheet.create({
   notifBtn: {
     padding: 8,
     borderRadius: 12,
+  },
+  logoutOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+    zIndex: 9999,
+  },
+  logoutBottom: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 24,
   },
   dateText: {
     fontSize: 12,

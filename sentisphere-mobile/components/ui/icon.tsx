@@ -34,6 +34,7 @@ import {
   PartyPopper,
   Globe2,
   Smile,
+  LogOut,
 } from 'lucide-react-native';
 
 type IconProps = {
@@ -71,7 +72,8 @@ type IconProps = {
     | 'ticket'
     | 'party-popper'
     | 'globe-2'
-    | 'smile';
+    | 'smile'
+    | 'log-out';
   size?: number;
   color?: string;
   fill?: string;
@@ -112,6 +114,7 @@ const icons: Record<string, any> = {
   'party-popper': PartyPopper,
   'globe-2': Globe2,
   'smile': Smile,
+  'log-out': LogOut,
 };
 
 export function Icon({ name, size = 20, color, fill }: IconProps) {
@@ -152,6 +155,7 @@ export function Icon({ name, size = 20, color, fill }: IconProps) {
     'party-popper': 'gift',
     'globe-2': 'globe',
     smile: 'smile',
+    'log-out': 'log-out',
   };
   const featherName = featherNameMap[name] ?? 'circle';
   return <Feather name={featherName} size={size} color={color} />;

@@ -51,19 +51,22 @@ class Settings(BaseSettings):
 def _load_settings() -> "Settings":
     s = Settings()
     origins = os.getenv("FRONTEND_ORIGINS") or os.getenv("FRONTEND_ORIGIN")
+    dev_defaults = [
+        "http://localhost:5173",
+        "http://localhost:8000",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:8000",
+        "http://localhost:8081",
+        "http://127.0.0.1:8081",
+        "http://localhost:8010",
+        "http://127.0.0.1:8010",
+    ]
     if origins:
-        s.CORS_ORIGINS = [o.strip() for o in origins.split(",") if o.strip()]
+        provided = [o.strip() for o in origins.split(",") if o.strip()]
+        # Always include dev defaults to prevent missing headers in local testing
+        s.CORS_ORIGINS = sorted(set(provided + dev_defaults))
     else:
-        s.CORS_ORIGINS = [
-            "http://localhost:5173",
-            "http://localhost:8000",
-            "http://127.0.0.1:5173",
-            "http://127.0.0.1:8000",
-            "http://localhost:8081",
-            "http://127.0.0.1:8081",
-            "http://localhost:8010",
-            "http://127.0.0.1:8010",
-        ]
+        s.CORS_ORIGINS = dev_defaults
     return s
 
 settings = _load_settings()
