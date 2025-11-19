@@ -377,7 +377,7 @@ function Reports() {
     </div>
   );
 
-  const itemsPerPage = 6;
+  const itemsPerPage = 4;
   const sortedTrendWeeks = [...trendWeeks].sort((a, b) => new Date(b.week_start).getTime() - new Date(a.week_start).getTime());
   const maxPage = Math.max(0, Math.ceil(sortedTrendWeeks.length / itemsPerPage) - 1);
   const startIndex = page * itemsPerPage;
@@ -450,7 +450,7 @@ function Reports() {
         <div className="space-y-4">
           <div className="bg-white rounded-2xl shadow p-4 w-full max-w-full">
             <div className="flex justify-between items-center mb-2">
-              <h2 className={styles.sectionTitle}>Wellness Trends</h2>
+              <h2 className={styles.sectionTitle}>Trends</h2>
               <div className="flex items-center gap-2">
                 <button
                   className={`p-2 rounded-full border ${page === 0 ? "opacity-40 cursor-not-allowed" : "hover:bg-gray-100"}`}
