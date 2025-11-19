@@ -33,7 +33,16 @@ class User(Base):
     user_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     email: Mapped[Optional[str]] = mapped_column(String(100), unique=True)
     name: Mapped[Optional[str]] = mapped_column(String(100))
-    role: Mapped[UserRole] = mapped_column(Enum(UserRole, name="user_role", native_enum=False), nullable=False)
+    role: Mapped[UserRole] = mapped_column(
+        Enum(
+            UserRole,
+            name="user_role",
+            native_enum=False,
+            values_callable=lambda e: [m.value for m in e],
+            validate_strings=True,
+        ),
+        nullable=False,
+    )
     password_hash: Mapped[Optional[str]] = mapped_column(String(255))
     nickname: Mapped[Optional[str]] = mapped_column(String(50))
     last_login: Mapped[Optional[datetime]] = mapped_column(DateTime)

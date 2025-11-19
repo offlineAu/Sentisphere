@@ -15,6 +15,7 @@ import csv
 import logging
 from fastapi.security import OAuth2PasswordBearer
 
+
 from app.core.config import settings
 from app.db.database import engine, ENGINE_INIT_ERROR_MSG
 from app.db.mobile_database import mobile_engine
@@ -58,6 +59,8 @@ from app.services.journal_service import JournalService
 from app.services.jwt import decode_token
 from app.services.narrative_insight_service import NarrativeInsightService
 from app.services.report_service import ReportService
+import app.models
+from app.services.counselor_report_service import CounselorReportService
 
 BASE_DIR = Path(__file__).resolve().parent
 EVENTS_FILE = BASE_DIR / "events.json"
@@ -319,6 +322,7 @@ def mood_trend(
     ]
 
 
+@app.get("/api/alerts")
 @app.get("/alerts")
 def list_alerts(
     limit: int = Query(100, ge=1, le=1000),
@@ -335,6 +339,7 @@ def list_alerts(
     ]
 
 
+@app.get("/api/recent-alerts")
 @app.get("/recent-alerts")
 def recent_alerts(
     limit: int = Query(10, ge=1, le=100),
@@ -354,6 +359,7 @@ def recent_alerts(
     ]
 
 
+@app.get("/api/all-alerts")
 @app.get("/all-alerts")
 def all_alerts(
     limit: int = Query(1000, ge=1, le=2000),
@@ -370,6 +376,7 @@ def all_alerts(
     ]
 
 
+@app.get("/api/students-monitored")
 @app.get("/students-monitored")
 def students_monitored(
     _user: User = Depends(require_counselor),
@@ -382,6 +389,7 @@ def students_monitored(
     return {"count": int(count)}
 
 
+@app.get("/api/this-week-checkins")
 @app.get("/this-week-checkins")
 def this_week_checkins(
     _user: User = Depends(require_counselor),
@@ -396,6 +404,7 @@ def this_week_checkins(
     return {"count": int(count)}
 
 
+@app.get("/api/open-appointments")
 @app.get("/open-appointments")
 def open_appointments(
     _user: User = Depends(require_counselor),
@@ -412,6 +421,7 @@ def open_appointments(
     return {"count": int(count)}
 
 
+@app.get("/api/high-risk-flags")
 @app.get("/high-risk-flags")
 def high_risk_flags(
     _user: User = Depends(require_counselor),
@@ -439,6 +449,7 @@ def high_risk_flags(
     return {"count": int(alert_count + journal_count + checkin_count)}
 
 
+@app.get("/api/sentiments")
 @app.get("/sentiments")
 def sentiment_breakdown(
     period: str = Query("month", enum=["week", "month", "year"]),
@@ -469,6 +480,7 @@ def sentiment_breakdown(
     return [{"name": row["sentiment"], "value": row["value"]} for row in rows]
 
 
+@app.get("/api/checkin-breakdown")
 @app.get("/checkin-breakdown")
 def checkin_breakdown(
     period: str = Query("month", enum=["week", "month", "year"]),
@@ -828,6 +840,7 @@ def _ensure_conversation_access(
 def list_conversations(
     include_messages: bool = Query(False),
     initiator_user_id: Optional[int] = Query(None),
+    user_id: Optional[int] = Query(None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -836,6 +849,8 @@ def list_conversations(
         filter_user_id = current_user.user_id
     elif initiator_user_id is not None:
         filter_user_id = initiator_user_id
+    elif user_id is not None:
+        filter_user_id = user_id
 
     return ConversationService.list_conversations(
         db,
@@ -1680,6 +1695,26 @@ def behavior_insights(current_user: str = Depends(get_current_user)):
     ]
 
 
+@app.get("/api/ai/sentiment-summary")
+def ai_sentiment_summary(
+    period: str = Query("month", enum=["week", "month", "year"]),
+    current_user: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    days_map = {"week": 7, "month": 30, "year": 365}
+    days = days_map.get(period, 30)
+    return NarrativeInsightService.behavior_highlights(db, days=days)
+
+
+@app.get("/api/ai/mood-summary")
+def ai_mood_summary(
+    period: str = Query("month", enum=["week", "month", "year"]),
+    current_user: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    days_map = {"week": 7, "month": 30, "year": 365}
+    days = days_map.get(period, 30)
+    return NarrativeInsightService.mood_shift_summary(db, days=days)
 @app.get("/api/events")
 def list_events(current_user: str = Depends(get_current_user)):
     return _load_events()
