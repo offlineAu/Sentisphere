@@ -2,7 +2,10 @@ import { StyleSheet } from 'react-native';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Easing, Platform, Pressable, ScrollView, View, Modal, ActivityIndicator, LayoutAnimation, UIManager, TextInput, Share, KeyboardAvoidingView, Image } from 'react-native';
+import { Animated, Easing, Platform, Pressable, ScrollView, View, Modal, ActivityIndicator, LayoutAnimation, UIManager, TextInput, KeyboardAvoidingView, Image } from 'react-native';
+import * as Print from 'expo-print';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 import * as Haptics from 'expo-haptics';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -142,11 +145,102 @@ export default function AppointmentsScreen() {
       return;
     }
     try {
-      const summary = `Appointment Request\n\nStudent Information\n- Full Name: ${fullName}\n- Student ID: ${studentId}\n- Email: ${email}\n- Phone: ${phone || '-'}\n\nMeeting Preferences\n- Preferred Date: ${preferredDate || '-'}\n- Preferred Time: ${preferredTime || '-'}\n- Preferred Counselor: ${preferredCounselor || '-'}\n- Urgency: ${urgency}\n\nMeeting Details\n- Reason: ${reason}\n- Previous Sessions: ${previous}\n- Additional Info: ${additional || '-'}`;
-      await Share.share({ message: summary });
+      const esc = (s: any) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const generatedAt = new Date().toLocaleString();
+      const brand = '#10B981';
+      const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    @page { margin: 40px 28px; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Arial, sans-serif; color: #111827; }
+    .wm { position: fixed; top: 42%; left: 50%; transform: translate(-50%,-50%) rotate(-30deg); font-size: 120px; font-weight: 800; color: #111827; opacity: 0.06; z-index: 0; white-space: nowrap; }
+    .content { position: relative; z-index: 1; }
+    .header { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 3px solid ${brand}; }
+    .title { font-size: 18px; font-weight: 800; }
+    .brand { color: ${brand}; }
+    .meta { color: #6B7280; font-size: 11px; }
+    .section { margin: 16px 0 8px; }
+    .section h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: #374151; }
+    table { width: 100%; border-collapse: collapse; }
+    td { padding: 4px 0; vertical-align: top; font-size: 12px; }
+    .label { color: #6B7280; width: 42%; }
+    .value { color: #111827; font-weight: 600; }
+    .box { padding: 8px 10px; border: 1px solid #E5E7EB; border-radius: 8px; background: #FAFAFA; }
+    .footer { margin-top: 18px; text-align: right; color: #6B7280; font-size: 10px; }
+  </style>
+  <title>Sentisphere Appointment Request</title>
+  </head>
+  <body>
+    <div class="wm">Sentisphere</div>
+    <div class="content">
+      <div class="header">
+        <div class="title"><span class="brand">Sentisphere</span> Appointment Request</div>
+        <div class="meta">Generated: ${esc(generatedAt)}</div>
+      </div>
+
+      <div class="section">
+        <h3>Student Information</h3>
+        <table>
+          <tr><td class="label">Full Name</td><td class="value">${esc(fullName)}</td></tr>
+          <tr><td class="label">Student ID</td><td class="value">${esc(studentId)}</td></tr>
+          <tr><td class="label">Email</td><td class="value">${esc(email)}</td></tr>
+          <tr><td class="label">Phone</td><td class="value">${esc(phone || '-')}</td></tr>
+        </table>
+      </div>
+
+      <div class="section">
+        <h3>Meeting Preferences</h3>
+        <table>
+          <tr><td class="label">Preferred Date</td><td class="value">${esc(preferredDate || '-')}</td></tr>
+          <tr><td class="label">Preferred Time</td><td class="value">${esc(preferredTime || '-')}</td></tr>
+          <tr><td class="label">Preferred Counselor</td><td class="value">${esc(preferredCounselor || '-')}</td></tr>
+          <tr><td class="label">Urgency</td><td class="value">${esc(urgency)}</td></tr>
+        </table>
+      </div>
+
+      <div class="section">
+        <h3>Meeting Details</h3>
+        <div class="box">
+          <div><span class="label">Reason:</span> <span class="value">${esc(reason)}</span></div>
+          <div><span class="label">Previous Sessions:</span> <span class="value">${esc(previous)}</span></div>
+          <div><span class="label">Additional Info:</span> <span class="value">${esc(additional || '-')}</span></div>
+        </div>
+      </div>
+
+      <div class="footer">© ${new Date().getFullYear()} Sentisphere • student counseling services</div>
+    </div>
+  </body>
+</html>`;
+
+      if (Platform.OS === 'web') {
+        // Use browser print dialog to save as PDF
+        await Print.printAsync({ html });
+        showToast('Use the browser dialog to save as PDF');
+        return;
+      }
+
+      const file = await Print.printToFileAsync({ html });
+      const safe = (studentId || fullName || 'student').replace(/[^a-z0-9_-]+/gi, '_');
+      const FS = FileSystem as any;
+      const dir: string | null = (FS?.documentDirectory as string | null) ?? (FS?.cacheDirectory as string | null) ?? null;
+      if (!dir) { showToast('Storage unavailable'); return; }
+      const baseDir = (dir as string).endsWith('/') ? dir : `${dir}/`;
+      const target = `${baseDir}Sentisphere_Appointment_${safe}.pdf`;
+      try { await FileSystem.deleteAsync(target, { idempotent: true }); } catch {}
+      await FileSystem.moveAsync({ from: file.uri, to: target });
+
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) {
+        await Sharing.shareAsync(target, { mimeType: 'application/pdf', dialogTitle: 'Share Appointment PDF', UTI: 'com.adobe.pdf' });
+      }
       await doHaptic('success');
-      showToast('PDF generated');
-    } catch {}
+      showToast('PDF ready');
+    } catch (e) {
+      showToast('Failed to generate PDF');
+    }
   };
 
   const next = async () => {
@@ -195,7 +289,7 @@ export default function AppointmentsScreen() {
           <View style={{ height: 8 }} />
           <View style={{ alignItems: 'center', justifyContent: 'center', marginTop: 4, marginBottom: 10 }}>
             <Image
-              source={{ uri: 'https://cdn-icons-png.flaticon.com/512/668/668278.png' }}
+              source={require('../../../assets/images/calendar green.png')}
               style={{ width: 56, height: 56, marginBottom: 6 }}
               resizeMode="contain"
               accessible

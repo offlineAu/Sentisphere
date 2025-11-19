@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { View, TextInput, StyleSheet, ScrollView, Platform, Animated, Easing, Pressable, LayoutChangeEvent } from 'react-native'
+import { View, TextInput, StyleSheet, ScrollView, Platform, Animated, Easing, Pressable, LayoutChangeEvent, Image } from 'react-native'
 import { LinearGradient } from 'expo-linear-gradient'
 import { ThemedView } from '@/components/themed-view'
 import { ThemedText } from '@/components/themed-text'
@@ -8,7 +8,6 @@ import { useColorScheme } from '@/hooks/use-color-scheme'
 import { Colors } from '@/constants/theme'
 import { router } from 'expo-router'
 import * as SecureStore from 'expo-secure-store'
-import { SuccessDialog } from '@/components/ui/success-dialog'
 import { LoadingSplash } from '@/components/ui/loading-splash'
 
 export default function AuthScreen() {
@@ -24,6 +23,7 @@ export default function AuthScreen() {
   const [toastMessage, setToastMessage] = useState<string | null>(null)
   const [attempting, setAttempting] = useState(false)
   const [successNickname, setSuccessNickname] = useState<string | null>(null)
+  const [welcomeVisible, setWelcomeVisible] = useState(false)
   const [showSplash, setShowSplash] = useState(false)
   const [splashPhase, setSplashPhase] = useState<'loading' | 'success'>('loading')
   const toastOpacity = useRef(new Animated.Value(0)).current
@@ -31,7 +31,10 @@ export default function AuthScreen() {
   const segmentAnim = useRef(new Animated.Value(0)).current
   const formAnim = useRef(new Animated.Value(1)).current
   const [segmentWidth, setSegmentWidth] = useState(0)
-  const AnimatedGradient = Animated.createAnimatedComponent(LinearGradient)
+  const successAnim = useRef(new Animated.Value(0)).current
+  const welcomeAnim = useRef(new Animated.Value(0)).current
+  const [oopsVisible, setOopsVisible] = useState(false)
+  const oopsAnim = useRef(new Animated.Value(0)).current
   
 
   const post = async (path: string, body: any) => {
@@ -57,29 +60,48 @@ export default function AuthScreen() {
   }, [])
 
   useEffect(() => {
+    // Indicator subtle bounce (iOS-safe: transform only)
+    segmentAnim.stopAnimation()
     Animated.spring(segmentAnim, {
       toValue: mode === 'signup' ? 0 : 1,
-      damping: 12,
-      stiffness: 180,
-      mass: 0.6,
+      stiffness: 220,
+      damping: 22,
+      mass: 0.9,
+      overshootClamping: false,
       useNativeDriver: true,
     }).start()
 
-    Animated.sequence([
-      Animated.timing(formAnim, {
-        toValue: 0,
-        duration: 120,
-        easing: Easing.out(Easing.quad),
-        useNativeDriver: true,
-      }),
-      Animated.timing(formAnim, {
-        toValue: 1,
-        duration: 180,
-        easing: Easing.out(Easing.quad),
-        useNativeDriver: true,
-      }),
-    ]).start()
+    // Form subtle fade/slide
+    formAnim.stopAnimation()
+    formAnim.setValue(0)
+    Animated.timing(formAnim, {
+      toValue: 1,
+      duration: 180,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: true,
+    }).start()
   }, [mode])
+
+  useEffect(() => {
+    if (successNickname) {
+      successAnim.setValue(0)
+      Animated.timing(successAnim, { toValue: 1, duration: 360, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start()
+    }
+  }, [successNickname])
+
+  useEffect(() => {
+    if (welcomeVisible) {
+      welcomeAnim.setValue(0)
+      Animated.timing(welcomeAnim, { toValue: 1, duration: 360, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start()
+    }
+  }, [welcomeVisible])
+
+  useEffect(() => {
+    if (oopsVisible) {
+      oopsAnim.setValue(0)
+      Animated.timing(oopsAnim, { toValue: 1, duration: 360, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start()
+    }
+  }, [oopsVisible])
 
   const saveToken = async (t: string) => {
     try {
@@ -168,10 +190,16 @@ export default function AuthScreen() {
       setToken(tok)
       if (tok) { await saveToken(tok) }
       setStatus('Signed in')
-      router.replace('/(student)/(tabs)/dashboard')
+      setWelcomeVisible(true)
     } catch (e: any) {
       setStatus(null)
-      showToast(e?.message || 'Login failed')
+      const msg = (e?.message || '').toString()
+      const notRegistered = /not\s*registered/i.test(msg) || /user\s*not\s*found/i.test(msg) || /\/api\/auth\/mobile\/login\s+failed:\s+(404|401)/i.test(msg)
+      if (notRegistered) {
+        setOopsVisible(true)
+      } else {
+        showToast(msg || 'Login failed')
+      }
     } finally {
       setAttempting(false)
     }
@@ -181,31 +209,43 @@ export default function AuthScreen() {
     <ThemedView style={styles.whiteScreen}>
       <ScrollView contentContainerStyle={styles.screen} keyboardShouldPersistTaps="handled">
         <View style={styles.stack}>
-          <ThemedText type="title" style={[styles.title, { fontSize: 40 }]}>Welcome Student</ThemedText>
+          <View style={{ alignItems: 'center' }}>
+            <Image source={require('../../assets/images/Sentisphere Logo Only.png')} style={{ width: 200, height: 200, marginBottom: -20 }} accessibilityLabel="Login" />
+          </View>
+          <ThemedText type="title" style={[styles.title, { fontSize: 30 }]}>Welcome Student</ThemedText>
 
           <View
             style={styles.segmentContainer}
             onLayout={(event: LayoutChangeEvent) => {
-              setSegmentWidth(event.nativeEvent.layout.width)
+              const w = event.nativeEvent.layout.width
+              setSegmentWidth(w)
+              // Ensure indicator is positioned correctly immediately on first layout
+              segmentAnim.setValue(mode === 'signup' ? 0 : 1)
             }}
           >
             {segmentWidth > 0 ? (
-              <AnimatedGradient
-                colors={['#0d8c4f', '#11a45b']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
+              <Animated.View
                 pointerEvents="none"
                 style={[
                   styles.segmentIndicator,
                   {
-                    width: Math.max((segmentWidth - 8) / 2, 0),
-                    left: segmentAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [4, 4 + Math.max((segmentWidth - 8) / 2, 0)],
-                    }),
+                    width: Math.max(Math.round((segmentWidth - 8) / 2), 0),
+                    transform: [{
+                      translateX: segmentAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [4, 4 + Math.max((segmentWidth - 8) / 2, 0)],
+                      }) as any,
+                    }],
                   },
                 ]}
-              />
+              >
+                <LinearGradient
+                  colors={['#0d8c4f', '#11a45b']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={StyleSheet.absoluteFillObject as any}
+                />
+              </Animated.View>
             ) : null}
             <Pressable style={styles.segmentButton} onPress={() => setMode('signup')}>
               <ThemedText style={[styles.segmentLabel, mode === 'signup' && styles.segmentLabelActive]}>Sign Up</ThemedText>
@@ -271,22 +311,74 @@ export default function AuthScreen() {
         </Animated.View>
       )}
 
-      <SuccessDialog
-        visible={Boolean(successNickname)}
-        title={`🎉 Welcome to Sentisphere, ${successNickname || ''}!`}
-        message={
-          <ThemedText style={{ textAlign: 'center', color: '#4B5563' }}>
-            You're all set. Tap continue to explore your dashboard.
-          </ThemedText>
-        }
-        onContinue={() => {
-          setSuccessNickname(null)
-          router.replace('/(student)/(tabs)/dashboard')
-        }}
-        onRequestClose={() => {
-          setSuccessNickname(null)
-        }}
-      />
+      {Boolean(successNickname) && (
+        <View style={styles.successOverlay}>
+          <LinearGradient colors={["#FFFFFF", "#ECFDF5"]} style={StyleSheet.absoluteFillObject} />
+          <Animated.View style={{ alignItems: 'center', gap: 8, opacity: successAnim, transform: [{ scale: successAnim.interpolate({ inputRange: [0,1], outputRange: [0.96, 1] }) }] }}>
+            <Image source={require('../../assets/images/congrats.png')} style={{ width: 120, height: 120 }} accessibilityLabel="Success" />
+            <ThemedText style={{ fontSize: 20, fontFamily: 'Inter_700Bold', color: '#111827', marginTop: 6 }}>
+              Welcome {successNickname}!
+            </ThemedText>
+            <ThemedText style={{ fontSize: 13, color: '#6B7280', textAlign: 'center', marginHorizontal: 24 }}>
+              You're all set. Tap continue to explore your dashboard.
+            </ThemedText>
+          </Animated.View>
+          <View style={styles.successBottom}>
+            <Button
+              title="Continue"
+              onPress={() => { setSuccessNickname(null); router.replace('/(student)/(tabs)/dashboard') }}
+              style={{ paddingVertical: 14, borderRadius: 999, alignSelf: 'stretch' }}
+              textStyle={{ fontSize: 14 }}
+            />
+          </View>
+        </View>
+      )}
+
+      {welcomeVisible && (
+        <View style={styles.successOverlay}>
+          <LinearGradient colors={["#FFFFFF", "#ECFDF5"]} style={StyleSheet.absoluteFillObject} />
+          <Animated.View style={{ alignItems: 'center', gap: 8, opacity: welcomeAnim, transform: [{ scale: welcomeAnim.interpolate({ inputRange: [0,1], outputRange: [0.96, 1] }) }] }}>
+            <Image source={require('../../assets/images/welcome back.png')} style={{ width: 120, height: 120 }} accessibilityLabel="Welcome back" />
+            <ThemedText style={{ fontSize: 20, fontFamily: 'Inter_700Bold', color: '#111827', marginTop: 6 }}>
+              Welcome back to Sentisphere!
+            </ThemedText>
+            <ThemedText style={{ fontSize: 13, color: '#6B7280', textAlign: 'center', marginHorizontal: 24 }}>
+              Glad to see you again.
+            </ThemedText>
+          </Animated.View>
+          <View style={styles.successBottom}>
+            <Button
+              title="Continue"
+              onPress={() => { setWelcomeVisible(false); router.replace('/(student)/(tabs)/dashboard') }}
+              style={{ paddingVertical: 14, borderRadius: 999, alignSelf: 'stretch' }}
+              textStyle={{ fontSize: 14 }}
+            />
+          </View>
+        </View>
+      )}
+
+      {oopsVisible && (
+        <View style={styles.successOverlay}>
+          <LinearGradient colors={["#FFFFFF", "#ECFDF5"]} style={StyleSheet.absoluteFillObject} />
+          <Animated.View style={{ alignItems: 'center', gap: 8, opacity: oopsAnim, transform: [{ scale: oopsAnim.interpolate({ inputRange: [0,1], outputRange: [0.96, 1] }) }] }}>
+            <Image source={require('../../assets/images/oops.png')} style={{ width: 120, height: 120 }} accessibilityLabel="Not registered" />
+            <ThemedText style={{ fontSize: 20, fontFamily: 'Inter_700Bold', color: '#111827', marginTop: 6, textAlign: 'center', marginHorizontal: 24 }}>
+              Oops! You're not a registered sentisphere user
+            </ThemedText>
+            <ThemedText style={{ fontSize: 13, color: '#6B7280', textAlign: 'center', marginHorizontal: 24 }}>
+              Please contact your school administrator or sign up to get started.
+            </ThemedText>
+          </Animated.View>
+          <View style={styles.successBottom}>
+            <Button
+              title="Back to Login"
+              onPress={() => { setOopsVisible(false); setMode('login') }}
+              style={{ paddingVertical: 14, borderRadius: 999, alignSelf: 'stretch' }}
+              textStyle={{ fontSize: 14 }}
+            />
+          </View>
+        </View>
+      )}
 
       <LoadingSplash
         visible={showSplash}
@@ -308,6 +400,24 @@ const styles = StyleSheet.create({
   screen: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   stack: { width: '92%', maxWidth: 540 },
   title: { marginBottom: 18, textAlign: 'center', alignSelf: 'center' },
+  successOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+    zIndex: 9999,
+    elevation: 6,
+  },
+  successBottom: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 24,
+  },
   field: { gap: 6, marginBottom: 10 },
   input: {
     borderWidth: 1,
@@ -332,7 +442,8 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 4,
     bottom: 4,
-    borderRadius: 12,
+    borderRadius: 16,
+    overflow: 'hidden',
   },
   segmentButton: {
     flex: 1,
