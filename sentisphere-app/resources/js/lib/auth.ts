@@ -8,7 +8,14 @@ function csrfToken() {
 
 export interface LoginResponse { ok: boolean; error?: string }
 export interface LogoutResponse { ok: boolean }
-export interface SessionStatus { authenticated: boolean }
+export interface SessionUser {
+  user_id: number;
+  email?: string;
+  name?: string;
+  role?: string;
+}
+
+export interface SessionStatus { authenticated: boolean; user?: SessionUser }
 export interface SignupResponse { ok: boolean; user_id?: number; errors?: any; error?: string }
 
 export async function loginFastApi(username: string, password: string): Promise<LoginResponse> {
@@ -49,7 +56,7 @@ export async function logoutFastApi(): Promise<LogoutResponse> {
 export async function sessionStatus(): Promise<SessionStatus> {
   try {
     const tok = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
-    const resp = await api.get<{ user_id: number }>(
+    const resp = await api.get<SessionUser>(
       '/auth/me',
       {
         headers: tok ? { Authorization: `Bearer ${tok}` } : undefined,
@@ -57,7 +64,7 @@ export async function sessionStatus(): Promise<SessionStatus> {
       }
     );
     if (resp.status >= 200 && resp.status < 300 && typeof resp.data?.user_id === 'number') {
-      return { authenticated: true };
+      return { authenticated: true, user: resp.data };
     }
     return { authenticated: false };
   } catch (e) {
