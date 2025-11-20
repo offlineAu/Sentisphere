@@ -13,14 +13,16 @@ import { router } from "@inertiajs/react";
 // Types
 // -----------------------------
 interface Conversation {
-  id: number;
+  conversation_id: number;
   initiator_user_id: number;
   initiator_role: string;
-  subject: string;
+  subject: string | null;
   status: "open" | "ended";
   created_at: string;
-  last_activity_at: string;
-  initiator_nickname: string; // <-- add this
+  last_activity_at: string | null;
+  // Optional nickname; backend conversation payload does not currently include this,
+  // so we treat it as a best-effort label and fall back to subject or id.
+  initiator_nickname?: string;
 }
 
 interface ChatMessage {
@@ -38,10 +40,7 @@ interface ChatMessage {
 export default function Chat() {
   const { open } = useSidebar();
   const [authenticated, setAuthenticated] = useState<boolean>(false);
-  const [userId, setUserId] = useState<number>(() => {
-    const envId = (import.meta as any).env?.VITE_COUNSELOR_USER_ID;
-    return Number(envId) || 1;
-  });
+  const [userId, setUserId] = useState<number | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [activeConversation, setActiveConversation] = useState<number | null>(null);
@@ -60,6 +59,11 @@ export default function Chat() {
       if (!mounted) return;
       if (s?.authenticated) {
         setAuthenticated(true);
+        const idFromSession =
+          (s as any)?.user?.id ?? (s as any)?.user?.user_id ?? null;
+        if (idFromSession != null) {
+          setUserId(Number(idFromSession));
+        }
       } else {
         router.visit('/login');
       }
@@ -69,17 +73,15 @@ export default function Chat() {
 
   // Fetch conversations
   useEffect(() => {
-    if (!authenticated) return;
+    if (!authenticated || userId == null) return;
     
     setLoading(true);
     const fetchConversations = async () => {
       try {
-        const res = await api.get<Conversation[]>(`/conversations`, {
-          params: { user_id: userId },
-        });
+        const res = await api.get<Conversation[]>(`/conversations`);
         setConversations(res.data);
         if (res.data.length > 0) {
-          setActiveConversation(res.data[0].id);
+          setActiveConversation(res.data[0].conversation_id);
         }
       } catch (err) {
         console.error("Error fetching conversations:", err);
@@ -103,11 +105,11 @@ export default function Chat() {
         setUnreadCounts((prev) => ({ ...prev, [activeConversation]: unread }));
       })
       .catch((err) => console.error("Error fetching messages:", err));
-  }, [activeConversation]);
+  }, [activeConversation, authenticated, userId]);
 
   // Fetch participant nickname when conversation changes
   const currentConversation = conversations.find(
-    (c) => c.id === activeConversation
+    (c) => c.conversation_id === activeConversation
   );
 
   useEffect(() => {
@@ -125,7 +127,7 @@ export default function Chat() {
   useEffect(() => {
     if (conversations.length === 0 || !authenticated) return;
     const poll = async () => {
-      const ids = conversations.map((c) => c.id);
+      const ids = conversations.map((c) => c.conversation_id);
       for (const id of ids) {
         try {
           const { data } = await api.get<ChatMessage[]>(`/conversations/${id}/messages`);
@@ -225,7 +227,7 @@ export default function Chat() {
           {/* Chat Section */}
           <div className="flex gap-4 min-h-0 items-stretch overflow-hidden">
             {/* Sidebar (Conversations) */}
-            <div className="w-[320px] md:w-[340px] flex-none min-h-0 min-w-0">
+            <div className="hidden md:block md:w-[340px] flex-none min-h-0 min-w-0">
               <div className="bg-white rounded-2xl shadow p-4 h-[82vh] min-h-0 flex flex-col overflow-hidden">
                 <div className="flex items-center gap-2 mb-3 flex-none">
                   <div className="relative flex-1">
@@ -245,62 +247,66 @@ export default function Chat() {
                       .filter((c) => {
                         if (!searchQuery.trim()) return true;
                         const q = searchQuery.toLowerCase();
-                        if ((c.initiator_nickname || "").toLowerCase().includes(q)) return true;
-                        const msgs = messagesByConversation[c.id] || [];
+                        const nickname = (c.initiator_nickname || "").toLowerCase();
+                        const subject = (c.subject || "").toLowerCase();
+                        if (nickname.includes(q) || subject.includes(q)) return true;
+                        const msgs = messagesByConversation[c.conversation_id] || [];
                         return msgs.some((m) => m.content.toLowerCase().includes(q));
                       })
                       .filter((c) => {
                         if (filter === "all") return true;
-                        const unread = unreadCounts[c.id] || 0;
+                        const unread = unreadCounts[c.conversation_id] || 0;
                         return filter === "unread" ? unread > 0 : unread === 0;
                       })
                       .map((c) => {
-                      const total = messagesByConversation[c.id]?.length || 0;
-                      const unread = unreadCounts[c.id] || 0;
-                      const last = (messagesByConversation[c.id] || [])[total - 1];
-                      const isActive = activeConversation === c.id;
+                      const convId = c.conversation_id;
+                      const total = messagesByConversation[convId]?.length || 0;
+                      const unread = unreadCounts[convId] || 0;
+                      const last = (messagesByConversation[convId] || [])[total - 1];
+                      const isActive = activeConversation === convId;
                       return (
                         <li
-                          key={c.id}
+                          key={convId}
                           onClick={() => {
-                            setActiveConversation(c.id);
+                            setActiveConversation(convId);
                             // optimistically clear unread, and notify backend to mark as read
-                            setUnreadCounts((prev) => ({ ...prev, [c.id]: 0 }));
+                            setUnreadCounts((prev) => ({ ...prev, [convId]: 0 }));
                             api
-                              .post(`/conversations/${c.id}/read`, null, { params: { user_id: userId }})
+                              .post(`/conversations/${convId}/read`, null, { params: { user_id: userId }})
                               .catch(() => {/* ignore */});
                           }}
-                          className={`relative pl-4 pr-3 py-3 cursor-pointer text-left transition select-none rounded-md box-border ${
+                          className={`relative pl-4 pr-3 py-3 cursor-pointer text-left transition select-none rounded-xl box-border border ${
                             isActive
-                              ? "bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 text-white shadow-md ring-2 ring-emerald-700/30"
-                              : "bg-transparent text-[#333] hover:bg-[#f9fafb]"
+                              ? "bg-emerald-50 border-emerald-300 ring-2 ring-emerald-400 text-emerald-900"
+                              : "bg-white hover:bg-gray-50 border-gray-200 text-[#333]"
                           }`}
                         >
-                          {isActive && (
-                            <span className="absolute left-0 top-0 bottom-0 w-1 bg-white/40 rounded-r"></span>
-                          )}
                           <div className="flex items-start gap-3">
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center justify-between gap-3">
-                                <span className="font-medium truncate">
-                                  {c.initiator_nickname}
-                                </span>
+                                <div className="min-w-0">
+                                  <div className="font-semibold text-sm text-gray-900 truncate">{c.subject || `Conversation #${convId}`}</div>
+                                  <div className="text-[12px] text-gray-500 truncate">{c.initiator_nickname || ''}</div>
+                                </div>
                                 <div className="flex items-center gap-3 shrink-0">
                                   <span className="text-xs opacity-75">
-                                    {last ? new Date(last.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                                    {(() => {
+                                      const t = last?.timestamp || c.last_activity_at;
+                                      return t ? new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+                                    })()}
                                   </span>
                                   <span
                                     className={`text-[10px] px-2 py-[2px] rounded-full uppercase tracking-wide ${
                                       c.status === "open"
                                         ? isActive
-                                          ? "bg-white/20 text-white border border-white/30"
+                                          ? "bg-emerald-600/10 text-emerald-700 border border-emerald-200"
                                           : "bg-green-100 text-green-700 border border-green-200"
                                         : isActive
-                                        ? "bg-white/20 text-white border border-white/30"
+                                        ? "bg-rose-600/10 text-rose-700 border border-rose-200"
                                         : "bg-red-100 text-red-700 border border-red-200"
                                     }`}
                                   >
-                                    {c.status === "open" ? "Open" : "Ended"}
+                                    {c.status === "open" ? "OPEN" : "ENDED"}
                                   </span>
                                   {unread > 0 && !isActive && (
                                     <span className="inline-flex items-center justify-center text-[11px] font-semibold text-white bg-red-600 rounded-full min-w-6 h-6 px-2">
@@ -309,7 +315,7 @@ export default function Chat() {
                                   )}
                                 </div>
                               </div>
-                              <div className="mt-1 text-[13px] text-gray-800 truncate" style={{ hyphens: 'none', wordBreak: 'keep-all' }}>
+                              <div className="mt-1 text-[13px] text-gray-700 truncate">
                                 {last ? `${last.sender_id === userId ? 'You: ' : ''}${last.content}` : ''}
                               </div>
                             </div>
@@ -323,21 +329,22 @@ export default function Chat() {
             </div>
 
             {/* Chat Window */}
-            <div className="flex-[1_1_0] min-h-0 min-w-[640px] w-full">
+            <div className="flex-[1_1_0] min-h-0 min-w-0 sm:min-w-[480px] lg:min-w-[640px] w-full">
               <div className="bg-white rounded-2xl shadow flex flex-col h-[82vh] min-h-0 min-w-0 w-full overflow-hidden">
                 {currentConversation ? (
                   <>
                     {/* Chat Header (compact) */}
                     <div className="px-4 py-3 border-b flex items-center justify-between bg-gradient-to-r from-emerald-50 to-transparent flex-none w-full">
                       <div className="min-w-0">
-                        <h2 className="font-semibold text-[15px] text-[#0d8c4f] truncate">{currentConversation.initiator_nickname}</h2>
+                        <h2 className="font-semibold text-[15px] text-[#0d8c4f] truncate">{currentConversation.subject || `Conversation #${currentConversation.conversation_id}`}</h2>
+                        <div className="text-xs text-gray-500 truncate">{participantNickname}</div>
                         <div className="mt-1">
                           <span className={`text-[10px] px-2 py-[2px] rounded-full uppercase tracking-wide ${
                             currentConversation.status === 'open'
                               ? 'bg-green-100 text-green-700 border border-green-200'
                               : 'bg-red-100 text-red-700 border border-red-200'
                           }`}>
-                            {currentConversation.status === 'open' ? 'Open' : 'Ended'}
+                            {currentConversation.status === 'open' ? 'OPEN' : 'ENDED'}
                           </span>
                         </div>
                       </div>
@@ -348,17 +355,17 @@ export default function Chat() {
                     </div>
 
                     {/* Messages */}
-                    <div ref={messagesScrollRef} className="flex-1 min-h-0 min-w-0 w-full max-w-full p-4 overflow-y-scroll space-y-4" style={{ scrollbarGutter: 'stable both-edges' }}>
-                      {messages.  map((m) => (
+                    <div ref={messagesScrollRef} className="flex-1 min-h-0 min-w-0 w-full max-w-full p-4 overflow-y-scroll space-y-3" style={{ scrollbarGutter: 'stable both-edges', scrollBehavior: 'smooth' }}>
+                      {messages.map((m) => (
                         <div
                           key={m.id}
-                          className={`max-w-[70%] px-4 py-2 rounded-2xl shadow-sm break-normal whitespace-pre-wrap hyphens-none overflow-hidden ${
+                          className={`w-fit max-w-[600px] sm:max-w-[68%] px-4 py-2 rounded-2xl shadow-sm whitespace-pre-wrap break-words leading-relaxed overflow-hidden ${
                             m.sender_id === userId
                               ? "bg-[#2563eb] text-white ml-auto rounded-br-md"
                               : "bg-gray-100 text-[#333] mr-auto rounded-bl-md"
                           }`}
                         >
-                          <p className="break-normal whitespace-pre-wrap hyphens-none" style={{ wordBreak: 'keep-all' }}>{m.content}</p>
+                          <p className="whitespace-pre-wrap break-words" style={{ wordBreak: 'break-word' }}>{m.content}</p>
                           <small className="block text-xs opacity-75 mt-1">
                             {new Date(m.timestamp).toLocaleTimeString([], {
                               hour: "2-digit",
@@ -370,7 +377,7 @@ export default function Chat() {
                     </div>
 
                     {/* Input */}
-                    <div className="p-3 border-t flex gap-2 flex-none">
+                    <div className="p-3 border-t flex gap-2 flex-none h-[64px] items-center">
                       <input
                         type="text"
                         value={newMessage}
@@ -383,7 +390,7 @@ export default function Chat() {
                             ? "Type your message..."
                             : "This conversation has ended."
                         }
-                        className={`flex-1 border rounded-xl px-4 py-2 outline-none focus:ring-2 ${
+                        className={`flex-1 h-10 border rounded-xl px-4 py-2 outline-none focus:ring-2 ${
                           currentConversation.status === "open"
                             ? "focus:ring-[#0d8c4f] text-[#222]"
                             : "bg-gray-100 text-gray-400 cursor-not-allowed"
@@ -392,7 +399,7 @@ export default function Chat() {
                       />
                       <button
                         onClick={handleSend}
-                        className={`rounded-xl px-4 flex items-center gap-2 transition ${
+                        className={`rounded-xl px-4 h-10 flex items-center gap-2 transition ${
                           currentConversation.status === "open"
                             ? "bg-[#0d8c4f] text-white hover:bg-[#0b6d3f]"
                             : "bg-gray-300 text-gray-500 cursor-not-allowed"

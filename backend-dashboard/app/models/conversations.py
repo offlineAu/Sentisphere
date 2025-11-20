@@ -26,7 +26,14 @@ class Conversation(Base):
     initiator_role: Mapped[str] = mapped_column(String(20), nullable=False)
     subject: Mapped[Optional[str]] = mapped_column(String(100))
     status: Mapped[ConversationStatus] = mapped_column(
-        Enum(ConversationStatus, name="conversation_status", native_enum=False), nullable=False, server_default="open"
+        Enum(
+            ConversationStatus,
+            name="conversation_status",
+            native_enum=False,
+            values_callable=lambda enum_cls: [e.value for e in enum_cls],
+        ),
+        nullable=False,
+        server_default=ConversationStatus.OPEN.value,
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
     last_activity_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
