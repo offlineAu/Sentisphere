@@ -21,6 +21,7 @@ from app.db.mobile_database import mobile_engine
 from app.db.session import get_db
 from app.api.routes.auth import router as auth_router
 from app.models.alert import Alert, AlertSeverity, AlertStatus
+from app.models.counselor_profile import CounselorProfile
 from app.models.appointment_log import AppointmentLog
 from app.models.checkin_sentiment import CheckinSentiment
 from app.models.conversations import Conversation, ConversationStatus
@@ -58,6 +59,7 @@ from app.services.journal_service import JournalService
 from app.services.jwt import decode_token
 from app.services.narrative_insight_service import NarrativeInsightService
 from app.services.report_service import ReportService
+from app.services.counselor_report_service import CounselorReportService
 
 BASE_DIR = Path(__file__).resolve().parent
 EVENTS_FILE = BASE_DIR / "events.json"
@@ -105,13 +107,13 @@ def get_current_user(
 
 
 def require_counselor(current_user: User = Depends(get_current_user)) -> User:
-    if current_user.role != UserRole.COUNSELOR:
+    if current_user.role != UserRole.counselor:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Counselor access required")
     return current_user
 
 
 def require_student(current_user: User = Depends(get_current_user)) -> User:
-    if current_user.role != UserRole.STUDENT:
+    if current_user.role != UserRole.student:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Student access required")
     return current_user
 
@@ -262,7 +264,7 @@ def create_alert(
     db: Session = Depends(get_db),
 ):
     payload_data = alert_in.model_dump(exclude_unset=True)
-    if current_user.role == UserRole.STUDENT:
+    if current_user.role == UserRole.student:
         if alert_in.user_id and alert_in.user_id != current_user.user_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot report for another user")
         payload_data["user_id"] = current_user.user_id
@@ -335,7 +337,7 @@ def list_alerts(
     ]
 
 
-@app.get("/recent-alerts")
+@app.get("/api/recent-alerts")
 def recent_alerts(
     limit: int = Query(10, ge=1, le=100),
     _user: User = Depends(require_counselor),
@@ -354,7 +356,7 @@ def recent_alerts(
     ]
 
 
-@app.get("/all-alerts")
+@app.get("/api/all-alerts")
 def all_alerts(
     limit: int = Query(1000, ge=1, le=2000),
     _user: User = Depends(require_counselor),
@@ -370,19 +372,19 @@ def all_alerts(
     ]
 
 
-@app.get("/students-monitored")
+@app.get("/api/students-monitored")
 def students_monitored(
     _user: User = Depends(require_counselor),
     db: Session = Depends(get_db),
 ):
     count = db.scalar(
         select(func.count(func.distinct(EmotionalCheckin.user_id))).join(User, EmotionalCheckin.user_id == User.user_id)
-        .where(User.role == UserRole.STUDENT, User.is_active.is_(True))
+        .where(User.role == UserRole.student, User.is_active.is_(True))
     ) or 0
     return {"count": int(count)}
 
 
-@app.get("/this-week-checkins")
+@app.get("/api/this-week-checkins")
 def this_week_checkins(
     _user: User = Depends(require_counselor),
     db: Session = Depends(get_db),
@@ -396,7 +398,7 @@ def this_week_checkins(
     return {"count": int(count)}
 
 
-@app.get("/open-appointments")
+@app.get("/api/open-appointments")
 def open_appointments(
     _user: User = Depends(require_counselor),
     db: Session = Depends(get_db),
@@ -412,7 +414,7 @@ def open_appointments(
     return {"count": int(count)}
 
 
-@app.get("/high-risk-flags")
+@app.get("/api/high-risk-flags")
 def high_risk_flags(
     _user: User = Depends(require_counselor),
     db: Session = Depends(get_db),
@@ -439,7 +441,7 @@ def high_risk_flags(
     return {"count": int(alert_count + journal_count + checkin_count)}
 
 
-@app.get("/sentiments")
+@app.get("/api/sentiments")
 def sentiment_breakdown(
     period: str = Query("month", enum=["week", "month", "year"]),
     _user: User = Depends(require_counselor),
@@ -469,7 +471,7 @@ def sentiment_breakdown(
     return [{"name": row["sentiment"], "value": row["value"]} for row in rows]
 
 
-@app.get("/checkin-breakdown")
+@app.get("/api/checkin-breakdown")
 def checkin_breakdown(
     period: str = Query("month", enum=["week", "month", "year"]),
     _user: User = Depends(require_counselor),
@@ -511,6 +513,61 @@ def checkin_breakdown(
         "energy": [{"label": r["label"], "value": r["value"]} for r in energy_rows],
         "stress": [{"label": r["label"], "value": r["value"]} for r in stress_rows],
     }
+
+
+@app.get("/api/ai/sentiment-summary")
+def ai_sentiment_summary(
+    period: str = Query("month", enum=["week", "month", "year"]),
+    _user: User = Depends(require_counselor),
+    db: Session = Depends(get_db),
+):
+    """Return a short natural-language summary of recent sentiment patterns.
+
+    This is intentionally lightweight and uses existing aggregate data instead
+    of any heavy external AI dependencies.
+    """
+    data = NarrativeInsightService.mood_shift_summary(db, days=30)
+    trend = str(data.get("trend", "stable"))
+    details = data.get("details") or []
+    if not details:
+        summary = "Sentiment data is limited for this period; no clear trend yet."
+    else:
+        total_points = sum(int(d.get("count") or 0) for d in details)
+        first = details[0]
+        last = details[-1]
+        direction = {
+            "increasing": "has been rising",
+            "decreasing": "has been easing",
+        }.get(trend, "has been relatively steady")
+        summary = (
+            f"Across the last {len(details)} days, emotional activity {direction}. "
+            f"There were about {total_points} check-ins overall, from "
+            f"{first.get('date')} through {last.get('date')}."
+        )
+    return {"summary": summary}
+
+
+@app.get("/api/ai/mood-summary")
+def ai_mood_summary(
+    period: str = Query("month", enum=["week", "month", "year"]),
+    _user: User = Depends(require_counselor),
+    db: Session = Depends(get_db),
+):
+    """Return a short wellness-focused summary for the counselor dashboard."""
+    report = CounselorReportService.summary(db)
+    current = int(report.get("current_wellness_index", 0))
+    previous = int(report.get("previous_wellness_index", current))
+    change = current - previous
+    direction = "held steady"
+    if change > 0:
+        direction = f"improved by {change} points"
+    elif change < 0:
+        direction = f"dipped by {abs(change)} points"
+    event_name = report.get("event_name")
+    base = f"Overall wellness {direction} to {current} on the index this period."
+    if event_name:
+        base += f" This coincides with {event_name.lower()}, which may be influencing student stress and engagement."
+    return {"summary": base}
 
 class CheckinIn(BaseModel):
     mood_level: str
@@ -819,7 +876,7 @@ def _ensure_conversation_access(
 ) -> Conversation:
     if conversation is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
-    if current_user.role == UserRole.STUDENT and conversation.initiator_user_id != current_user.user_id:
+    if current_user.role == UserRole.student and conversation.initiator_user_id != current_user.user_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
     return conversation
 
@@ -832,7 +889,7 @@ def list_conversations(
     db: Session = Depends(get_db),
 ):
     filter_user_id: Optional[int] = None
-    if current_user.role == UserRole.STUDENT:
+    if current_user.role == UserRole.student:
         filter_user_id = current_user.user_id
     elif initiator_user_id is not None:
         filter_user_id = initiator_user_id

@@ -23,8 +23,17 @@ if TYPE_CHECKING:  # pragma: no cover
 
 
 class UserRole(str, PyEnum):
-    STUDENT = "student"
-    COUNSELOR = "counselor"
+    student = "student"
+    counselor = "counselor"
+
+    @staticmethod
+    def _missing_(value):
+        if isinstance(value, str):
+            value = value.lower()
+            for member in UserRole:
+                if member.value == value:
+                    return member
+        return None
 
 
 class User(Base):
