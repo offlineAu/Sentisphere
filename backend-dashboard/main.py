@@ -190,7 +190,7 @@ def delete_checkin(
 # --- Mobile ingestion: Journals ---
 
 
-@app.get("/api/journals", response_model=List[JournalSchema])
+@app.get("/api/journals-service", response_model=List[JournalSchema])
 def list_my_journals(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
@@ -200,7 +200,7 @@ def list_my_journals(
     return JournalService.list_journals(db, user_id=current_user.user_id, skip=skip, limit=limit)
 
 
-@app.post("/api/journals", response_model=JournalSchema, status_code=status.HTTP_201_CREATED)
+@app.post("/api/journals-service", response_model=JournalSchema, status_code=status.HTTP_201_CREATED)
 def create_journal(
     journal_in: JournalCreate,
     current_user: User = Depends(require_student),
@@ -216,7 +216,7 @@ def create_journal(
     return created
 
 
-@app.get("/api/journals/{journal_id}", response_model=JournalSchema)
+@app.get("/api/journals-service/{journal_id}", response_model=JournalSchema)
 def get_journal(
     journal_id: int,
     current_user: User = Depends(require_student),
@@ -228,7 +228,7 @@ def get_journal(
     return journal
 
 
-@app.patch("/api/journals/{journal_id}", response_model=JournalSchema)
+@app.patch("/api/journals-service/{journal_id}", response_model=JournalSchema)
 def update_journal(
     journal_id: int,
     journal_in: JournalUpdate,
@@ -242,7 +242,7 @@ def update_journal(
     return updated
 
 
-@app.delete("/api/journals/{journal_id}", status_code=status.HTTP_204_NO_CONTENT)
+@app.delete("/api/journals-service/{journal_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_journal(
     journal_id: int,
     current_user: User = Depends(require_student),
