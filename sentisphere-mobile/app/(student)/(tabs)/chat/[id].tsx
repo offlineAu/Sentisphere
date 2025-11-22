@@ -6,21 +6,35 @@ import { Icon } from '@/components/ui/icon';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors } from '@/constants/theme';
 import * as Haptics from 'expo-haptics';
+import * as SecureStore from 'expo-secure-store';
 import { Stack, useLocalSearchParams, router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
  type Msg = { id: string; role: 'user' | 'ai'; text: string; time: string; createdAt: number; status?: 'sent' | 'delivered' | 'read' };
 
+ type ApiMessage = {
+  message_id: number;
+  conversation_id: number;
+  sender_id: number;
+  content: string;
+  is_read: boolean;
+  timestamp: string;
+ };
+
+ type ApiConversation = {
+  conversation_id: number;
+  initiator_user_id: number;
+  initiator_role: string;
+  subject?: string | null;
+  status: 'open' | 'ended';
+  created_at: string;
+  last_activity_at?: string | null;
+  messages?: ApiMessage[];
+ };
+
  export default function ChatDetailScreen() {
   const { id, name } = useLocalSearchParams<{ id: string; name?: string }>();
-  const [messages, setMessages] = useState<Msg[]>(() => {
-    const now = Date.now();
-    return [
-      { id: 'm1', role: 'ai', text: `Hi ${name || 'there'}, how can I help today?`, time: '09:10 AM', createdAt: now - 1000 * 60 * 60 * 3 },
-      { id: 'm2', role: 'user', text: 'I feel overwhelmed with tasks.', time: '09:12 AM', createdAt: now - 1000 * 60 * 60 * 3 + 2 * 60 * 1000, status: 'read' },
-      { id: 'm3', role: 'ai', text: "Let's try breaking tasks into smaller steps.", time: '09:13 AM', createdAt: now - 1000 * 60 * 60 * 3 + 3 * 60 * 1000 },
-    ];
-  });
+  const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState('');
   const [chatOpen, setChatOpen] = useState(true);
   const scheme = useColorScheme() ?? 'light';
@@ -32,6 +46,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
   const [inputFocused, setInputFocused] = useState(false);
   const [typing, setTyping] = useState(false);
   const [inputHeight, setInputHeight] = useState(40);
+  const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8010';
+  const [currentUserId, setCurrentUserId] = useState<number | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [conv, setConv] = useState<ApiConversation | null>(null);
 
   const doHaptic = async (kind: 'light' | 'selection' | 'success' = 'light') => {
     if (Platform.OS === 'web') return;
@@ -47,6 +65,64 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
     const t = setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 0);
     return () => clearTimeout(t);
   }, []);
+
+  const getAuthToken = React.useCallback(async (): Promise<string | null> => {
+    if (Platform.OS === 'web') {
+      try { return (window as any)?.localStorage?.getItem('auth_token') || null } catch { return null }
+    }
+    try { return await SecureStore.getItemAsync('auth_token') } catch { return null }
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      setLoading(true);
+      try {
+        const tok = await getAuthToken();
+        if (!tok) return;
+        let meId: number | null = null;
+        try {
+          const meRes = await fetch(`${API_BASE_URL}/api/auth/mobile/me`, { headers: { Authorization: `Bearer ${tok}` } });
+          if (meRes.ok) {
+            const me = await meRes.json();
+            meId = me?.user_id ?? null;
+            if (mounted) setCurrentUserId(meId);
+          }
+        } catch {}
+        const convRes = await fetch(`${API_BASE_URL}/api/mobile/conversations/${id}?include_messages=true`, { headers: { Authorization: `Bearer ${tok}` } });
+        if (convRes.ok) {
+          const c: ApiConversation = await convRes.json();
+          if (mounted) {
+            setConv(c);
+            setChatOpen(c.status === 'open');
+            let msgs: ApiMessage[] = [];
+            if (Array.isArray(c.messages) && c.messages.length) {
+              msgs = c.messages;
+            } else {
+              try {
+                const mRes = await fetch(`${API_BASE_URL}/api/mobile/conversations/${id}/messages`, { headers: { Authorization: `Bearer ${tok}` } });
+                if (mRes.ok) msgs = await mRes.json();
+              } catch {}
+            }
+            const mapped: Msg[] = msgs.map((m) => {
+              const createdAt = new Date(m.timestamp).getTime();
+              const time = new Date(m.timestamp).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+              const role: 'user' | 'ai' = meId && m.sender_id === meId ? 'user' : 'ai';
+              const status: 'sent' | 'delivered' | 'read' | undefined = role === 'user' ? 'read' : undefined;
+              return { id: String(m.message_id), role, text: m.content, time, createdAt, status };
+            });
+            setMessages(mapped);
+          }
+        }
+        try {
+          await fetch(`${API_BASE_URL}/api/mobile/conversations/${id}/read`, { method: 'POST', headers: { Authorization: `Bearer ${tok}` } });
+        } catch {}
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    })();
+    return () => { mounted = false };
+  }, [API_BASE_URL, getAuthToken, id]);
 
   const formatDateLabel = (ts: number) => {
     const d = new Date(ts);
@@ -77,27 +153,44 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
     const trimmed = input.trim();
     if (!trimmed || !chatOpen) return;
     await doHaptic('light');
-    const tm = new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
     const now = Date.now();
-    const userMsg: Msg = { id: `${now}`, role: 'user', text: trimmed, time: tm, createdAt: now, status: 'sent' };
+    const tm = new Date(now).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    const tempId = `temp-${now}`;
+    const userMsg: Msg = { id: tempId, role: 'user', text: trimmed, time: tm, createdAt: now, status: 'sent' };
     setMessages((prev) => [...prev, userMsg]);
     setInput('');
     requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
-
-    // Simulate delivery/read and a brief typing indicator
-    setTyping(true);
-    setTimeout(() => {
-      setMessages((prev) => prev.map((m) => (m.id === userMsg.id ? { ...m, status: 'delivered' } : m)));
-    }, 400);
-    setTimeout(() => {
-      setMessages((prev) => prev.map((m) => (m.id === userMsg.id ? { ...m, status: 'read' } : m)));
-      setTyping(false);
-    }, 1200);
+    try {
+      const tok = await getAuthToken();
+      if (!tok || !conv) return;
+      const res = await fetch(`${API_BASE_URL}/api/mobile/conversations/${conv.conversation_id}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` },
+        body: JSON.stringify({ content: trimmed, is_read: false }),
+      });
+      if (res.ok) {
+        const m: ApiMessage = await res.json();
+        const createdAt = new Date(m.timestamp).getTime();
+        const time = new Date(m.timestamp).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+        setMessages((prev) => prev.map((x) => (x.id === tempId ? { id: String(m.message_id), role: 'user', text: m.content, time, createdAt, status: 'read' } : x)));
+      }
+    } catch {}
   };
 
   const toggleChat = async () => {
     await doHaptic('selection');
-    setChatOpen((o) => !o);
+    const next = !chatOpen;
+    setChatOpen(next);
+    try {
+      const tok = await getAuthToken();
+      if (!tok || !conv) return;
+      await fetch(`${API_BASE_URL}/api/mobile/conversations/${conv.conversation_id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` },
+        body: JSON.stringify({ status: next ? 'open' : 'ended' }),
+      });
+      setConv({ ...conv, status: next ? 'open' : 'ended' });
+    } catch {}
   };
 
   const StatusBadge = ({ open }: { open: boolean }) => (
@@ -121,22 +214,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
     }
   };
 
-  const LoadEarlier = ({ onLoad, palette }: { onLoad: () => void; palette: any }) => (
-    <View style={{ paddingVertical: 8, alignItems: 'center' }}>
-      <Pressable onPress={onLoad} style={({ pressed }) => [{
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 999,
-        borderWidth: 1,
-        borderColor: palette.border,
-        backgroundColor: palette.background,
-        opacity: pressed ? 0.9 : 1,
-      }]}>
-        <ThemedText style={{ color: palette.tint, fontFamily: 'Inter_600SemiBold' }}>Load earlier</ThemedText>
-      </Pressable>
-    </View>
-  );
-
   const TypingIndicator = ({ palette }: { palette: any }) => (
     <View style={{ paddingVertical: 8, paddingHorizontal: 12 }}>
       <View style={{ alignSelf: 'flex-start', backgroundColor: palette.background, borderColor: palette.border, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8 }}>
@@ -144,15 +221,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
       </View>
     </View>
   );
-
-  const loadEarlier = () => {
-    const base = messages.length ? messages[0].createdAt : Date.now();
-    const older: Msg[] = [
-      { id: `old-${base-600000}`, role: 'ai', text: 'Earlier note: remember to hydrate.', time: '07:55 AM', createdAt: base - 600000 },
-      { id: `old-${base-570000}`, role: 'user', text: 'Thanks, I will.', time: '07:58 AM', createdAt: base - 570000, status: 'read' },
-    ];
-    setMessages((prev) => [...older, ...prev]);
-  };
 
   const renderRow = ({ item }: { item: any }) => {
     if (item.type === 'sep') {
@@ -231,7 +299,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
             windowSize={7}
             updateCellsBatchingPeriod={50}
             removeClippedSubviews
-            ListHeaderComponent={<LoadEarlier onLoad={() => loadEarlier()} palette={palette} />}
             ListFooterComponent={typing ? <TypingIndicator palette={palette} /> : null}
           />
 
