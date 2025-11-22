@@ -17,7 +17,7 @@ from fastapi.security import OAuth2PasswordBearer
 
 from app.core.config import settings
 from app.db.database import engine, ENGINE_INIT_ERROR_MSG
-from app.db.mobile_database import mobile_engine
+from app.db.mobile_database import mobile_engine, get_mobile_db
 from app.db.session import get_db
 from app.api.routes.auth import router as auth_router
 from app.models.alert import Alert, AlertSeverity, AlertStatus
@@ -51,6 +51,7 @@ from app.schemas.journal import (
 )
 from app.models.notification import Notification
 from app.models.user import User, UserRole
+from app.models.mobile_user import MobileUser
 from app.models.user_activity import UserActivity
 from app.services.alert_service import AlertService
 from app.services.checkin_service import CheckinService
@@ -290,6 +291,268 @@ def auth_me(token: str = Depends(oauth2_scheme)):
         return {"user_id": int(sub)}
     except Exception:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
+
+@app.get("/api/counselors")
+def list_counselors(
+    token: str = Depends(oauth2_scheme),
+    mdb: Session = Depends(get_mobile_db),
+):
+    """Return active counselors for selection, using the mobile DB only.
+
+    We only validate the JWT signature/payload and do NOT look up the current
+    user in the main DB, to avoid coupling to the web DB engine.
+    """
+    # Validate token (no main-DB user fetch)
+    try:
+        decode_token(token)
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
+
+    # Read counselors from mobile DB
+    rows = (
+        mdb.execute(
+            select(MobileUser).where(
+                func.lower(MobileUser.role) == "counselor",
+                MobileUser.is_active.is_(True),
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [
+        {
+            "user_id": u.user_id,
+            "name": u.name,
+            "nickname": u.nickname,
+            "email": u.email,
+        }
+        for u in rows
+    ]
+
+# --- Mobile-only Conversations API (uses mobile DB, no main DB lookup) ---
+
+@app.get("/api/mobile/conversations")
+def mobile_list_conversations(
+    include_messages: bool = Query(False),
+    token: str = Depends(oauth2_scheme),
+    mdb: Session = Depends(get_mobile_db),
+):
+    uid = _extract_user_id(token)
+    conv_rows = list(
+        mdb.execute(
+            text(
+                """
+                SELECT conversation_id, initiator_user_id, initiator_role,
+                       subject, status, created_at, last_activity_at
+                FROM conversations
+                WHERE initiator_user_id = :uid
+                ORDER BY COALESCE(last_activity_at, created_at) DESC
+                """
+            ),
+            {"uid": uid},
+        ).mappings()
+    )
+    conversations = [dict(row) for row in conv_rows]
+    if include_messages and conversations:
+        for c in conversations:
+            msgs = list(
+                mdb.execute(
+                    text(
+                        """
+                        SELECT message_id, conversation_id, sender_id, content, is_read, timestamp
+                        FROM messages
+                        WHERE conversation_id = :cid
+                        ORDER BY timestamp ASC
+                        """
+                    ),
+                    {"cid": c["conversation_id"]},
+                ).mappings()
+            )
+            c["messages"] = [dict(m) for m in msgs]
+    return conversations
+
+
+@app.post("/api/mobile/conversations", status_code=status.HTTP_201_CREATED)
+def mobile_start_conversation(
+    conversation_in: ConversationStart,
+    token: str = Depends(oauth2_scheme),
+    mdb: Session = Depends(get_mobile_db),
+):
+    uid = _extract_user_id(token)
+    subject = conversation_in.subject if conversation_in and conversation_in.subject else None
+    res = mdb.execute(
+        text(
+            """
+            INSERT INTO conversations (initiator_user_id, initiator_role, subject, status, created_at, last_activity_at)
+            VALUES (:uid, 'student', :subject, 'open', NOW(), NOW())
+            """
+        ),
+        {"uid": uid, "subject": subject},
+    )
+    mdb.commit()
+    cid = res.lastrowid
+    convo = mdb.execute(
+        text(
+            """
+            SELECT conversation_id, initiator_user_id, initiator_role, subject, status, created_at, last_activity_at
+            FROM conversations WHERE conversation_id = :cid LIMIT 1
+            """
+        ),
+        {"cid": cid},
+    ).mappings().first()
+    return dict(convo) if convo else {"conversation_id": cid, "initiator_user_id": uid, "initiator_role": "student", "subject": subject, "status": "open"}
+
+
+@app.get("/api/mobile/conversations/{conversation_id}")
+def mobile_get_conversation(
+    conversation_id: int,
+    include_messages: bool = Query(False),
+    token: str = Depends(oauth2_scheme),
+    mdb: Session = Depends(get_mobile_db),
+):
+    uid = _extract_user_id(token)
+    convo = mdb.execute(
+        text(
+            """
+            SELECT conversation_id, initiator_user_id, initiator_role, subject, status, created_at, last_activity_at
+            FROM conversations WHERE conversation_id = :cid LIMIT 1
+            """
+        ),
+        {"cid": conversation_id},
+    ).mappings().first()
+    if not convo or int(convo["initiator_user_id"]) != int(uid):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+    data = dict(convo)
+    if include_messages:
+        msgs = list(
+            mdb.execute(
+                text(
+                    """
+                    SELECT message_id, conversation_id, sender_id, content, is_read, timestamp
+                    FROM messages WHERE conversation_id = :cid ORDER BY timestamp ASC
+                    """
+                ),
+                {"cid": conversation_id},
+            ).mappings()
+        )
+        data["messages"] = [dict(m) for m in msgs]
+    return data
+
+
+@app.get("/api/mobile/conversations/{conversation_id}/messages")
+def mobile_list_messages(
+    conversation_id: int,
+    token: str = Depends(oauth2_scheme),
+    mdb: Session = Depends(get_mobile_db),
+):
+    uid = _extract_user_id(token)
+    owner = mdb.execute(
+        text("SELECT initiator_user_id FROM conversations WHERE conversation_id = :cid"),
+        {"cid": conversation_id},
+    ).mappings().first()
+    if not owner or int(owner["initiator_user_id"]) != int(uid):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+    msgs = list(
+        mdb.execute(
+            text(
+                """
+                SELECT message_id, conversation_id, sender_id, content, is_read, timestamp
+                FROM messages WHERE conversation_id = :cid ORDER BY timestamp ASC
+                """
+            ),
+            {"cid": conversation_id},
+        ).mappings()
+    )
+    return [dict(m) for m in msgs]
+
+
+@app.post("/api/mobile/conversations/{conversation_id}/messages", status_code=status.HTTP_201_CREATED)
+def mobile_send_message(
+    conversation_id: int,
+    message_in: MessageSend,
+    token: str = Depends(oauth2_scheme),
+    mdb: Session = Depends(get_mobile_db),
+):
+    uid = _extract_user_id(token)
+    owner = mdb.execute(
+        text("SELECT initiator_user_id FROM conversations WHERE conversation_id = :cid"),
+        {"cid": conversation_id},
+    ).mappings().first()
+    if not owner or int(owner["initiator_user_id"]) != int(uid):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+    res = mdb.execute(
+        text(
+            """
+            INSERT INTO messages (conversation_id, sender_id, content, is_read, timestamp)
+            VALUES (:cid, :sid, :content, :is_read, NOW())
+            """
+        ),
+        {"cid": conversation_id, "sid": uid, "content": message_in.content, "is_read": bool(message_in.is_read)},
+    )
+    mdb.execute(text("UPDATE conversations SET last_activity_at = NOW() WHERE conversation_id = :cid"), {"cid": conversation_id})
+    mdb.commit()
+    mid = res.lastrowid
+    row = mdb.execute(
+        text(
+            """
+            SELECT message_id, conversation_id, sender_id, content, is_read, timestamp
+            FROM messages WHERE message_id = :mid
+            """
+        ),
+        {"mid": mid},
+    ).mappings().first()
+    return dict(row) if row else {"message_id": mid, "conversation_id": conversation_id, "sender_id": uid, "content": message_in.content, "is_read": bool(message_in.is_read)}
+
+
+@app.post("/api/mobile/conversations/{conversation_id}/read")
+def mobile_mark_read(
+    conversation_id: int,
+    token: str = Depends(oauth2_scheme),
+    mdb: Session = Depends(get_mobile_db),
+):
+    uid = _extract_user_id(token)
+    owner = mdb.execute(
+        text("SELECT initiator_user_id FROM conversations WHERE conversation_id = :cid"),
+        {"cid": conversation_id},
+    ).mappings().first()
+    if not owner or int(owner["initiator_user_id"]) != int(uid):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+    res = mdb.execute(
+        text("UPDATE messages SET is_read = 1 WHERE conversation_id = :cid AND sender_id <> :uid"),
+        {"cid": conversation_id, "uid": uid},
+    )
+    mdb.commit()
+    return {"updated": res.rowcount or 0}
+
+
+@app.patch("/api/mobile/conversations/{conversation_id}")
+def mobile_update_conversation(
+    conversation_id: int,
+    conversation_in: ConversationUpdate,
+    token: str = Depends(oauth2_scheme),
+    mdb: Session = Depends(get_mobile_db),
+):
+    uid = _extract_user_id(token)
+    owner = mdb.execute(
+        text("SELECT initiator_user_id FROM conversations WHERE conversation_id = :cid"),
+        {"cid": conversation_id},
+    ).mappings().first()
+    if not owner or int(owner["initiator_user_id"]) != int(uid):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+    if conversation_in.last_activity_at is not None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="last_activity_at cannot be updated")
+    updates = {}
+    if conversation_in.status is not None:
+        updates["status"] = conversation_in.status.value if hasattr(conversation_in.status, "value") else conversation_in.status
+    if updates:
+        set_clause = ", ".join(f"{k} = :{k}" for k in updates.keys())
+        mdb.execute(text(f"UPDATE conversations SET {set_clause} WHERE conversation_id = :cid"), {**updates, "cid": conversation_id})
+        mdb.commit()
+    convo = mdb.execute(
+        text("SELECT conversation_id, initiator_user_id, initiator_role, subject, status, created_at, last_activity_at FROM conversations WHERE conversation_id = :cid"),
+        {"cid": conversation_id},
+    ).mappings().first()
+    return dict(convo) if convo else {"conversation_id": conversation_id, **updates}
 
 @app.get("/api/mood-trend")
 def mood_trend(
