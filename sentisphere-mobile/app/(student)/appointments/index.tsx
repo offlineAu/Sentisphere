@@ -7,6 +7,7 @@ import * as Print from 'expo-print';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import * as Haptics from 'expo-haptics';
+import * as SecureStore from 'expo-secure-store';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -29,6 +30,7 @@ export default function AppointmentsScreen() {
   const scheme = useColorScheme() ?? 'light';
   const palette = Colors[scheme] as any;
   const focusBlue = '#3B82F6';
+  const API = process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8010';
 
   // Form state (survey-style)
   const [fullName, setFullName] = useState('');
@@ -42,6 +44,7 @@ export default function AppointmentsScreen() {
   const [reason, setReason] = useState('');
   const [previous, setPrevious] = useState<'none' | 'institution' | 'other'>('none');
   const [additional, setAdditional] = useState('');
+  const [displayNickname, setDisplayNickname] = useState('');
   // Focus states for inputs (active border)
   const [focusFullName, setFocusFullName] = useState(false);
   const [focusStudentId, setFocusStudentId] = useState(false);
@@ -72,6 +75,40 @@ export default function AppointmentsScreen() {
       UIManager.setLayoutAnimationEnabledExperimental(true);
     }
   }, []);
+
+  useEffect(() => {
+    const decodeJwtName = (t: string): string | null => {
+      try {
+        const p = t.split('.')[1];
+        if (!p) return null;
+        const s = p.replace(/-/g, '+').replace(/_/g, '/');
+        const pad = s.length % 4 ? s + '='.repeat(4 - (s.length % 4)) : s;
+        const json = typeof atob === 'function' ? atob(pad) : '';
+        if (!json) return null;
+        const obj = JSON.parse(json);
+        return obj?.nickname || obj?.name || null;
+      } catch { return null }
+    };
+    const getAuthToken = async (): Promise<string | null> => {
+      if (Platform.OS === 'web') {
+        try { return (window as any)?.localStorage?.getItem('auth_token') || null } catch { return null }
+      }
+      try { return await SecureStore.getItemAsync('auth_token') } catch { return null }
+    };
+    (async () => {
+      try {
+        const tok = await getAuthToken();
+        if (!tok) return;
+        let localName: string | null = null;
+        if (Platform.OS === 'web') localName = decodeJwtName(tok);
+        if (localName) setDisplayNickname((prev) => prev || localName);
+        const res = await fetch(`${API}/api/auth/mobile/me`, { headers: { Authorization: `Bearer ${tok}` } });
+        if (!res.ok) return;
+        const d = await res.json();
+        setDisplayNickname(d?.nickname || d?.name || localName || 'student');
+      } catch {}
+    })();
+  }, [API]);
 
   // Toast
   const toast = useRef(new Animated.Value(0)).current;
@@ -148,6 +185,14 @@ export default function AppointmentsScreen() {
       const esc = (s: any) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       const generatedAt = new Date().toLocaleString();
       const brand = '#10B981';
+      const safeName = (s: any) => String(s ?? '')
+        .replace(/[^a-z0-9_-]+/gi, '_')
+        .replace(/_+/g, '_')
+        .replace(/^_|_$/g, '');
+      const nick = safeName(displayNickname) || 'student';
+      const dateForName = safeName(preferredDate || new Date().toISOString().slice(0, 10));
+      let fileBaseName = `${nick}-appointment-${dateForName}`;
+      if (fileBaseName.length > 80) fileBaseName = fileBaseName.slice(0, 80).replace(/-+$/,'');
       const html = `<!DOCTYPE html>
 <html>
 <head>
@@ -171,7 +216,7 @@ export default function AppointmentsScreen() {
     .box { padding: 8px 10px; border: 1px solid #E5E7EB; border-radius: 8px; background: #FAFAFA; }
     .footer { margin-top: 18px; text-align: right; color: #6B7280; font-size: 10px; }
   </style>
-  <title>Sentisphere Appointment Request</title>
+  <title>${fileBaseName}</title>
   </head>
   <body>
     <div class="wm">Sentisphere</div>
@@ -222,19 +267,55 @@ export default function AppointmentsScreen() {
         return;
       }
 
-      const file = await Print.printToFileAsync({ html });
-      const safe = (studentId || fullName || 'student').replace(/[^a-z0-9_-]+/gi, '_');
-      const FS = FileSystem as any;
-      const dir: string | null = (FS?.documentDirectory as string | null) ?? (FS?.cacheDirectory as string | null) ?? null;
-      if (!dir) { showToast('Storage unavailable'); return; }
-      const baseDir = (dir as string).endsWith('/') ? dir : `${dir}/`;
-      const target = `${baseDir}Sentisphere_Appointment_${safe}.pdf`;
-      try { await FileSystem.deleteAsync(target, { idempotent: true }); } catch {}
-      await FileSystem.moveAsync({ from: file.uri, to: target });
+      const file = await Print.printToFileAsync({ html, base64: true });
+      let target = file.uri;
+      try {
+        const FS = FileSystem as any;
+        const dir = (FS?.documentDirectory ?? FS?.cacheDirectory) as string | null;
+        if (dir) {
+          const baseDir = (dir as string).endsWith('/') ? dir : `${dir}/`;
+          const desired = `${baseDir}${fileBaseName}.pdf`;
+          try { await FileSystem.deleteAsync(desired, { idempotent: true }); } catch {}
+          if ((file as any)?.base64) {
+            try {
+              let PDFDocumentLocal: any = null;
+              try { PDFDocumentLocal = (await import('pdf-lib/dist/pdf-lib.esm.js')).PDFDocument; } catch {}
+              if (PDFDocumentLocal) {
+                const src = `data:application/pdf;base64,${(file as any).base64}`;
+                const doc = await PDFDocumentLocal.load(src);
+                doc.setTitle(fileBaseName);
+                const updatedBase64 = await doc.saveAsBase64({ dataUri: false });
+                await FileSystem.writeAsStringAsync(desired, updatedBase64, { encoding: (FS?.EncodingType?.Base64 ?? 'base64') } as any);
+              } else {
+                await FileSystem.writeAsStringAsync(desired, (file as any).base64, { encoding: (FS?.EncodingType?.Base64 ?? 'base64') } as any);
+              }
+            } catch {
+              await FileSystem.writeAsStringAsync(desired, (file as any).base64, { encoding: (FS?.EncodingType?.Base64 ?? 'base64') } as any);
+            }
+          } else {
+            await FileSystem.copyAsync({ from: file.uri, to: desired });
+          }
+          try { await FileSystem.deleteAsync(file.uri, { idempotent: true }); } catch {}
+          target = desired;
+        }
+      } catch {}
 
       const canShare = await Sharing.isAvailableAsync();
       if (canShare) {
-        await Sharing.shareAsync(target, { mimeType: 'application/pdf', dialogTitle: 'Share Appointment PDF', UTI: 'com.adobe.pdf' });
+        await Sharing.shareAsync(target, { mimeType: 'application/pdf', dialogTitle: `${fileBaseName}.pdf`, UTI: 'com.adobe.pdf' });
+      } else if (Platform.OS === 'android') {
+        try {
+          const FS = FileSystem as any;
+          const perm = await FS.StorageAccessFramework.requestDirectoryPermissionsAsync();
+          if (perm?.granted && perm?.directoryUri) {
+            const destUri = await FS.StorageAccessFramework.createFileAsync(perm.directoryUri, `${fileBaseName}.pdf`, 'application/pdf');
+            const data = (file as any)?.base64 || await FileSystem.readAsStringAsync(target, { encoding: (FS?.EncodingType?.Base64 ?? 'base64') } as any);
+            await FS.StorageAccessFramework.writeAsStringAsync(destUri, data);
+            showToast('Saved to selected folder');
+          } else {
+            showToast('Share not available');
+          }
+        } catch {}
       }
       await doHaptic('success');
       showToast('PDF ready');
