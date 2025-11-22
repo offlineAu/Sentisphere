@@ -1,6 +1,6 @@
-import { useEffect, useState, useRef, ReactElement } from "react";
+import { useEffect, useState, useRef, useMemo, ReactElement } from "react";
 import axios from "axios";
-import { ChevronLeft, ChevronRight, Info, Users, CalendarCheck, CalendarClock, AlertTriangle, AlertCircle, Bell, Search, Mail, Percent as PercentIcon, Hash as HashIcon, Brain, User } from "lucide-react";
+import { ChevronLeft, ChevronRight, Info, Users, CalendarCheck, CalendarClock, AlertTriangle, AlertCircle, Bell, Search, Mail, Percent as PercentIcon, Hash as HashIcon, Brain, User, Filter } from "lucide-react";
 import { motion } from "framer-motion";
 import {
   ResponsiveContainer,
@@ -256,6 +256,7 @@ export default function CounselorDashboard() {
   const { open } = useSidebar();
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [authenticated, setAuthenticated] = useState<boolean>(false);
+  const [refreshKey, setRefreshKey] = useState<number>(0);
   const [moodTrend, setMoodTrend] = useState<any[]>([]);
   const [sentimentBreakdown, setSentimentBreakdown] = useState<any[]>([]);
   const [checkinBreakdown, setCheckinBreakdown] = useState<{ mood: any[]; energy: any[]; stress: any[] } | null>(null);
@@ -289,6 +290,21 @@ export default function CounselorDashboard() {
   // Messages unread count (UI badge only; wire up when API is available)
   const [unreadMessages, setUnreadMessages] = useState<number>(0);
   const [loading, setLoading] = useState(true);
+
+  // Global date filter state (Counselor dashboard scope)
+  const [globalRange, setGlobalRange] = useState<
+    'this_week' | 'last_week' | 'last_30d' | 'this_month' | 'this_semester' | 'custom'
+  >('this_week');
+  const [rangeStart, setRangeStart] = useState<string>('');
+  const [rangeEnd, setRangeEnd] = useState<string>('');
+  const filterParams = useMemo(
+    () => (
+      globalRange === 'custom' && rangeStart && rangeEnd
+        ? { range: 'custom', start: rangeStart, end: rangeEnd }
+        : { range: globalRange }
+    ),
+    [globalRange, rangeStart, rangeEnd]
+  );
 
   const moodScale = [
     { value: 1, label: 'Very Sad' },
@@ -335,10 +351,10 @@ export default function CounselorDashboard() {
     const fetchData = async () => {
       try {
         // Helper function to safely get numeric data
-        const getNumericData = async (endpoint: string): Promise<number> => {
+        const getNumericData = async (endpoint: string, params?: Record<string, any>): Promise<number> => {
           try {
             console.log(`[DEBUG] Fetching from ${endpoint}`);
-            const response = await api.get<any>(endpoint);
+            const response = await api.get<any>(endpoint, params ? { params } : undefined);
             console.log(`[DEBUG] Response from ${endpoint}:`, response);
             
             // Handle the actual response structure: { data: { count: number } }
@@ -374,21 +390,24 @@ export default function CounselorDashboard() {
           openAppointments,
           highRiskFlags,
           thisWeekCheckins,
-          // Fetch array data
-          moodTrendRes,
+          // Fetch array / structured data
+          trendsRes,
           recentAlertsRes,
           allAlertsRes,
-          appointmentLogsRes
+          appointmentLogsRes,
         ] = await Promise.all([
+          // Time-independent
           getNumericData('/students-monitored'),
-          getNumericData('/open-appointments'),
-          getNumericData('/high-risk-flags'),
-          getNumericData('/this-week-checkins'),
-          // Array data
-          api.get<ArrayResponse<any>>('/mood-trend').catch(() => ({ data: [] })),
+          // Time-dependent metrics respect global date filter
+          getNumericData('/open-appointments', filterParams),
+          getNumericData('/high-risk-flags', filterParams),
+          getNumericData('/this-week-checkins', filterParams),
+          // Weekly mood analytics should ignore the dashboard's global date filter
+          api.get<any>('/reports/trends').catch(() => ({ data: { weeks: [] } })),
+          // Recent alerts & logs (currently use their own windows; not yet date-filtered)
           api.get<ArrayResponse<any>>('/recent-alerts').catch(() => ({ data: [] })),
           api.get<ArrayResponse<any>>('/all-alerts').catch(() => ({ data: [] })),
-          api.get<ArrayResponse<any>>('/appointment-logs').catch(() => ({ data: [] }))
+          api.get<ArrayResponse<any>>('/appointment-logs').catch(() => ({ data: [] })),
         ]);
 
         // Log all numeric states before setting them
@@ -415,8 +434,7 @@ export default function CounselorDashboard() {
           });
         }, 0);
 
-        // Set array states with proper type checking
-        setMoodTrend(Array.isArray(moodTrendRes?.data) ? moodTrendRes.data : []);
+        // Set array states (exclude moodTrend here; trends fetched in a separate effect)
         setRecentAlerts(Array.isArray(recentAlertsRes?.data) ? recentAlertsRes.data : []);
         setAllAlerts(Array.isArray(allAlertsRes?.data) ? allAlertsRes.data : []);
         setAppointmentLogs(Array.isArray(appointmentLogsRes?.data) ? appointmentLogsRes.data : []);
@@ -431,25 +449,75 @@ export default function CounselorDashboard() {
     };
 
     fetchData();
+  }, [authenticated, globalRange, rangeStart, rangeEnd, refreshKey]);
+
+  // Fetch Weekly Mood Analytics (trends) once, independent of the dashboard global date filter
+  useEffect(() => {
+    if (!authenticated) return;
+    api
+      .get<any>('/reports/trends')
+      .then((res) => {
+        const weeks = Array.isArray(res?.data?.weeks) ? res.data.weeks : [];
+        setMoodTrend(weeks);
+      })
+      .catch(() => setMoodTrend([]));
   }, [authenticated]);
 
-  // Only run this on initial mount
+  // Infer first period with data after authentication
   useEffect(() => {
+    if (!authenticated) return;
     let isMounted = true;
-    getFirstPeriodWithData().then((period) => {
-      if (isMounted) setSentimentPeriod(period);
-    });
+    getFirstPeriodWithData()
+      .then((period) => { if (isMounted) setSentimentPeriod(period); })
+      .catch(() => { /* noop */ });
     return () => { isMounted = false; };
-  }, []);
+  }, [authenticated]);
 
   // Fetch sentiment breakdown when sentimentPeriod changes (only if authenticated)
   useEffect(() => {
     if (!authenticated) return;
-    api.get<any[]>('/sentiments', { params: { period: sentimentPeriod }}).then(r=>setSentimentBreakdown(r.data)).catch(console.error);
-    api.get<{mood:any[];energy:any[];stress:any[]}>('/checkin-breakdown', { params: { period: sentimentPeriod }}).then(r=>setCheckinBreakdown(r.data)).catch(console.error);
-    api.get<{summary?: string}>('/ai/sentiment-summary', { params: { period: sentimentPeriod }}).then(r=>setAiSentimentSummary(r.data?.summary || null)).catch(()=>setAiSentimentSummary(null));
-    api.get<{summary?: string}>('/ai/mood-summary', { params: { period: sentimentPeriod }}).then(r=>setAiMoodSummary(r.data?.summary || null)).catch(()=>setAiMoodSummary(null));
-  }, [sentimentPeriod, authenticated]);
+    const params = { period: sentimentPeriod, ...filterParams };
+
+    const fetchSentiments = async () => {
+      try {
+        const r = await api.get<any[]>('/sentiments', { params });
+        let data = Array.isArray(r?.data) ? r.data : [];
+        if (data.length === 0) {
+          // Fallback to period-only if range produced no data
+          const rf = await api.get<any[]>('/sentiments', { params: { period: sentimentPeriod } });
+          data = Array.isArray(rf?.data) ? rf.data : [];
+        }
+        setSentimentBreakdown(data);
+      } catch (e) {
+        console.error(e);
+        setSentimentBreakdown([]);
+      }
+    };
+
+    const fetchCheckinBreakdown = async () => {
+      try {
+        const r = await api.get<{mood:any[];energy:any[];stress:any[]}>('/checkin-breakdown', { params });
+        let payload = r?.data as any;
+        const empty = !payload || [payload.mood, payload.energy, payload.stress].every(
+          (arr: any) => !Array.isArray(arr) || arr.length === 0
+        );
+        if (empty) {
+          const rf = await api.get<{mood:any[];energy:any[];stress:any[]}>('/checkin-breakdown', { params: { period: sentimentPeriod } });
+          payload = rf?.data as any;
+        }
+        setCheckinBreakdown(payload);
+      } catch (e) {
+        console.error(e);
+        setCheckinBreakdown(null);
+      }
+    };
+
+    fetchSentiments();
+    fetchCheckinBreakdown();
+
+    api.get<{summary?: string}>('/ai/sentiment-summary', { params }).then(r=>setAiSentimentSummary(r.data?.summary || null)).catch(()=>setAiSentimentSummary(null));
+    api.get<{summary?: string}>('/ai/mood-summary', { params }).then(r=>setAiMoodSummary(r.data?.summary || null)).catch(()=>setAiMoodSummary(null));
+  }, [sentimentPeriod, authenticated, globalRange, rangeStart, rangeEnd]);
 
   // Get user info from token
   useEffect(() => {
@@ -503,6 +571,32 @@ export default function CounselorDashboard() {
     getUserFromToken();
   }, []);
 
+  // Listen for profile updates to trigger refresh
+  useEffect(() => {
+    const onProfileUpdated = () => setRefreshKey((v) => v + 1);
+    window.addEventListener('profileUpdated', onProfileUpdated);
+    return () => {
+      window.removeEventListener('profileUpdated', onProfileUpdated);
+    };
+  }, []);
+
+  // Fetch counselor profile details when authenticated or on refresh
+  useEffect(() => {
+    if (!authenticated || !currentUser?.id) return;
+    api.get<any>('/counselor-profile', { params: { user_id: currentUser.id } })
+      .then((res) => setCounselor(res.data))
+      .catch(() => setCounselor(null));
+  }, [authenticated, currentUser?.id, refreshKey]);
+
+  useEffect(() => {
+    if (!counselor || !currentUser) return;
+    setCurrentUser((u) => u ? ({
+      ...u,
+      name: counselor.name || u.name,
+      email: counselor.email || u.email,
+    }) : u);
+  }, [counselor]);
+
   const parseWeekString = (weekStr: string) => {
     const [yearStr, monthStr, weekLabel] = weekStr.split("-");
     const year = parseInt(yearStr, 10);
@@ -512,23 +606,12 @@ export default function CounselorDashboard() {
     return { year, month, week };
   };
 
-  // Filter out weeks without valid mood data and sort by date
+  // Filter out weeks without valid mood data and sort by end date (latest first)
   const sortedMoodTrend = [...moodTrend]
-    .filter(entry => {
-      // Ensure we have a valid week string and avgMood is a number
-      return entry.week && 
-             typeof entry.week === 'string' && 
-             typeof entry.avgMood === 'number' && 
-             !isNaN(entry.avgMood);
-    })
-    .sort((a, b) => {
-      const pa = parseWeekString(a.week);
-      const pb = parseWeekString(b.week);
-
-      if (pb.year !== pa.year) return pb.year - pa.year;
-      if (pb.month !== pa.month) return pb.month - pa.month;
-      return pb.week - pa.week; // ascending week, W5 > W1
-    });
+    .filter((entry: any) => (
+      entry && typeof entry.week_end === 'string' && typeof entry.avg_mood === 'number' && !isNaN(entry.avg_mood)
+    ))
+    .sort((a: any, b: any) => new Date(b.week_end).getTime() - new Date(a.week_end).getTime());
 
   const getCurrentWeekString = () => {
     const today = new Date();
@@ -546,8 +629,10 @@ export default function CounselorDashboard() {
   // Paginate (3 per page)
   const itemsPerPage = 3;
   const startIndex = page * itemsPerPage;
-  const paginatedMoodTrend = sortedMoodTrend.slice(startIndex, startIndex + itemsPerPage);
-  // reverse so oldest on left
+  const paginatedMoodTrend = sortedMoodTrend.slice(startIndex, startIndex + itemsPerPage).map((wk: any) => ({
+    week: `${new Date(wk.week_start).toLocaleDateString(undefined, { month: 'short', day: '2-digit' })} - ${new Date(wk.week_end).toLocaleDateString(undefined, { month: 'short', day: '2-digit' })}`,
+    avgMood: wk.avg_mood,
+  }));
 
   const maxPage = Math.ceil(sortedMoodTrend.length / itemsPerPage) - 1;
 

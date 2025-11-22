@@ -161,6 +161,18 @@ function Reports() {
 
   const [page, setPage] = useState(0);
 
+  // Global date filter state (Reports scope)
+  const [globalRange, setGlobalRange] = useState<
+    'this_week' | 'last_week' | 'last_30d' | 'this_month' | 'this_semester' | 'custom'
+  >('this_week');
+  const [rangeStart, setRangeStart] = useState<string>('');
+  const [rangeEnd, setRangeEnd] = useState<string>('');
+  const filterParams = useMemo(() => (
+    globalRange === 'custom' && rangeStart && rangeEnd
+      ? { range: 'custom', start: rangeStart, end: rangeEnd }
+      : { range: globalRange }
+  ), [globalRange, rangeStart, rangeEnd]);
+
   // Carousels refs
   const weeklySliderRef = useRef<any>(null);
   const behaviorSliderRef = useRef<any>(null);
@@ -252,17 +264,20 @@ function Reports() {
       .catch(err => console.error(err));
   }, []);
 
-  // --- Fetch reports ---
+  // --- Fetch reports (respects global date filter for time-dependent data) ---
   useEffect(() => {
     const fetchReports = async () => {
       try {
         const [summaryRes, trendsRes, weeklyInsightsRes, behaviorRes, eventsRes, engagementRes] = await Promise.all([
+          // Time-independent
           api.get<ReportSummary>(`/reports/summary`),
+          // Time-independent: overall trends do not change with global date filter
           api.get<any>(`/reports/trends`),
-          api.get<WeeklyInsight[]>(`/reports/weekly-insights`),
-          api.get<BehaviorInsight[]>(`/reports/behavior-insights`),
+          api.get<WeeklyInsight[]>(`/reports/weekly-insights`, { params: filterParams }),
+          api.get<BehaviorInsight[]>(`/reports/behavior-insights`, { params: filterParams }),
+          // Events listing is independent of filter
           api.get<Array<{ name: string; start: string; end: string; type?: string }>>(`/events`),
-          api.get<EngagementMetrics>(`/reports/engagement`),
+          api.get<EngagementMetrics>(`/reports/engagement`, { params: filterParams }),
         ]);
         setSummary(summaryRes.data || null);
         // Prefer dedicated weekly-insights endpoint if available
@@ -292,7 +307,7 @@ function Reports() {
         setEvents(Array.isArray(eventsRes.data) ? eventsRes.data : []);
         setEngagement(engagementRes.data || null);
 
-        const topRes = await api.get<any>(`/reports/top-stats`);
+        const topRes = await api.get<any>(`/reports/top-stats`, { params: filterParams });
         const topData = topRes.data;
 
         const calcDelta = (current: number, previous: number) => {
@@ -348,7 +363,7 @@ function Reports() {
         const kpiRes = await api.get<any>(`/analytics/intervention-success`);
         setChatKpi(kpiRes.data || null);
 
-        const attentionRes = await api.get<any[]>(`/reports/attention`);
+        const attentionRes = await api.get<any[]>(`/reports/attention`, { params: filterParams });
         const attentionData = attentionRes.data || [];
         setAttentionStudents(
           attentionData.map((s: any) => ({
@@ -366,7 +381,7 @@ function Reports() {
     };
 
     fetchReports();
-  }, []);
+  }, [globalRange, rangeStart, rangeEnd]);
 
   if (loading) return (
     <div className="flex h-[80vh] w-full items-center justify-center">
@@ -378,7 +393,9 @@ function Reports() {
   );
 
   const itemsPerPage = 4;
-  const sortedTrendWeeks = [...trendWeeks].sort((a, b) => new Date(b.week_start).getTime() - new Date(a.week_start).getTime());
+  // Sort by week_end (rolling current date) so labels progress like
+  // Mon–Mon, Mon–Tue, ..., Mon–Sun, then next week starts.
+  const sortedTrendWeeks = [...trendWeeks].sort((a, b) => new Date(b.week_end).getTime() - new Date(a.week_end).getTime());
   const maxPage = Math.max(0, Math.ceil(sortedTrendWeeks.length / itemsPerPage) - 1);
   const startIndex = page * itemsPerPage;
   const paginatedTrendData = sortedTrendWeeks.slice(startIndex, startIndex + itemsPerPage).map((wk) => ({
@@ -406,6 +423,42 @@ function Reports() {
         </p>
       </div>
 
+      {/* Global Date Filter */}
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <Filter className="h-4 w-4 text-[#0d8c4f]" />
+          <select
+            className="border rounded-lg px-2 py-1 text-sm"
+            value={globalRange}
+            onChange={(e) => setGlobalRange(e.target.value as any)}
+          >
+            <option value="this_week">This Week</option>
+            <option value="last_week">Last Week</option>
+            <option value="last_30d">Last 30 Days</option>
+            <option value="this_month">This Month</option>
+            <option value="this_semester">This Semester</option>
+            <option value="custom">Custom Range</option>
+          </select>
+          {globalRange === 'custom' && (
+            <>
+              <input
+                type="date"
+                className="border rounded-lg px-2 py-1 text-sm"
+                value={rangeStart}
+                onChange={(e) => setRangeStart(e.target.value)}
+              />
+              <span className="text-gray-400">—</span>
+              <input
+                type="date"
+                className="border rounded-lg px-2 py-1 text-sm"
+                value={rangeEnd}
+                onChange={(e) => setRangeEnd(e.target.value)}
+              />
+            </>
+          )}
+        </div>
+      </div>
+
       {/* Top Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {topStats.length === 0 ? (
@@ -415,14 +468,29 @@ function Reports() {
         ) : topStats.map((stat, i) => {
           const isTotal = stat.label === "Total Students";
           const isRisk = stat.label === "At-Risk Students";
+          const isActive = stat.label === "Active Users";
+          const isWellness = stat.label === "Avg. Wellness Score";
           const baseCard = "rounded-2xl shadow p-4";
           const gradientGreen = "bg-gradient-to-br from-[#0ea768] to-[#0d8c4f] text-white";
           const gradientRed = "bg-gradient-to-br from-[#f87171] to-[#dc2626] text-white";
+          const gradientBlue = "bg-gradient-to-br from-[#38bdf8] to-[#0ea5e9] text-white"; // Active Users
+          const gradientYellow = "bg-gradient-to-br from-[#facc15] to-[#eab308] text-white"; // Avg. Wellness Score
           const whiteCard = "bg-white hover:shadow-md transition";
-          const cardClass = `${baseCard} ${isTotal ? gradientGreen : isRisk ? gradientRed : whiteCard}`;
-          const titleClass = isTotal || isRisk ? "text-sm font-medium opacity-90" : "text-sm font-medium text-gray-600";
-          const valueClass = isTotal || isRisk ? "text-3xl font-extrabold mt-1" : "text-xl font-bold text-gray-900";
-          const deltaClass = isTotal || isRisk ? "text-xs opacity-90 mt-1 flex items-center gap-1" : `text-xs ${stat.deltaColor}`;
+          const cardClass = `${baseCard} ${
+            isTotal
+              ? gradientGreen
+              : isRisk
+              ? gradientRed
+              : isActive
+              ? gradientBlue
+              : isWellness
+              ? gradientYellow
+              : whiteCard
+          }`;
+          const isGradient = isTotal || isRisk || isActive || isWellness;
+          const titleClass = isGradient ? "text-sm font-medium opacity-90" : "text-sm font-medium text-gray-600";
+          const valueClass = isGradient ? "text-3xl font-extrabold mt-1" : "text-xl font-bold text-gray-900";
+          const deltaClass = isGradient ? "text-xs opacity-90 mt-1 flex items-center gap-1" : `text-xs ${stat.deltaColor}`;
 
           return (
             <div key={i} className={cardClass}>
@@ -446,8 +514,8 @@ function Reports() {
       </div>
 
       {/* Wellness Trend + Academic Calendar */}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <div className="space-y-4">
+      <div className="grid grid-cols-1 xl:grid-cols-6 gap-4">
+        <div className="space-y-4 xl:col-span-4">
           <div className="bg-white rounded-2xl shadow p-4 w-full max-w-full">
             <div className="flex justify-between items-center mb-2">
               <h2 className={styles.sectionTitle}>Trends</h2>
@@ -469,12 +537,12 @@ function Reports() {
               </div>
             </div>
 
-            <div className="h-[350px] flex items-center justify-center">
+            <div className="h-[350px] flex items-center justify-center -ml-1">
               {paginatedTrendData.length === 0 ? (
                 <span className="text-gray-500 text-sm">No wellness data available.</span>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={paginatedTrendData} margin={{ top: 20, right: 35, bottom: 40, left: 20 }}>
+                  <LineChart data={paginatedTrendData} margin={{ top: 20, right: 60, bottom: 64, left: 0 }}>
                     <defs>
                       <linearGradient id="lineWellness" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="0%" stopColor="#0d8c4f" stopOpacity={0.85} />
@@ -482,7 +550,7 @@ function Reports() {
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="week_label" interval={0} stroke="#0d8c4f" angle={0} height={60} tick={{ fill: "#0f172a", fontSize: 12 }} />
+                    <XAxis dataKey="week_label" interval={0} stroke="#0d8c4f" angle={0} height={64} tick={{ fill: "#0f172a", fontSize: 12 }} />
                     <YAxis domain={[0, 100]} tick={{ fill: "#0f172a", fontSize: 12 }} stroke="#0d8c4f" />
                     <RTooltip formatter={(value: number) => `${value}%`} labelFormatter={(label) => `Week ${label}`} />
                     <Legend verticalAlign="top" height={32} wrapperStyle={{ fontSize: "0.75rem" }} />
@@ -581,8 +649,8 @@ function Reports() {
           </div>
         </div>
 
-        <div className="space-y-4">
-          <div className="bg-white rounded-2xl shadow-sm border p-4 xl:max-w-md xl:mx-auto">
+        <div className="space-y-4 xl:col-span-2 xl:pl-6">
+          <div className="bg-white rounded-2xl shadow-sm border p-4">
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h2 className={styles.sectionTitle}>Academic Calendar</h2>
@@ -854,11 +922,10 @@ function Reports() {
                     ))}
                   </td>
                   <td className="flex gap-2">
-                    <span role="button" title="Add note">🗒️</span>
-                    <span role="button" title="Email">✉️</span>
-                    <span role="button" title="View">👁️</span>
-                    <button
-                      className="px-2 py-1 text-xs rounded bg-[#0d8c4f] text-white hover:opacity-90"
+                    <span
+                      role="button"
+                      title="Notify student"
+                      className="cursor-pointer text-lg"
                       onClick={async () => {
                         try {
                           const message = `Hi ${student.name}, we noticed a few signs that you might benefit from a quick chat. When you're ready, please consider speaking with a counselor — we're here to help.`;
@@ -872,8 +939,8 @@ function Reports() {
                         }
                       }}
                     >
-                      Notify
-                    </button>
+                      ✉️
+                    </span>
                   </td>
                 </tr>
               ))}

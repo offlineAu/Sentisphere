@@ -6,6 +6,8 @@ SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
 Base = declarative_base()
 
+from app.models import *
+
 
 def get_db():
     db = SessionLocal()
