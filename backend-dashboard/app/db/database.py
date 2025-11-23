@@ -19,7 +19,12 @@ def _ensure_database_exists(url):
     if not database_name:
         return
 
-    server_url = url.set(database=None)
+    # Build a server-level DSN explicitly without a database segment. Some drivers
+    # may still attempt to select the DB with url.set(database=None).
+    server_url = (
+        f"{url.drivername}://{url.username}:{(url.password or '')}"
+        f"@{url.host}:{url.port}"
+    )
     server_engine = create_engine(server_url, isolation_level="AUTOCOMMIT", pool_pre_ping=True)
     try:
         with server_engine.connect() as conn:
