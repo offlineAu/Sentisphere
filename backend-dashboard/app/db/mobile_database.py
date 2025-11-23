@@ -17,7 +17,10 @@ def _ensure_database_exists(url):
     if not database_name:
         return
 
-    server_url = url.set(database=None)
+    server_url = (
+        f"{url.drivername}://{url.username}:{(url.password or '')}"
+        f"@{url.host}:{url.port}"
+    )
     server_engine = create_engine(server_url, isolation_level="AUTOCOMMIT", pool_pre_ping=True)
     try:
         with server_engine.connect() as conn:
@@ -39,6 +42,56 @@ def _create_engine():
     with eng.connect() as conn:
         conn.execute(text("SELECT 1"))
         # Ensure required tables exist for mobile features
+        conn.execute(text(
+            """
+            CREATE TABLE IF NOT EXISTS `user` (
+              `user_id` INT NOT NULL AUTO_INCREMENT,
+              `email` VARCHAR(100) NULL,
+              `name` VARCHAR(100) NULL,
+              `role` VARCHAR(50) NOT NULL,
+              `password_hash` VARCHAR(255) NULL,
+              `nickname` VARCHAR(50) NULL,
+              `last_login` DATETIME NULL,
+              `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+              `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY (`user_id`),
+              UNIQUE KEY `uniq_user_nickname` (`nickname`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """
+        ))
+        conn.execute(text(
+            """
+            CREATE TABLE IF NOT EXISTS `conversations` (
+              `conversation_id` INT NOT NULL AUTO_INCREMENT,
+              `initiator_user_id` INT NOT NULL,
+              `initiator_role` VARCHAR(20) NOT NULL,
+              `subject` VARCHAR(100) NULL,
+              `status` VARCHAR(20) NOT NULL DEFAULT 'open',
+              `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              `last_activity_at` DATETIME NULL,
+              PRIMARY KEY (`conversation_id`),
+              KEY `idx_conversations_initiator` (`initiator_user_id`),
+              CONSTRAINT `fk_conv_user` FOREIGN KEY (`initiator_user_id`) REFERENCES `user`(`user_id`) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """
+        ))
+        conn.execute(text(
+            """
+            CREATE TABLE IF NOT EXISTS `messages` (
+              `message_id` INT NOT NULL AUTO_INCREMENT,
+              `conversation_id` INT NOT NULL,
+              `sender_id` INT NOT NULL,
+              `content` TEXT NOT NULL,
+              `is_read` TINYINT(1) NOT NULL DEFAULT 0,
+              `timestamp` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY (`message_id`),
+              KEY `idx_messages_conversation` (`conversation_id`),
+              KEY `idx_messages_sender` (`sender_id`),
+              CONSTRAINT `fk_msg_conv` FOREIGN KEY (`conversation_id`) REFERENCES `conversations`(`conversation_id`) ON DELETE CASCADE,
+              CONSTRAINT `fk_msg_user` FOREIGN KEY (`sender_id`) REFERENCES `user`(`user_id`) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """
+        ))
         conn.execute(text(
             """
             CREATE TABLE IF NOT EXISTS `journal` (
