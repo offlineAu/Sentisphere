@@ -18,7 +18,7 @@ class CounselorProfile(Base):
     )
     department: Mapped[Optional[str]] = mapped_column(String(100))
     contact_number: Mapped[Optional[str]] = mapped_column(String(20))
-    availability: Mapped[Optional[str]] = mapped_column(String(100))
+    availability: Mapped[Optional[str]] = mapped_column(Text)
     year_experience: Mapped[Optional[int]] = mapped_column(Integer)
     phone: Mapped[Optional[str]] = mapped_column(String(50))
     license_number: Mapped[Optional[str]] = mapped_column(String(100))

@@ -78,36 +78,32 @@ class CounselorReportService:
     # ------------------------------------------------------------------
     @classmethod
     def _wellness_index(cls, db: Session, start_dt: datetime, end_dt: datetime) -> int:
+        # SQLAlchemy 2.x expects each (condition, result) pair as a separate
+        # positional argument to case(), not a single tuple of tuples.
         mood_case = case(
-            (
-                (EmotionalCheckin.mood_level == MoodLevel.VERY_SAD, 0),
-                (EmotionalCheckin.mood_level == MoodLevel.SAD, 17),
-                (EmotionalCheckin.mood_level == MoodLevel.NEUTRAL, 33),
-                (EmotionalCheckin.mood_level == MoodLevel.GOOD, 50),
-                (EmotionalCheckin.mood_level == MoodLevel.HAPPY, 67),
-                (EmotionalCheckin.mood_level == MoodLevel.VERY_HAPPY, 83),
-                (EmotionalCheckin.mood_level == MoodLevel.EXCELLENT, 100),
-            ),
+            (EmotionalCheckin.mood_level == MoodLevel.VERY_SAD, 0),
+            (EmotionalCheckin.mood_level == MoodLevel.SAD, 17),
+            (EmotionalCheckin.mood_level == MoodLevel.NEUTRAL, 33),
+            (EmotionalCheckin.mood_level == MoodLevel.GOOD, 50),
+            (EmotionalCheckin.mood_level == MoodLevel.HAPPY, 67),
+            (EmotionalCheckin.mood_level == MoodLevel.VERY_HAPPY, 83),
+            (EmotionalCheckin.mood_level == MoodLevel.EXCELLENT, 100),
             else_=None,
         )
         energy_case = case(
-            (
-                (EmotionalCheckin.energy_level == EnergyLevel.VERY_LOW, 0),
-                (EmotionalCheckin.energy_level == EnergyLevel.LOW, 25),
-                (EmotionalCheckin.energy_level == EnergyLevel.MODERATE, 50),
-                (EmotionalCheckin.energy_level == EnergyLevel.HIGH, 75),
-                (EmotionalCheckin.energy_level == EnergyLevel.VERY_HIGH, 100),
-            ),
+            (EmotionalCheckin.energy_level == EnergyLevel.VERY_LOW, 0),
+            (EmotionalCheckin.energy_level == EnergyLevel.LOW, 25),
+            (EmotionalCheckin.energy_level == EnergyLevel.MODERATE, 50),
+            (EmotionalCheckin.energy_level == EnergyLevel.HIGH, 75),
+            (EmotionalCheckin.energy_level == EnergyLevel.VERY_HIGH, 100),
             else_=None,
         )
         stress_case = case(
-            (
-                (EmotionalCheckin.stress_level == StressLevel.NO_STRESS, 0),
-                (EmotionalCheckin.stress_level == StressLevel.LOW_STRESS, 25),
-                (EmotionalCheckin.stress_level == StressLevel.MODERATE, 50),
-                (EmotionalCheckin.stress_level == StressLevel.HIGH_STRESS, 75),
-                (EmotionalCheckin.stress_level == StressLevel.VERY_HIGH_STRESS, 100),
-            ),
+            (EmotionalCheckin.stress_level == StressLevel.NO_STRESS, 0),
+            (EmotionalCheckin.stress_level == StressLevel.LOW_STRESS, 25),
+            (EmotionalCheckin.stress_level == StressLevel.MODERATE, 50),
+            (EmotionalCheckin.stress_level == StressLevel.HIGH_STRESS, 75),
+            (EmotionalCheckin.stress_level == StressLevel.VERY_HIGH_STRESS, 100),
             else_=None,
         )
 
@@ -790,8 +786,8 @@ class CounselorReportService:
         stmt = (
             select(
                 Alert.alert_id,
-                Alert.severity,
-                Alert.status,
+                func.lower(Alert.severity).label("severity"),
+                func.lower(Alert.status).label("status"),
                 Alert.created_at,
                 User.name.label("student_name"),
             )
@@ -804,8 +800,9 @@ class CounselorReportService:
             {
                 "id": row.alert_id,
                 "name": row.student_name,
-                "severity": row.severity.value if isinstance(row.severity, AlertSeverity) else row.severity,
-                "status": row.status.value if isinstance(row.status, AlertStatus) else row.status,
+                # Use plain string values to avoid enum mapping issues with legacy data
+                "severity": row.severity,
+                "status": row.status,
                 "created_at": row.created_at,
             }
             for row in db.execute(stmt)
@@ -814,14 +811,15 @@ class CounselorReportService:
     @classmethod
     def list_alerts(cls, db: Session, *, limit: int = 100) -> List[Dict[str, Any]]:
         stmt = (
-            select(Alert.severity, Alert.created_at)
+            select(func.lower(Alert.severity).label("severity"), Alert.created_at)
             .where(Alert.severity.in_([AlertSeverity.LOW, AlertSeverity.MEDIUM, AlertSeverity.HIGH, AlertSeverity.CRITICAL]))
             .order_by(Alert.created_at.desc())
             .limit(limit)
         )
         return [
             {
-                "severity": row.severity.value if isinstance(row.severity, AlertSeverity) else row.severity,
+                # Severity is already a simple string from the query
+                "severity": row.severity,
                 "created_at": row.created_at,
             }
             for row in db.execute(stmt)

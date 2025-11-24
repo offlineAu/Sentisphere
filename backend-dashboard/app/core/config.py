@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     # Database
     DB_USER: str = os.getenv("DB_USER", "root")
     DB_PASS: str = os.getenv("DB_PASS", "")
-    DB_HOST: str = os.getenv("DB_HOST", "localhost")
+    DB_HOST: str = os.getenv("DB_HOST", "127.0.0.1")
     DB_PORT: str = os.getenv("DB_PORT", "3306")
     DB_NAME: str = os.getenv("DB_NAME", "sentisphere_app")
     DB_DRIVER: str = os.getenv("DB_DRIVER", "mysql+mysqlconnector")
