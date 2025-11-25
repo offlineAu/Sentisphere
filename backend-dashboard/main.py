@@ -15,6 +15,7 @@ import csv
 import logging
 from fastapi.security import OAuth2PasswordBearer
 
+
 from app.core.config import settings
 from app.db.database import engine, ENGINE_INIT_ERROR_MSG
 from app.db.mobile_database import mobile_engine, get_mobile_db
@@ -593,6 +594,7 @@ def mood_trend(
     ]
 
 
+@app.get("/api/alerts")
 @app.get("/alerts")
 @app.get("/api/alerts")
 def list_alerts(
@@ -1251,6 +1253,7 @@ def _ensure_conversation_access(
 def list_conversations(
     include_messages: bool = Query(False),
     initiator_user_id: Optional[int] = Query(None),
+    user_id: Optional[int] = Query(None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -2184,6 +2187,26 @@ def behavior_insights(
     ]
 
 
+@app.get("/api/ai/sentiment-summary")
+def ai_sentiment_summary(
+    period: str = Query("month", enum=["week", "month", "year"]),
+    current_user: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    days_map = {"week": 7, "month": 30, "year": 365}
+    days = days_map.get(period, 30)
+    return NarrativeInsightService.behavior_highlights(db, days=days)
+
+
+@app.get("/api/ai/mood-summary")
+def ai_mood_summary(
+    period: str = Query("month", enum=["week", "month", "year"]),
+    current_user: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    days_map = {"week": 7, "month": 30, "year": 365}
+    days = days_map.get(period, 30)
+    return NarrativeInsightService.mood_shift_summary(db, days=days)
 @app.get("/api/events")
 def list_events(current_user: str = Depends(get_current_user)):
     return _load_events()

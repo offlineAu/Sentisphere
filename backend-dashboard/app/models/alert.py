@@ -31,11 +31,26 @@ class Alert(Base):
     user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("user.user_id", ondelete="SET NULL"))
     reason: Mapped[Optional[str]] = mapped_column(String(255))
     severity: Mapped[AlertSeverity] = mapped_column(
-        Enum(AlertSeverity, name="alert_severity", native_enum=False), nullable=False
+        Enum(
+            AlertSeverity,
+            name="alert_severity",
+            native_enum=False,
+            values_callable=lambda e: [m.value for m in e],
+            validate_strings=True,
+        ),
+        nullable=False,
     )
     assigned_to: Mapped[Optional[int]] = mapped_column(ForeignKey("user.user_id", ondelete="SET NULL"))
     status: Mapped[AlertStatus] = mapped_column(
-        Enum(AlertStatus, name="alert_status", native_enum=False), nullable=False, server_default="open"
+        Enum(
+            AlertStatus,
+            name="alert_status",
+            native_enum=False,
+            values_callable=lambda e: [m.value for m in e],
+            validate_strings=True,
+        ),
+        nullable=False,
+        server_default="open",
     )
     resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())

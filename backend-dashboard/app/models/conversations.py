@@ -30,10 +30,11 @@ class Conversation(Base):
             ConversationStatus,
             name="conversation_status",
             native_enum=False,
-            values_callable=lambda enum_cls: [e.value for e in enum_cls],
+            values_callable=lambda e: [m.value for m in e],
+            validate_strings=True,
         ),
         nullable=False,
-        server_default=ConversationStatus.OPEN.value,
+        server_default="open",
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
     last_activity_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
