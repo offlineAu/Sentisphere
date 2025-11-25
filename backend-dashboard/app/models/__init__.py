@@ -1,5 +1,5 @@
-from .user import User
-from .counselor_profile import CounselorProfile
+from . user import User
+from . counselor_profile import CounselorProfile
 from .alert import Alert
 from .appointment_log import AppointmentLog
 from .checkin_sentiment import CheckinSentiment
