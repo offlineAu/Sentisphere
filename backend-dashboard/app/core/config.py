@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     MS_VERIFY_STRICT: bool = os.getenv("MS_VERIFY_STRICT", "0") in ("1", "true", "True")
     ALLOW_PASSWORDLESS_STUDENT_LOGIN: bool = os.getenv("ALLOW_PASSWORDLESS_STUDENT_LOGIN", "1") in ("1", "true", "True")
     
+    # Internal features / flags
+    INTERNAL_API_TOKEN: str = os.getenv("INTERNAL_API_TOKEN", "")
+    INSIGHTS_FEATURE_ENABLED: bool = os.getenv("INSIGHTS_FEATURE_ENABLED", "1") in ("1", "true", "True")
+    
     # Pydantic v2 settings config
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
 

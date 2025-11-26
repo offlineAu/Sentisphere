@@ -308,23 +308,44 @@ function Reports() {
         setEngagement(engagementRes.data || null);
 
         const topRes = await api.get<any>(`/reports/top-stats`, { params: filterParams });
-        const topData = topRes.data;
+        const topData = topRes.data || {};
 
-        const calcDelta = (current: number, previous: number) => {
-          if (!previous) return { delta: "", deltaColor: "" };
-          const change = ((current - previous) / previous) * 100;
+        const calcDelta = (current?: number, previous?: number) => {
+          if (previous === undefined || previous === null || previous === 0) {
+            return { delta: "", deltaColor: "" };
+          }
+          const c = Number(current ?? 0);
+          const p = Number(previous ?? 0);
+          if (!Number.isFinite(c) || !Number.isFinite(p) || p === 0) {
+            return { delta: "", deltaColor: "" };
+          }
+          const change = ((c - p) / p) * 100;
           const sign = change >= 0 ? "+" : "";
           const color = change >= 0 ? "text-green-600" : "text-red-600";
           return { delta: `${sign}${change.toFixed(1)}%`, deltaColor: color };
         };
 
-        const prevStats = { total_students: 1200, active_users: 850, at_risk_students: 20, avg_wellness_score: 7.0 };
-
         setTopStats([
-          { label: "Total Students", value: topData.total_students, ...calcDelta(topData.total_students, prevStats.total_students) },
-          { label: "Active Users", value: topData.active_users, ...calcDelta(topData.active_users, prevStats.active_users) },
-          { label: "At-Risk Students", value: topData.at_risk_students, ...calcDelta(topData.at_risk_students, prevStats.at_risk_students) },
-          { label: "Avg. Wellness Score", value: topData.avg_wellness_score, ...calcDelta(topData.avg_wellness_score, prevStats.avg_wellness_score) },
+          {
+            label: "Total Students",
+            value: topData.total_students,
+            ...calcDelta(topData.total_students, topData.total_students_previous),
+          },
+          {
+            label: "Active Users",
+            value: topData.active_users,
+            ...calcDelta(topData.active_users, topData.active_users_previous),
+          },
+          {
+            label: "At-Risk Students",
+            value: topData.at_risk_students,
+            ...calcDelta(topData.at_risk_students, topData.at_risk_students_previous),
+          },
+          {
+            label: "Avg. Wellness Score",
+            value: topData.avg_wellness_score,
+            ...calcDelta(topData.avg_wellness_score, topData.avg_wellness_score_previous),
+          },
         ]);
 
         // Fetch alerts from unified endpoint for Risk Assessment card
@@ -412,8 +433,8 @@ function Reports() {
 
   return (
     <main
-      className={`transition-all duration-200 bg-[#f9fafb] min-h-screen pt-1 pr-6 pb-6 w-full p-4 sm:p-5 space-y-5 max-w-full pl-6`}
-      style={{ minHeight: "100vh" }}
+      className={`transition-all duration-200 min-h-screen pt-1 pr-6 pb-6 w-full p-4 sm:p-5 space-y-5 max-w-full pl-6`}
+      style={{ minHeight: "100vh", backgroundColor: "transparent" }}
     >
       {/* Header */}
       <div>
@@ -513,312 +534,256 @@ function Reports() {
         })}
       </div>
 
-      {/* Wellness Trend + Academic Calendar */}
-      <div className="grid grid-cols-1 xl:grid-cols-6 gap-4">
-        <div className="space-y-4 xl:col-span-4">
-          <div className="bg-white rounded-2xl shadow p-4 w-full max-w-full">
-            <div className="flex justify-between items-center mb-2">
-              <h2 className={styles.sectionTitle}>Trends</h2>
-              <div className="flex items-center gap-2">
-                <button
-                  className={`p-2 rounded-full border ${page === 0 ? "opacity-40 cursor-not-allowed" : "hover:bg-gray-100"}`}
-                  onClick={() => setPage(p => Math.max(p - 1, 0))}
-                  disabled={page === 0}
-                >
-                  <ChevronLeft className="h-5 w-5 text-[#0d8c4f]" />
-                </button>
-                <button
-                  className={`p-2 rounded-full border ${page === maxPage ? "opacity-40 cursor-not-allowed" : "hover:bg-gray-100"}`}
-                  onClick={() => setPage(p => Math.min(p + 1, maxPage))}
-                  disabled={page === maxPage}
-                >
-                  <ChevronRight className="h-5 w-5 text-[#0d8c4f]" />
-                </button>
-              </div>
-            </div>
-
-            <div className="h-[350px] flex items-center justify-center -ml-1">
-              {paginatedTrendData.length === 0 ? (
-                <span className="text-gray-500 text-sm">No wellness data available.</span>
-              ) : (
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={paginatedTrendData} margin={{ top: 20, right: 60, bottom: 64, left: 0 }}>
-                    <defs>
-                      <linearGradient id="lineWellness" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#0d8c4f" stopOpacity={0.85} />
-                        <stop offset="100%" stopColor="#86efac" stopOpacity={0.25} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="week_label" interval={0} stroke="#0d8c4f" angle={0} height={64} tick={{ fill: "#0f172a", fontSize: 12 }} />
-                    <YAxis domain={[0, 100]} tick={{ fill: "#0f172a", fontSize: 12 }} stroke="#0d8c4f" />
-                    <RTooltip formatter={(value: number) => `${value}%`} labelFormatter={(label) => `Week ${label}`} />
-                    <Legend verticalAlign="top" height={32} wrapperStyle={{ fontSize: "0.75rem" }} />
-                    <Line type="monotone" dataKey="wellness" name="Wellness Index" stroke="#0d8c4f" strokeWidth={3} dot={{ r: 5, strokeWidth: 2 }} activeDot={{ r: 7 }} />
-                    <Line type="monotone" dataKey="mood" name="Mood" stroke="#22c55e" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
-                    <Line type="monotone" dataKey="energy" name="Energy" stroke="#3b82f6" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
-                    <Line type="monotone" dataKey="stress" name="Stress" stroke="#ef4444" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
-                  </LineChart>
-                </ResponsiveContainer>
-              )}
-            </div>
-
-            {/* Stats Row */}
-            <div className="flex flex-col sm:flex-row justify-between mt-4 gap-2">
-              {(() => {
-                const chText = `${changePct >= 0 ? "+" : ""}${changePct}%`;
-                const items = [
-                  { label: "Current Index", value: `${Math.round(latestIndex)}%` },
-                  { label: "Change vs Last Week", value: chText, className: changePct >= 0 ? "text-green-600" : "text-red-600" },
-                  { label: "Active Event", value: summary?.event_name ? `${summary.event_name}` : "None" },
-                ];
-                return items.map((s, i) => (
-                  <div key={i} className="flex-1 bg-gray-50 rounded-xl p-3 text-center">
-                    <div className="text-[#6b7280] text-xs font-medium">{s.label}</div>
-                    <div className={`text-lg font-bold ${s.className || "text-[#333]"}`}>{s.value}</div>
-                  </div>
-                ));
-              })()}
+      {/* Trends + Academic Calendar (Trends emphasized) */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        <div className="bg-white rounded-2xl shadow p-4 w-full max-w-full xl:col-span-2">
+          <div className="flex justify-between items-center mb-2">
+            <h2 className={styles.sectionTitle}>Trends</h2>
+            <div className="flex items-center gap-2">
+              <button
+                className={`p-2 rounded-full border ${page === 0 ? "opacity-40 cursor-not-allowed" : "hover:bg-gray-100"}`}
+                onClick={() => setPage(p => Math.max(p - 1, 0))}
+                disabled={page === 0}
+              >
+                <ChevronLeft className="h-5 w-5 text-[#0d8c4f]" />
+              </button>
+              <button
+                className={`p-2 rounded-full border ${page === maxPage ? "opacity-40 cursor-not-allowed" : "hover:bg-gray-100"}`}
+                onClick={() => setPage(p => Math.min(p + 1, maxPage))}
+                disabled={page === maxPage}
+              >
+                <ChevronRight className="h-5 w-5 text-[#0d8c4f]" />
+              </button>
             </div>
           </div>
 
-          <div className="bg-white rounded-2xl shadow p-4 relative">
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <h2 className={styles.sectionTitle}>Weekly Insights</h2>
-                <p className="text-xs text-[#6b7280] mt-1">Data-informed highlights across wellness and engagement.</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <button className="p-1 rounded-full border hover:bg-gray-100" onClick={() => weeklySliderRef.current?.slickPrev()} aria-label="Previous insight">
-                  <ChevronLeft className="h-4 w-4" />
-                </button>
-                <button className="p-1 rounded-full border hover:bg-gray-100" onClick={() => weeklySliderRef.current?.slickNext()} aria-label="Next insight">
-                  <ChevronRight className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-            {insights.length === 0 ? (
-              <div className="text-sm text-gray-500">No insights available.</div>
+          <div className="h-[350px] flex items-center justify-center -ml-1">
+            {paginatedTrendData.length === 0 ? (
+              <span className="text-gray-500 text-sm">No wellness data available.</span>
             ) : (
-              <div className="relative pb-10">
-                <Slider ref={weeklySliderRef} {...insightSliderSettings} className="weekly-insights-slider">
-                  {insights.map((insight, idx) => (
-                    <div key={`${insight.week_start}-${idx}`} className="px-1 h-full">
-                      <div className="rounded-2xl shadow-sm border bg-gray-50 p-4 text-sm flex h-full flex-col space-y-3 transition hover:shadow-md">
-                        <div className="flex items-center justify-between text-xs text-[#6b7280]">
-                          <span>{new Date(insight.week_start).toLocaleDateString()} - {new Date(insight.week_end).toLocaleDateString()}</span>
-                          <span className="font-medium text-[#111827]">{insight.event_name ?? "No Event"}</span>
-                        </div>
-                        <div>
-                          <h3 className="text-base font-semibold text-[#111827]">{insight.title}</h3>
-                          <p className="text-[#374151] mt-1 leading-relaxed">{insight.description}</p>
-                        </div>
-                        <div className="bg-white rounded-lg p-3 border border-dashed border-[#0d8c4f]/40">
-                          <div className="text-xs uppercase tracking-wide text-[#0d8c4f] font-semibold mb-1">Recommendation</div>
-                          <p className="text-sm text-[#0f172a] leading-relaxed">{insight.recommendation}</p>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </Slider>
-              </div>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={paginatedTrendData} margin={{ top: 20, right: 60, bottom: 64, left: 0 }}>
+                  <defs>
+                    <linearGradient id="lineWellness" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#0d8c4f" stopOpacity={0.85} />
+                      <stop offset="100%" stopColor="#86efac" stopOpacity={0.25} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="week_label" interval={0} stroke="#0d8c4f" angle={0} height={64} tick={{ fill: "#0f172a", fontSize: 12 }} />
+                  <YAxis domain={[0, 100]} tick={{ fill: "#0f172a", fontSize: 12 }} stroke="#0d8c4f" />
+                  <RTooltip formatter={(value: number) => `${value}%`} labelFormatter={(label) => `Week ${label}`} />
+                  <Legend verticalAlign="top" height={32} wrapperStyle={{ fontSize: "0.75rem" }} />
+                  <Line type="monotone" dataKey="wellness" name="Wellness Index" stroke="#0d8c4f" strokeWidth={3} dot={{ r: 5, strokeWidth: 2 }} activeDot={{ r: 7 }} />
+                  <Line type="monotone" dataKey="mood" name="Mood" stroke="#22c55e" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                  <Line type="monotone" dataKey="energy" name="Energy" stroke="#3b82f6" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                  <Line type="monotone" dataKey="stress" name="Stress" stroke="#ef4444" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                </LineChart>
+              </ResponsiveContainer>
             )}
           </div>
 
-          <div className="bg-white rounded-2xl shadow p-4 min-h-[260px] flex flex-col">
-            <h3 className="text-[#333] font-semibold mb-3 text-sm">Engagement Metrics</h3>
-            {!engagement ? (
-              <div className="text-sm text-gray-500 flex-1 flex items-center justify-center">No engagement data available.</div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-center flex-1">
-                <div className="bg-gray-50 rounded-xl p-3 flex flex-col justify-center">
-                  <div className="text-[#6b7280] text-xs">Active Students (This Week)</div>
-                  <div className="text-xl font-bold text-[#111827]">{engagement.active_students_this_week}</div>
-                  <div className="text-xs text-[#6b7280]">Last Week: {engagement.active_students_last_week}</div>
+          {/* Stats Row */}
+          <div className="flex flex-col sm:flex-row justify-between mt-4 gap-2">
+            {(() => {
+              const chText = `${changePct >= 0 ? "+" : ""}${changePct}%`;
+              const items = [
+                { label: "Current Index", value: `${Math.round(latestIndex)}%` },
+                { label: "Change vs Last Week", value: chText, className: changePct >= 0 ? "text-green-600" : "text-red-600" },
+                { label: "Active Event", value: summary?.event_name ? `${summary.event_name}` : "None" },
+              ];
+              return items.map((s, i) => (
+                <div key={i} className="flex-1 bg-gray-50 rounded-xl p-3 text-center">
+                  <div className="text-[#6b7280] text-xs font-medium">{s.label}</div>
+                  <div className={`text-lg font-bold ${s.className || "text-[#333]"}`}>{s.value}</div>
                 </div>
-                <div className="bg-gray-50 rounded-xl p-3 flex flex-col justify-center">
-                  <div className="text-[#6b7280] text-xs">Avg Check-ins / Student</div>
-                  <div className="text-xl font-bold text-[#111827]">{engagement.avg_checkins_per_student}</div>
-                </div>
-                <div className="bg-gray-50 rounded-xl p-3 flex flex-col justify-center">
-                  <div className="text-[#6b7280] text-xs">Participation Change</div>
-                  <div className={`text-xl font-bold ${String(engagement.participation_change).startsWith('-') ? 'text-red-600' : 'text-green-600'}`}>{engagement.participation_change}</div>
-                </div>
-              </div>
-            )}
+              ));
+            })()}
           </div>
         </div>
 
-        <div className="space-y-4 xl:col-span-2 xl:pl-6">
-          <div className="bg-white rounded-2xl shadow-sm border p-4">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h2 className={styles.sectionTitle}>Academic Calendar</h2>
-                <p className="text-xs text-[#6b7280] mt-1">Uploaded events, exams, and holidays appear directly on the calendar.</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  className="p-2 rounded-full border hover:bg-gray-100"
-                  onClick={() => setCalendarMonth(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}
-                  aria-label="Previous month"
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </button>
-                <span className="text-sm font-semibold text-[#111827] w-28 text-center">
-                  {calendarMonth.toLocaleDateString(undefined, { month: "long", year: "numeric" })}
-                </span>
-                <button
-                  className="p-2 rounded-full border hover:bg-gray-100"
-                  onClick={() => setCalendarMonth(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}
-                  aria-label="Next month"
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </button>
-              </div>
+        <div className="bg-white rounded-2xl shadow-sm border p-4 xl:col-span-1 flex flex-col">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className={styles.sectionTitle}>Academic Calendar</h2>
+              <p className="text-xs text-[#6b7280] mt-1">Uploaded events, exams, and holidays appear directly on the calendar.</p>
             </div>
-
-            <div className="grid grid-cols-7 gap-1 text-[11px] font-semibold text-[#6b7280]">
-              {"Sun Mon Tue Wed Thu Fri Sat".split(" ").map((day) => (
-                <div key={day} className="text-center py-1 uppercase tracking-wide">{day}</div>
-              ))}
-            </div>
-            <div className="grid grid-cols-7 gap-1 mt-1">
-              {calendarDays.map(({ date, inMonth, events: dayEvents }, idx) => {
-                const isToday = (() => {
-                  const now = new Date();
-                  return date.getDate() === now.getDate() && date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
-                })();
-                return (
-                  <div
-                    key={`${date.toISOString()}-${idx}`}
-                    className={`rounded-xl border p-2 min-h-[56px] flex flex-col gap-1 text-[10px] ${inMonth ? "bg-gray-50" : "bg-gray-100/60 text-gray-400"} ${isToday ? "border-[#0d8c4f]" : "border-gray-200"}`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className={`font-semibold text-base ${inMonth ? "text-[#111827]" : "text-gray-400"}`}>{date.getDate()}</span>
-                      {dayEvents.length > 0 && <span className="text-[10px] text-[#0d8c4f] font-semibold">{dayEvents.length}</span>}
-                    </div>
-                    {dayEvents.slice(0, 2).map((ev, i) => (
-                      <div key={i} className="rounded-md bg-[#0d8c4f]/10 px-1 py-0.5 text-[10px] text-[#0d8c4f] truncate">
-                        {ev.name}
-                      </div>
-                    ))}
-                    {dayEvents.length > 2 && (
-                      <div className="text-[9px] text-[#6b7280]">+{dayEvents.length - 2} more</div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="mt-4 space-y-2">
-              <div
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={async (e) => {
-                  e.preventDefault();
-                  const file = e.dataTransfer.files?.[0];
-                  if (file) await uploadCalendar(file);
-                }}
-                className="border-2 border-dashed rounded-2xl p-4 text-center text-xs hover:bg-gray-50 transition"
+            <div className="flex items-center gap-2">
+              <button
+                className="p-2 rounded-full border hover:bg-gray-100"
+                onClick={() => setCalendarMonth(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}
+                aria-label="Previous month"
               >
-                <p className="text-[#374151]">Drag & drop your academic calendar file anywhere in this panel.</p>
-              </div>
-              <div className="flex flex-col gap-2">
-                <div className="text-[11px] text-[#6b7280]">
-                  Supported files: PNG, JPG, PDF, CSV, XLSX. Parsed events feed the calendar above.
-                </div>
-                <label className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-full bg-[#0d8c4f] text-white text-sm cursor-pointer hover:opacity-90">
-                  <CalendarDays className="h-4 w-4" /> Browse calendar file
-                  <input
-                    type="file"
-                    accept=".png,.jpg,.jpeg,.pdf,.xlsx,.csv"
-                    className="hidden"
-                    onChange={async (e) => {
-                      const f = e.target.files?.[0];
-                      if (f) await uploadCalendar(f);
-                    }}
-                  />
-                </label>
-              </div>
-              {uploading && <div className="text-[11px] text-[#6b7280]">Processing calendar...</div>}
-              {uploadError && <div className="text-[11px] text-red-600">{uploadError}</div>}
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <span className="text-sm font-semibold text-[#111827] w-28 text-center">
+                {calendarMonth.toLocaleDateString(undefined, { month: "long", year: "numeric" })}
+              </span>
+              <button
+                className="p-2 rounded-full border hover:bg-gray-100"
+                onClick={() => setCalendarMonth(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}
+                aria-label="Next month"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
             </div>
+          </div>
 
-            <div className="mt-4">
-              <h3 className="text-sm font-semibold text-[#111827] mb-2">Detected Events</h3>
-              {events.length === 0 ? (
-                <div className="text-sm text-gray-500">No events detected yet.</div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {events.map((ev, i) => (
-                    <div key={i} className="rounded-xl border p-2 bg-gray-50">
-                      <div className="text-sm font-semibold text-[#111827]">{ev.name}</div>
-                      <div className="text-xs text-[#6b7280]">
-                        {new Date(ev.start).toLocaleDateString()} – {new Date(ev.end ?? ev.start).toLocaleDateString()}
+          <div className="grid grid-cols-7 gap-1 text-[11px] font-semibold text-[#6b7280]">
+            {"Sun Mon Tue Wed Thu Fri Sat".split(" ").map((day) => (
+              <div key={day} className="text-center py-1 uppercase tracking-wide">{day}</div>
+            ))}
+          </div>
+          <div className="grid grid-cols-7 gap-1 mt-1 flex-1">
+            {calendarDays.map(({ date, inMonth, events: dayEvents }, idx) => {
+              const isToday = (() => {
+                const now = new Date();
+                return date.getDate() === now.getDate() && date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
+              })();
+              return (
+                <div
+                  key={`${date.toISOString()}-${idx}`}
+                  className={`rounded-xl border p-2 min-h-[56px] flex flex-col gap-1 text-[10px] ${inMonth ? "bg-gray-50" : "bg-gray-100/60 text-gray-400"} ${isToday ? "border-[#0d8c4f]" : "border-gray-200"}`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className={`font-semibold text-base ${inMonth ? "text-[#111827]" : "text-gray-400"}`}>{date.getDate()}</span>
+                    {dayEvents.length > 0 && <span className="text-[10px] text-[#0d8c4f] font-semibold">{dayEvents.length}</span>}
+                  </div>
+                  {dayEvents.slice(0, 2).map((ev, i) => (
+                    <div key={i} className="rounded-md bg-[#0d8c4f]/10 px-1 py-0.5 text-[10px] text-[#0d8c4f] truncate">
+                      {ev.name}
+                    </div>
+                  ))}
+                  {dayEvents.length > 2 && (
+                    <div className="text-[9px] text-[#6b7280]">+{dayEvents.length - 2} more</div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Weekly Insights + Behavioral & Pattern Insights (side by side) */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <div className="bg-white rounded-2xl shadow p-4 relative">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h2 className={styles.sectionTitle}>Weekly Insights</h2>
+              <p className="text-xs text-[#6b7280] mt-1">Data-informed highlights across wellness and engagement.</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button className="p-1 rounded-full border hover:bg-gray-100" onClick={() => weeklySliderRef.current?.slickPrev()} aria-label="Previous insight">
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <button className="p-1 rounded-full border hover:bg-gray-100" onClick={() => weeklySliderRef.current?.slickNext()} aria-label="Next insight">
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+          {insights.length === 0 ? (
+            <div className="text-sm text-gray-500">No insights available.</div>
+          ) : (
+            <div className="relative pb-10">
+              <Slider ref={weeklySliderRef} {...insightSliderSettings} className="weekly-insights-slider">
+                {insights.map((insight, idx) => (
+                  <div key={`${insight.week_start}-${idx}`} className="px-1 h-full">
+                    <div className="rounded-2xl shadow-sm border bg-gray-50 p-4 text-sm flex h-full flex-col space-y-3 transition hover:shadow-md">
+                      <div className="flex items-center justify-between text-xs text-[#6b7280]">
+                        <span>{new Date(insight.week_start).toLocaleDateString()} - {new Date(insight.week_end).toLocaleDateString()}</span>
+                        <span className="font-medium text-[#111827]">{insight.event_name ?? "No Event"}</span>
                       </div>
-                      {ev.type && (
-                        <div className="mt-1 inline-flex items-center rounded-full bg-[#0d8c4f]/10 px-2 py-0.5 text-[11px] text-[#0d8c4f]">
-                          {ev.type}
+                      <div>
+                        <h3 className="text-base font-semibold text-[#111827]">{insight.title}</h3>
+                        <p className="text-[#374151] mt-1 leading-relaxed">{insight.description}</p>
+                      </div>
+                      <div className="bg-white rounded-lg p-3 border border-dashed border-[#0d8c4f]/40">
+                        <div className="text-xs uppercase tracking-wide text-[#0d8c4f] font-semibold mb-1">Recommendation</div>
+                        <p className="text-sm text-[#0f172a] leading-relaxed">{insight.recommendation}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </Slider>
+            </div>
+          )}
+        </div>
+
+        <div className="bg-white rounded-2xl shadow-sm border p-4 min-h-[260px] flex flex-col">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className={styles.sectionTitle}>Behavioral & Pattern Insights</h2>
+            <div className="flex items-center gap-2">
+              <button className="p-1 rounded-full border hover:bg-gray-100" onClick={() => behaviorSliderRef.current?.slickPrev()} aria-label="Previous behavior insight">
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <button className="p-1 rounded-full border hover:bg-gray-100" onClick={() => behaviorSliderRef.current?.slickNext()} aria-label="Next behavior insight">
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+          {behaviorInsights.length === 0 ? (
+            <div className="text-sm text-gray-500 flex-1 flex items-center justify-center">No behavioral insights available.</div>
+          ) : (
+            <div className="relative pb-10 flex-1">
+              <Slider
+                ref={behaviorSliderRef}
+                dots
+                arrows={false}
+                infinite={behaviorInsights.length > 1}
+                autoplay={behaviorInsights.length > 1}
+                autoplaySpeed={7000}
+                adaptiveHeight={false}
+                appendDots={(dots: React.ReactNode) => (
+                  <div className="absolute bottom-3 left-0 right-0"><ul className="flex justify-center gap-2">{dots}</ul></div>
+                )}
+                customPaging={() => <span className="block h-2 w-2 rounded-full bg-gray-300" />}
+              >
+                {behaviorInsights.map((bi, idx) => (
+                  <div key={idx} className="px-1">
+                    <div className="rounded-2xl shadow-sm border bg-gray-50 p-4 text-sm">
+                      <h3 className="text-base font-semibold text-[#111827] mb-1">{bi.title}</h3>
+                      <p className="text-[#374151] leading-relaxed mb-3">{bi.description}</p>
+                      {Array.isArray(bi.metrics) && bi.metrics.length > 0 && (
+                        <div className="grid grid-cols-2 gap-2">
+                          {bi.metrics.map((m, i) => (
+                            <div key={i} className="bg-white rounded-lg border p-2 text-center">
+                              <div className="text-[11px] text-[#6b7280]">{m.label}</div>
+                              <div className="text-lg font-bold text-[#111827]">{m.value}</div>
+                            </div>
+                          ))}
                         </div>
                       )}
                     </div>
-                  ))}
-                </div>
-              )}
+                  </div>
+                ))}
+              </Slider>
             </div>
-          </div>
-
-          <div className="bg-white rounded-2xl shadow-sm border p-4 min-h-[260px] flex flex-col">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className={styles.sectionTitle}>Behavioral & Pattern Insights</h2>
-              <div className="flex items-center gap-2">
-                <button className="p-1 rounded-full border hover:bg-gray-100" onClick={() => behaviorSliderRef.current?.slickPrev()} aria-label="Previous behavior insight">
-                  <ChevronLeft className="h-4 w-4" />
-                </button>
-                <button className="p-1 rounded-full border hover:bg-gray-100" onClick={() => behaviorSliderRef.current?.slickNext()} aria-label="Next behavior insight">
-                  <ChevronRight className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-            {behaviorInsights.length === 0 ? (
-              <div className="text-sm text-gray-500 flex-1 flex items-center justify-center">No behavioral insights available.</div>
-            ) : (
-              <div className="relative pb-10 flex-1">
-                <Slider
-                  ref={behaviorSliderRef}
-                  dots
-                  arrows={false}
-                  infinite={behaviorInsights.length > 1}
-                  autoplay={behaviorInsights.length > 1}
-                  autoplaySpeed={7000}
-                  adaptiveHeight={false}
-                  appendDots={(dots: React.ReactNode) => (
-                    <div className="absolute bottom-3 left-0 right-0"><ul className="flex justify-center gap-2">{dots}</ul></div>
-                  )}
-                  customPaging={() => <span className="block h-2 w-2 rounded-full bg-gray-300" />}
-                >
-                  {behaviorInsights.map((bi, idx) => (
-                    <div key={idx} className="px-1">
-                      <div className="rounded-2xl shadow-sm border bg-gray-50 p-4 text-sm">
-                        <h3 className="text-base font-semibold text-[#111827] mb-1">{bi.title}</h3>
-                        <p className="text-[#374151] leading-relaxed mb-3">{bi.description}</p>
-                        {Array.isArray(bi.metrics) && bi.metrics.length > 0 && (
-                          <div className="grid grid-cols-2 gap-2">
-                            {bi.metrics.map((m, i) => (
-                              <div key={i} className="bg-white rounded-lg border p-2 text-center">
-                                <div className="text-[11px] text-[#6b7280]">{m.label}</div>
-                                <div className="text-lg font-bold text-[#111827]">{m.value}</div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </Slider>
-              </div>
-            )}
-          </div>
+          )}
         </div>
+      </div>
+
+      {/* Engagement Metrics (full width under paired sections) */}
+      <div className="bg-white rounded-2xl shadow p-4 min-h-[260px] flex flex-col">
+        <h3 className="text-[#333] font-semibold mb-3 text-sm">Engagement Metrics</h3>
+        {!engagement ? (
+          <div className="text-sm text-gray-500 flex-1 flex items-center justify-center">No engagement data available.</div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-center flex-1">
+            <div className="bg-gray-50 rounded-xl p-3 flex flex-col justify-center">
+              <div className="text-[#6b7280] text-xs">Active Students (This Week)</div>
+              <div className="text-xl font-bold text-[#111827]">{engagement.active_students_this_week}</div>
+              <div className="text-xs text-[#6b7280]">Last Week: {engagement.active_students_last_week}</div>
+            </div>
+            <div className="bg-gray-50 rounded-xl p-3 flex flex-col justify-center">
+              <div className="text-[#6b7280] text-xs">Avg Check-ins / Student</div>
+              <div className="text-xl font-bold text-[#111827]">{engagement.avg_checkins_per_student}</div>
+            </div>
+            <div className="bg-gray-50 rounded-xl p-3 flex flex-col justify-center">
+              <div className="text-[#6b7280] text-xs">Participation Change</div>
+              <div className={`text-xl font-bold ${String(engagement.participation_change).startsWith('-') ? 'text-red-600' : 'text-green-600'}`}>{engagement.participation_change}</div>
+            </div>
+          </div>
+        )}
       </div>
       {/* Concerns & Interventions */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

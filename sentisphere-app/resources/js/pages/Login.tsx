@@ -54,7 +54,7 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#f3f5f7] p-4">
+    <div className="min-h-screen flex items-center justify-center bg-transparent p-4">
       <Head title="Login" />
       <div className="w-full max-w-5xl bg-white rounded-2xl shadow-xl overflow-hidden grid grid-cols-1 md:grid-cols-2">
         {/* Left panel (Welcome Back) */}
