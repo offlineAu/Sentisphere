@@ -194,10 +194,10 @@ export default function Chat() {
   }
 
   return (
-    <div className="flex bg-[#f5f5f5] min-h-screen">
+    <div className="flex min-h-screen">
       <Sidebar />
       <main
-        className={`transition-all duration-200 bg-[#f5f5f5] min-h-screen space-y-4 ${
+        className={`transition-all duration-200 min-h-screen space-y-4 ${
           open ? "pl-[17rem]" : "pl-[5rem]"
         } pt-1 pr-6 pb-6`}
       >

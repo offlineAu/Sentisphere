@@ -113,10 +113,12 @@ CREATE TABLE conversations (
     initiator_user_id INT NOT NULL,
     initiator_role ENUM('student') NOT NULL,
     subject VARCHAR(100),
+    preferred_counselor_id INT,
     status ENUM('open', 'ended') DEFAULT 'open',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     last_activity_at DATETIME,
-    FOREIGN KEY (initiator_user_id) REFERENCES user(user_id)
+    FOREIGN KEY (initiator_user_id) REFERENCES user(user_id),
+    FOREIGN KEY (preferred_counselor_id) REFERENCES user(user_id)
 );
 CREATE TABLE messages (
     message_id INT PRIMARY KEY AUTO_INCREMENT,
@@ -136,6 +138,21 @@ CREATE TABLE appointment_log (
     remarks TEXT,
     FOREIGN KEY (user_id) REFERENCES user(user_id)
 );
+
+CREATE TABLE ai_insights (
+  insight_id INT PRIMARY KEY AUTO_INCREMENT,
+  user_id INT DEFAULT NULL, -- NULL = platform-level insights
+  type ENUM('weekly', 'behavioral') NOT NULL,
+  timeframe_start DATE NOT NULL,
+  timeframe_end DATE NOT NULL,
+  data JSON NOT NULL, -- structured blob: {summary, mood_trends, top_concerns, metrics, metadata}
+  risk_level ENUM('low','medium','high','critical') DEFAULT 'low',
+  generated_by VARCHAR(100), -- e.g., "fastapi_v1"
+  generated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_insight (user_id, type, timeframe_start, timeframe_end),
+  FOREIGN KEY (user_id) REFERENCES user(user_id)
+);
+
 SET FOREIGN_KEY_CHECKS=1;
 
 -- INSERT USERS

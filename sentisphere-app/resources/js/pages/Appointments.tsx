@@ -6,7 +6,7 @@ export default function Appointments() {
 
   return (
     <main
-      className={`transition-all duration-200 bg-[#f9fafb] min-h-screen space-y-6 pt-6 pr-6 pb-6`}
+      className={`transition-all duration-200 min-h-screen space-y-6 pt-6 pr-6 pb-6`}
     >
       <h1>Appointments</h1>
       <p>Shows appointment downloads and probability graph.</p>

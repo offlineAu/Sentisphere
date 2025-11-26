@@ -345,7 +345,8 @@ function Profile() {
 
   return (
     <main
-      className={`transition-all duration-200 bg-[#f9fafb] min-h-screen space-y-6 pt-6 pr-6 pb-6`}
+      className={`transition-all duration-200 min-h-screen space-y-6 pt-6 pr-6 pb-6`}
+      style={{ backgroundColor: "transparent" }}
     >
       <div className="pl-4 md:pl-6">
         <h1 className="text-2xl font-bold text-[#0d8c4f]">Profile</h1>
