@@ -31,21 +31,6 @@ def normalize_punctuation(text: str) -> str:
     return _PUNCT_RE.sub("'", text)
 
 
-def clean_text(text: str) -> str:
-    t = text or ""
-    t = remove_html(t)
-    t = remove_urls(t)
-    t = normalize_punctuation(t)
-    t = strip_accents(t)
-    t = t.lower()
-    t = normalize_whitespace(t)
-    return t
-
-
-def tokenize(text: str) -> list[str]:
-    t = clean_text(text)
-    return [tok for tok in re.findall(r"[a-z0-9']+", t) if tok]
-
 def clean_text(text: str | None) -> str:
     if not text:
         return ""
@@ -59,5 +44,6 @@ def clean_text(text: str | None) -> str:
     return cleaned
 
 
-def tokenize(text: str) -> Iterable[str]:
-    return normalize_whitespace(text).split()
+def tokenize(text: str) -> list[str]:
+    t = clean_text(text)
+    return t.split()

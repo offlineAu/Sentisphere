@@ -12,6 +12,33 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.db.database import engine
+from app.utils.text_cleaning import clean_text
+
+try:
+    from sentence_transformers import SentenceTransformer  # type: ignore
+    _HAS_ST = True
+except Exception:  # pragma: no cover
+    _HAS_ST = False
+    SentenceTransformer = None  # type: ignore
+
+try:
+    import numpy as _np  # type: ignore
+    from sklearn.cluster import KMeans  # type: ignore
+    _HAS_SK = True
+except Exception:  # pragma: no cover
+    _HAS_SK = False
+
+from functools import lru_cache
+
+
+@lru_cache(maxsize=1)
+def _get_embed_model():
+    if not _HAS_ST:
+        return None
+    try:
+        return SentenceTransformer("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+    except Exception:
+        return None
 
 _BISAYA_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "bisaya_keywords.json")
 
@@ -92,6 +119,61 @@ class InsightGenerationService:
                 if phrase in lt:
                     found.add(concept)
         return sorted(found)
+
+    @staticmethod
+    def _cluster_journal_themes(texts: List[str], max_k: int = 4) -> List[dict]:
+        """Cluster redacted journal snippets into coarse themes using multilingual embeddings.
+
+        Returns list of { label, count, examples } dicts. Fallback to keyword-only when
+        embeddings are unavailable or insufficient data.
+        """
+        snippets = [clean_text(t) for t in texts if t]
+        snippets = [s for s in snippets if len(s) >= 10]
+        if len(snippets) < 3:
+            # too few items; just map keywords
+            keys = InsightGenerationService._match_keywords(snippets)
+            return [{"label": k, "count": 1, "examples": []} for k in keys]
+
+        model = _get_embed_model()
+        if not model or not _HAS_SK:
+            keys = InsightGenerationService._match_keywords(snippets)
+            return [{"label": k, "count": 1, "examples": []} for k in keys]
+
+        vecs = model.encode(snippets, normalize_embeddings=False)
+        arr = _np.asarray(vecs)
+        k = min(max_k, max(2, min(5, int(round(len(snippets) ** 0.5)))))
+        try:
+            km = KMeans(n_clusters=k, n_init=10, random_state=42)
+            labels = km.fit_predict(arr)
+        except Exception:
+            labels = _np.zeros(len(snippets), dtype=int)
+
+        # crude token scorer per cluster
+        stop = {"the","and","this","that","with","for","from","ang","mga","sa","nga","ako","imo","ikaw","siya"}
+        clusters: dict[int, list[str]] = defaultdict(list)
+        for s, lb in zip(snippets, labels):
+            clusters[int(lb)].append(s)
+
+        out: list[dict] = []
+        for lb, items in clusters.items():
+            tok_counter: Counter = Counter()
+            for it in items:
+                for tok in it.split():
+                    if len(tok) >= 4 and tok not in stop:
+                        tok_counter[tok] += 1
+            top = [w for w, _ in tok_counter.most_common(3)]
+            label = ", ".join(top) if top else "general"
+            # try mapping known keyword concepts for a friendlier label
+            concepts = InsightGenerationService._match_keywords(items)
+            if concepts:
+                label = concepts[0]
+            out.append({
+                "label": label,
+                "count": len(items),
+                "examples": items[:3],
+            })
+        out.sort(key=lambda d: d["count"], reverse=True)
+        return out
 
     @staticmethod
     def _daily_avg_mood(checkins: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -228,6 +310,7 @@ class InsightGenerationService:
         # Keyword concepts
         redacted_texts = [j.get("redacted_excerpt") or "" for j in journals]
         keyword_concepts = InsightGenerationService._match_keywords(redacted_texts)
+        journal_themes = InsightGenerationService._cluster_journal_themes(redacted_texts)
 
         # Risk factors (for metadata and recommendation)
         sentiment_by_day: Dict[str, Counter] = defaultdict(Counter)
@@ -294,6 +377,7 @@ class InsightGenerationService:
             "mood_trends": {"daily": daily, "trend": trend},
             "stress_energy_patterns": stress_energy_patterns,
             "top_concerns": keyword_concepts,
+            "journal_themes": journal_themes,
             "recommendation": recommendation,
             "metadata": {
                 "risk_level": level,
@@ -419,11 +503,16 @@ class InsightGenerationService:
         else:
             level = "critical"
 
+        # Themes via embeddings (if available)
+        redacted_texts = [j.get("redacted_excerpt") or "" for j in journals]
+        themes = InsightGenerationService._cluster_journal_themes(redacted_texts)
+
         data: Dict[str, Any] = {
             "recurring_emotional_patterns": recurring_emotional_patterns,
             "irregular_changes": irregular_changes,
             "risk_flags": risk_flags,
             "behavioral_clusters": behavioral_clusters,
+            "themes": themes,
             "recommendation": recommendation,
             "metadata": {
                 "risk_level": level,
