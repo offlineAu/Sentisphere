@@ -72,6 +72,10 @@ from app.services.counselor_report_service import CounselorReportService
 from app.services.sentiment_service import SentimentService
 from app.services.counselor_service import CounselorService
 from app.schemas.counselor_profile import CounselorProfilePayload
+from app.services.embedding_service import EmbeddingService
+from app.schemas.similarity import SimilarJournal
+from app.schemas.sentiment import SentimentResult
+from app.utils.nlp_loader import analyze_text
 from app.utils.date_utils import (
     parse_global_range,
     get_week_range,
@@ -253,7 +257,6 @@ def _run_weekly_insights_job():
                     timeframe_end=end_dt.date(),
                     payload=payload,
                     insight_type="weekly",
-                    use_llm=True,
                 )
             logging.info("[scheduler] weekly insights generated for %d targets (%s to %s)", len(targets), start_dt, end_dt)
         finally:
@@ -279,7 +282,6 @@ def _run_daily_behavioral_job():
                     timeframe_end=end_dt.date(),
                     payload=payload,
                     insight_type="behavioral",
-                    use_llm=True,
                 )
             logging.info("[scheduler] behavioral insights generated for %d targets (%s to %s)", len(targets), start_dt, end_dt)
         finally:
@@ -485,11 +487,85 @@ def delete_journal(
     return None
 
 
+# --- Debug: direct sentiment probe (development only) ---
+
+
+class SentimentProbeIn(BaseModel):
+    text: str
+
+
+@app.post("/api/debug/sentiment", response_model=SentimentResult)
+def debug_sentiment_probe(payload: SentimentProbeIn):
+    if settings.ENV.lower() == "production":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not available in production")
+    out = analyze_text(payload.text or "")
+    return SentimentResult(
+        sentiment=out.sentiment,
+        emotions=out.emotions,
+        confidence=out.confidence,
+        model_version=out.model_version,
+    )
+
+
+# --- Journals: Similarity ---
+
+
+@app.get("/api/journals-service/{journal_id}/similar", response_model=List[SimilarJournal])
+def similar_journals_service(
+    journal_id: int,
+    top_k: int = Query(5, ge=1, le=20),
+    same_user_only: bool = Query(False),
+    _current_user: User = Depends(require_counselor),
+    db: Session = Depends(get_db),
+):
+    results = EmbeddingService.similar_journals(
+        db,
+        journal_id=journal_id,
+        top_k=top_k,
+        same_user_only=same_user_only,
+    )
+    return results
+
+
+# Alias path without the -service suffix (kept for flexibility)
+@app.get("/api/journals/{journal_id}/similar", response_model=List[SimilarJournal])
+def similar_journals_alias(
+    journal_id: int,
+    top_k: int = Query(5, ge=1, le=20),
+    same_user_only: bool = Query(False),
+    _current_user: User = Depends(require_counselor),
+    db: Session = Depends(get_db),
+):
+    results = EmbeddingService.similar_journals(
+        db,
+        journal_id=journal_id,
+        top_k=top_k,
+        same_user_only=same_user_only,
+    )
+    return results
+
+
 # --- Mobile ingestion: Alerts ---
 
 
 @app.post("/alerts", response_model=AlertSchema, status_code=status.HTTP_201_CREATED)
 def create_alert(
+    alert_in: AlertCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    payload_data = alert_in.model_dump(exclude_unset=True)
+    if current_user.role == UserRole.student:
+        if alert_in.user_id and alert_in.user_id != current_user.user_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot report for another user")
+        payload_data["user_id"] = current_user.user_id
+    alert = AlertService.create_alert(db, AlertCreate(**payload_data))
+    return alert
+
+
+# Alias for frontend base URL that includes /api
+@app.post("/api/alerts", response_model=AlertSchema, status_code=status.HTTP_201_CREATED)
+def create_alert_api(
     alert_in: AlertCreate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
