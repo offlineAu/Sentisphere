@@ -19,10 +19,6 @@ Route::get('/chat', function () {
     return Inertia::render('Chat');
 });
 
-// Appointments
-Route::get('/appointments', function () {
-    return Inertia::render('Appointments');
-});
 
 // Reports
 Route::get('/reports', function () {

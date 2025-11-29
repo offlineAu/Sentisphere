@@ -11,6 +11,9 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [showPwd, setShowPwd] = useState(false);
+  const [showPwd2, setShowPwd2] = useState(false);
+  const [remember, setRemember] = useState(false);
 
   const onSignin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -54,36 +57,36 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#f3f5f7] p-4">
+    <div className="min-h-screen relative flex items-center justify-center bg-transparent p-4">
       <Head title="Login" />
       <div className="w-full max-w-5xl bg-white rounded-2xl shadow-xl overflow-hidden grid grid-cols-1 md:grid-cols-2">
         {/* Left panel (Welcome Back) */}
-        <div className="hidden md:flex flex-col justify-center gap-6 p-10 bg-gradient-to-br from-emerald-600 via-emerald-500 to-teal-500 text-white">
-          <div>
-            <div className="text-2xl font-bold">Welcome Back!</div>
-            <div className="opacity-90 mt-2 text-sm">To keep connected with us please login with your personal info</div>
+        <div className="hidden md:flex relative flex-col items-center justify-center gap-5 p-10 bg-gradient-to-br from-emerald-600 via-emerald-500 to-teal-500 text-white">
+          <div className="flex items-center gap-2">
+            <img src="/logo.png" alt="Sentisphere logo" className="h-20 w-20 rounded-full bg-white" />
           </div>
-          <button
-            className="border border-white/80 px-5 py-2 rounded-full self-start hover:bg-white/10"
-            onClick={() => setMode('signin')}
-          >
-            SIGN IN
-          </button>
+          <div className="relative text-center">
+            <div className="pointer-events-none absolute -inset-10 rounded-full" style={{
+              background: "radial-gradient(closest-side, rgba(255,255,255,0.35), transparent 70%)"
+            }} />
+            <div className="text-3xl font-bold relative">Welcome to Sentisphere</div>
+            <div className="opacity-90 mt-2 text-sm">Support student wellness with timely insights and thoughtful interventions.</div>
+          </div>
         </div>
 
         {/* Right panel (Auth forms) */}
         <div className="p-8 md:p-10">
           <div className="flex items-center justify-between mb-6">
-            <h2 className="text-2xl font-semibold text-emerald-700">
+            <h2 className="text-2xl font-semibold text-primary">
               {mode === 'signup' ? 'Create Account' : 'Sign In'}
             </h2>
             <div className="flex gap-2">
               <button
-                className={`text-xs px-3 py-1.5 rounded-full ${mode==='signin' ? 'bg-emerald-600 text-white' : 'border border-gray-300 text-gray-700'}`}
+                className={`text-xs px-3 py-1.5 rounded-full ${mode==='signin' ? 'bg-primary text-primary-foreground' : 'border border-gray-300 text-gray-700 hover:bg-gray-100 active:bg-gray-200'}`}
                 onClick={() => setMode('signin')}
               >Sign In</button>
               <button
-                className={`text-xs px-3 py-1.5 rounded-full ${mode==='signup' ? 'bg-emerald-600 text-white' : 'border border-gray-300 text-gray-700'}`}
+                className={`text-xs px-3 py-1.5 rounded-full ${mode==='signup' ? 'bg-primary text-primary-foreground' : 'border border-gray-300 text-gray-700 hover:bg-gray-100 active:bg-gray-200'}`}
                 onClick={() => setMode('signup')}
               >Sign Up</button>
             </div>
@@ -101,7 +104,7 @@ export default function Login() {
                 <form onSubmit={onSignin} className="space-y-3">
                   <label className="block text-sm text-gray-700">Email</label>
                   <input
-                    className="w-full border rounded-xl px-3 py-2"
+                    className="w-full border rounded-xl px-3 py-2 border-border focus:ring-2 focus:ring-[var(--ring)] outline-none"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     autoComplete="username"
@@ -109,17 +112,31 @@ export default function Login() {
                     required
                   />
                   <label className="block text-sm text-gray-700">Password</label>
-                  <input
-                    className="w-full border rounded-xl px-3 py-2"
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    autoComplete="current-password"
-                    required
-                  />
+                  <div className="relative">
+                    <input
+                      className="w-full border rounded-xl px-3 py-2 border-border focus:ring-2 focus:ring-[var(--ring)] outline-none"
+                      type={showPwd ? 'text' : 'password'}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      autoComplete="current-password"
+                      required
+                    />
+                    <button
+                      type="button"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-600 hover:text-gray-800"
+                      onClick={() => setShowPwd((v) => !v)}
+                      aria-label={showPwd ? 'Hide password' : 'Show password'}
+                    >
+                      {showPwd ? 'Hide' : 'Show'}
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input id="remember" type="checkbox" className="h-4 w-4 rounded border-border" checked={remember} onChange={(e)=>setRemember(e.target.checked)} />
+                    <label htmlFor="remember" className="text-sm text-gray-700">Remember me</label>
+                  </div>
                   <button
                     type="submit"
-                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl px-4 py-2 disabled:opacity-50 mt-2"
+                    className="w-full bg-primary hover:bg-primary/90 active:bg-primary/80 text-primary-foreground font-semibold rounded-xl px-4 py-2 disabled:opacity-50 mt-2"
                     disabled={loading}
                   >
                     {loading ? 'Signing in...' : 'Sign In'}
@@ -130,7 +147,7 @@ export default function Login() {
                 <form onSubmit={onSignup} className="space-y-3">
                   <label className="block text-sm text-gray-700">Email</label>
                   <input
-                    className="w-full border rounded-xl px-3 py-2"
+                    className="w-full border rounded-xl px-3 py-2 border-border focus:ring-2 focus:ring-[var(--ring)] outline-none"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     autoComplete="email"
@@ -138,17 +155,27 @@ export default function Login() {
                     required
                   />
                   <label className="block text-sm text-gray-700">Password</label>
-                  <input
-                    className="w-full border rounded-xl px-3 py-2"
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    autoComplete="new-password"
-                    required
-                  />
+                  <div className="relative">
+                    <input
+                      className="w-full border rounded-xl px-3 py-2 border-border focus:ring-2 focus:ring-[var(--ring)] outline-none"
+                      type={showPwd2 ? 'text' : 'password'}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      autoComplete="new-password"
+                      required
+                    />
+                    <button
+                      type="button"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-600 hover:text-gray-800"
+                      onClick={() => setShowPwd2((v) => !v)}
+                      aria-label={showPwd2 ? 'Hide password' : 'Show password'}
+                    >
+                      {showPwd2 ? 'Hide' : 'Show'}
+                    </button>
+                  </div>
                   <label className="block text-sm text-gray-700">Confirm Password</label>
                   <input
-                    className="w-full border rounded-xl px-3 py-2"
+                    className="w-full border rounded-xl px-3 py-2 border-border focus:ring-2 focus:ring-[var(--ring)] outline-none"
                     type="password"
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
@@ -157,7 +184,7 @@ export default function Login() {
                   />
                   <button
                     type="submit"
-                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl px-4 py-2 disabled:opacity-50 mt-2"
+                    className="w-full bg-primary hover:bg-primary/90 active:bg-primary/80 text-primary-foreground font-semibold rounded-xl px-4 py-2 disabled:opacity-50 mt-2"
                     disabled={loading}
                   >
                     {loading ? 'Creating account...' : 'Sign Up'}

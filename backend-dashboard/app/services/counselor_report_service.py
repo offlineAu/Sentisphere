@@ -515,50 +515,61 @@ class CounselorReportService:
 
     @classmethod
     def top_stats(cls, db: Session) -> Dict[str, Any]:
-        stmt = select(
-            (select(func.count(User.user_id)).where(User.role == UserRole.STUDENT)).label("total_students"),
-            (select(func.count(User.user_id)).where(User.is_active.is_(True))).label("active_users"),
-            (
-                select(func.count(Alert.alert_id)).where(
-                    Alert.severity.in_([AlertSeverity.HIGH, AlertSeverity.CRITICAL]),
-                    Alert.status == AlertStatus.OPEN,
-                )
-            ).label("at_risk_students"),
-            (
-                select(
-                    func.round(
-                        func.avg(
-                            case(
-                                (
-                                    (EmotionalCheckin.mood_level == MoodLevel.VERY_SAD, 1),
-                                    (EmotionalCheckin.mood_level == MoodLevel.SAD, 2),
-                                    (EmotionalCheckin.mood_level == MoodLevel.NEUTRAL, 3),
-                                    (EmotionalCheckin.mood_level == MoodLevel.GOOD, 4),
-                                    (EmotionalCheckin.mood_level == MoodLevel.HAPPY, 5),
-                                    (EmotionalCheckin.mood_level == MoodLevel.VERY_HAPPY, 6),
-                                    (EmotionalCheckin.mood_level == MoodLevel.EXCELLENT, 7),
-                                ),
-                                else_=None,
-                            )
-                        ),
-                        2,
+        # Define comparison windows: this week vs last week
+        today = datetime.utcnow().date()
+        this_start, this_end = cls._week_bounds(today)
+        last_start = this_start - timedelta(days=7)
+        last_end = this_end - timedelta(days=7)
+
+        # Total students is effectively a point-in-time count; we expose a
+        # previous value for symmetry (it will usually match current).
+        total_students_stmt = select(func.count(User.user_id)).where(User.role == UserRole.STUDENT)
+        total_students = int(db.scalar(total_students_stmt) or 0)
+
+        # Active users: distinct students with at least one emotional check-in
+        # in the given window.
+        def _active_users(start_dt: datetime, end_dt: datetime) -> int:
+            stmt = (
+                select(func.count(func.distinct(EmotionalCheckin.user_id)))
+                .where(
+                    and_(
+                        EmotionalCheckin.created_at >= start_dt,
+                        EmotionalCheckin.created_at <= end_dt,
                     )
                 )
-            ).label("avg_wellness_score"),
-        )
-        row = db.execute(stmt).first()
-        if not row:
-            return {
-                "total_students": 0,
-                "active_users": 0,
-                "at_risk_students": 0,
-                "avg_wellness_score": 0.0,
-            }
+            )
+            return int(db.scalar(stmt) or 0)
+
+        active_this = _active_users(this_start, this_end)
+        active_last = _active_users(last_start, last_end)
+
+        # At-risk students: open high/critical alerts in each window.
+        def _at_risk(start_dt: datetime, end_dt: datetime) -> int:
+            stmt = select(func.count(Alert.alert_id)).where(
+                Alert.severity.in_([AlertSeverity.HIGH, AlertSeverity.CRITICAL]),
+                Alert.status == AlertStatus.OPEN,
+                Alert.created_at >= start_dt,
+                Alert.created_at <= end_dt,
+            )
+            return int(db.scalar(stmt) or 0)
+
+        at_risk_this = _at_risk(this_start, this_end)
+        at_risk_last = _at_risk(last_start, last_end)
+
+        # Average wellness score: reuse the wellness index helper on the same
+        # windows so that card deltas align with weekly dynamics.
+        avg_wellness_this = float(cls._wellness_index(db, this_start, this_end) or 0.0)
+        avg_wellness_last = float(cls._wellness_index(db, last_start, last_end) or 0.0)
+
         return {
-            "total_students": int(row.total_students or 0),
-            "active_users": int(row.active_users or 0),
-            "at_risk_students": int(row.at_risk_students or 0),
-            "avg_wellness_score": float(row.avg_wellness_score or 0.0),
+            "total_students": total_students,
+            "total_students_previous": total_students,
+            "active_users": active_this,
+            "active_users_previous": active_last,
+            "at_risk_students": at_risk_this,
+            "at_risk_students_previous": at_risk_last,
+            "avg_wellness_score": avg_wellness_this,
+            "avg_wellness_score_previous": avg_wellness_last,
         }
 
     @classmethod

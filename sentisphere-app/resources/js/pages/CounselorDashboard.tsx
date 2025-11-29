@@ -133,7 +133,7 @@ const riskBadge = (risk: StudentRisk) => {
       ? "bg-red-100 text-red-700"
       : risk === "medium"
       ? "bg-yellow-100 text-yellow-700"
-      : "bg-[#e5e5e5] text-[#0d8c4f]"; // palette for low risk
+      : "bg-muted text-primary"; // palette for low risk
   return (
     <span className={`px-2 py-1 rounded-lg text-xs font-medium ${color}`}>
       {risk}
@@ -291,6 +291,43 @@ export default function CounselorDashboard() {
   const [unreadMessages, setUnreadMessages] = useState<number>(0);
   const [loading, setLoading] = useState(true);
 
+  // Derive Open Appointments from appointment logs for the current week (unique students who downloaded appointment form)
+  useEffect(() => {
+    if (!Array.isArray(appointmentLogs) || appointmentLogs.length === 0) {
+      setOpenAppointments(0);
+      return;
+    }
+    try {
+      const now = new Date();
+      const day = now.getDay(); // 0=Sun..6=Sat
+      const mondayOffset = day === 0 ? -6 : 1 - day; // Monday as start
+      const weekStart = new Date(now);
+      weekStart.setDate(now.getDate() + mondayOffset);
+      weekStart.setHours(0, 0, 0, 0);
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekStart.getDate() + 7);
+
+      const isInCurrentWeek = (dt: string) => {
+        const d = new Date(dt);
+        return d >= weekStart && d < weekEnd;
+      };
+
+      const uniqueUsers = new Set<number | string>();
+      appointmentLogs.forEach((log: any) => {
+        const label = String(log?.form_type || '').toLowerCase();
+        const isAppointmentForm = /appointment/.test(label);
+        if (!isAppointmentForm) return;
+        const ts = log?.downloaded_at || log?.created_at;
+        if (!ts || !isInCurrentWeek(String(ts))) return;
+        uniqueUsers.add(log?.user_id ?? `${log?.user_id}`);
+      });
+      setOpenAppointments(uniqueUsers.size);
+    } catch {
+      // fallback
+      setOpenAppointments(0);
+    }
+  }, [appointmentLogs]);
+
   // Global date filter state (Counselor dashboard scope)
   const [globalRange, setGlobalRange] = useState<
     'this_week' | 'last_week' | 'last_30d' | 'this_month' | 'this_semester' | 'custom'
@@ -357,31 +394,98 @@ export default function CounselorDashboard() {
             const response = await api.get<any>(endpoint, params ? { params } : undefined);
             console.log(`[DEBUG] Response from ${endpoint}:`, response);
             
-            // Handle the actual response structure: { data: { count: number } }
+            // Robust extraction: handle {count}, arrays, nested data arrays, totals
             let result = 0;
-            
-            if (response?.data?.count !== undefined) {
-              // Handle { data: { count: number } } structure
-              result = Number(response.data.count) || 0;
-              console.log(`[DEBUG] Extracted count from ${endpoint}:`, result);
-            } else if (typeof response?.data === 'number') {
-              // Fallback for direct number response
-              result = response.data;
-            } else if (typeof response === 'number') {
-              // Fallback for direct number response (unlikely but handled)
-              result = response;
+            const d = (response as any)?.data;
+            if (typeof d?.count === 'number') {
+              result = Number(d.count) || 0;
+            } else if (Array.isArray(d)) {
+              result = d.length;
+            } else if (Array.isArray(d?.data)) {
+              result = d.data.length;
+            } else if (typeof d?.total === 'number') {
+              result = Number(d.total) || 0;
+            } else if (typeof d === 'number') {
+              result = d;
+            } else if (typeof (response as any) === 'number') {
+              result = (response as any);
             } else {
               console.warn(`[DEBUG] Unexpected response format from ${endpoint}:`, response);
               result = 0;
             }
-            
             console.log(`[DEBUG] Final value for ${endpoint}:`, result);
             return result;
-            
+          
           } catch (error) {
             console.error(`[ERROR] Error fetching ${endpoint}:`, error);
             return 0;
           }
+        };
+
+        // Helper to fetch all pages for endpoints returning paginated arrays
+        const fetchAllPaginated = async (
+          endpoint: string,
+          baseParams?: Record<string, any>
+        ): Promise<any[]> => {
+          const items: any[] = [];
+          let page = 1;
+          let lastPage = 1;
+          for (let i = 0; i < 50; i++) {
+            const res = await api.get<any>(endpoint, {
+              params: {
+                ...(baseParams || {}),
+                page,
+                per_page: 100,
+                page_size: 100,
+                size: 100,
+                limit: 100,
+              },
+            });
+            const dataRoot = (res as any)?.data;
+            const pageItems = Array.isArray(dataRoot?.data)
+              ? dataRoot.data
+              : Array.isArray(dataRoot?.items)
+              ? dataRoot.items
+              : Array.isArray(dataRoot?.results)
+              ? dataRoot.results
+              : Array.isArray(dataRoot?.logs)
+              ? dataRoot.logs
+              : Array.isArray(dataRoot?.records)
+              ? dataRoot.records
+              : Array.isArray(dataRoot?.data?.data)
+              ? dataRoot.data.data
+              : Array.isArray(dataRoot)
+              ? dataRoot
+              : [];
+            items.push(...pageItems);
+            const lpRaw = (
+              dataRoot?.last_page ??
+              dataRoot?.meta?.last_page ??
+              dataRoot?.pagination?.last_page ??
+              dataRoot?.data?.last_page ??
+              dataRoot?.meta?.pagination?.total_pages ??
+              dataRoot?.total_pages
+            );
+            const hasLast = Number.isFinite(Number(lpRaw));
+            if (hasLast) {
+              lastPage = Math.max(1, Number(lpRaw));
+              if (page >= lastPage) break;
+              page += 1;
+            } else {
+              // If no explicit last_page is provided, continue until an empty page
+              if (pageItems.length === 0) break;
+              page += 1;
+            }
+          }
+          return items;
+        };
+
+        const getAllItemsCount = async (
+          endpoint: string,
+          baseParams?: Record<string, any>
+        ): Promise<number> => {
+          const all = await fetchAllPaginated(endpoint, baseParams);
+          return all.length;
         };
 
         // Fetch numeric data in parallel
@@ -398,16 +502,16 @@ export default function CounselorDashboard() {
         ] = await Promise.all([
           // Time-independent
           getNumericData('/students-monitored'),
-          // Time-dependent metrics respect global date filter
-          getNumericData('/open-appointments', filterParams),
+          // Open appointments should reflect all currently open items (no date filter)
+          getNumericData('/open-appointments', { range: 'all' }),
           getNumericData('/high-risk-flags', filterParams),
           getNumericData('/this-week-checkins', filterParams),
           // Weekly mood analytics should ignore the dashboard's global date filter
           api.get<any>('/reports/trends').catch(() => ({ data: { weeks: [] } })),
-          // Recent alerts & logs (currently use their own windows; not yet date-filtered)
-          api.get<ArrayResponse<any>>('/recent-alerts').catch(() => ({ data: [] })),
-          api.get<ArrayResponse<any>>('/all-alerts').catch(() => ({ data: [] })),
-          api.get<ArrayResponse<any>>('/appointment-logs').catch(() => ({ data: [] })),
+          // Recent alerts & logs now respect global date filter
+          api.get<ArrayResponse<any>>('/recent-alerts', { params: filterParams }).catch(() => ({ data: [] })),
+          api.get<ArrayResponse<any>>('/all-alerts', { params: filterParams }).catch(() => ({ data: [] })),
+          api.get<ArrayResponse<any>>('/appointment-logs', { params: { range: 'all', limit: 1000 } }).catch(() => ({ data: [] })),
         ]);
 
         // Log all numeric states before setting them
@@ -420,7 +524,7 @@ export default function CounselorDashboard() {
         
         // Set numeric states
         setStudentsMonitored(studentsMonitored);
-        setOpenAppointments(openAppointments);
+        // Open appointments will be derived from appointment logs for the current week
         setHighRiskFlags(highRiskFlags);
         setThisWeekCheckins(thisWeekCheckins);
         
@@ -435,9 +539,43 @@ export default function CounselorDashboard() {
         }, 0);
 
         // Set array states (exclude moodTrend here; trends fetched in a separate effect)
-        setRecentAlerts(Array.isArray(recentAlertsRes?.data) ? recentAlertsRes.data : []);
-        setAllAlerts(Array.isArray(allAlertsRes?.data) ? allAlertsRes.data : []);
-        setAppointmentLogs(Array.isArray(appointmentLogsRes?.data) ? appointmentLogsRes.data : []);
+        setRecentAlerts(
+          Array.isArray((recentAlertsRes as any)?.data?.data)
+            ? (recentAlertsRes as any).data.data
+            : Array.isArray((recentAlertsRes as any)?.data)
+            ? (recentAlertsRes as any).data
+            : []
+        );
+        setAllAlerts(
+          Array.isArray((allAlertsRes as any)?.data?.data)
+            ? (allAlertsRes as any).data.data
+            : Array.isArray((allAlertsRes as any)?.data)
+            ? (allAlertsRes as any).data
+            : []
+        );
+        setAppointmentLogs(
+          Array.isArray((appointmentLogsRes as any)?.data?.data)
+            ? (appointmentLogsRes as any).data.data
+            : Array.isArray((appointmentLogsRes as any)?.data)
+            ? (appointmentLogsRes as any).data
+            : []
+        );
+        // Ensure we show ALL logs (aggregate all pages and dedupe)
+        try {
+          const allLogs = await fetchAllPaginated('/appointment-logs', { range: 'all' });
+          if (Array.isArray(allLogs) && allLogs.length) {
+            const seen = new Set<string>();
+            const unique = allLogs.filter((log: any) => {
+              const key = `${log?.log_id ?? ''}-${log?.user_id ?? ''}-${log?.downloaded_at ?? log?.created_at ?? ''}-${log?.form_type ?? ''}`;
+              if (seen.has(key)) return false;
+              seen.add(key);
+              return true;
+            });
+            setAppointmentLogs(unique);
+          }
+        } catch (e) {
+          console.warn('Failed to fetch all appointment logs', e);
+        }
         
         // Add a small delay to ensure all data is rendered before hiding the spinner
         await new Promise(resolve => setTimeout(resolve, 1000));
@@ -476,17 +614,12 @@ export default function CounselorDashboard() {
   // Fetch sentiment breakdown when sentimentPeriod changes (only if authenticated)
   useEffect(() => {
     if (!authenticated) return;
-    const params = { period: sentimentPeriod, ...filterParams };
+    const params = { period: sentimentPeriod };
 
     const fetchSentiments = async () => {
       try {
         const r = await api.get<any[]>('/sentiments', { params });
-        let data = Array.isArray(r?.data) ? r.data : [];
-        if (data.length === 0) {
-          // Fallback to period-only if range produced no data
-          const rf = await api.get<any[]>('/sentiments', { params: { period: sentimentPeriod } });
-          data = Array.isArray(rf?.data) ? rf.data : [];
-        }
+        const data = Array.isArray(r?.data) ? r.data : [];
         setSentimentBreakdown(data);
       } catch (e) {
         console.error(e);
@@ -497,14 +630,7 @@ export default function CounselorDashboard() {
     const fetchCheckinBreakdown = async () => {
       try {
         const r = await api.get<{mood:any[];energy:any[];stress:any[]}>('/checkin-breakdown', { params });
-        let payload = r?.data as any;
-        const empty = !payload || [payload.mood, payload.energy, payload.stress].every(
-          (arr: any) => !Array.isArray(arr) || arr.length === 0
-        );
-        if (empty) {
-          const rf = await api.get<{mood:any[];energy:any[];stress:any[]}>('/checkin-breakdown', { params: { period: sentimentPeriod } });
-          payload = rf?.data as any;
-        }
+        const payload = r?.data as any;
         setCheckinBreakdown(payload);
       } catch (e) {
         console.error(e);
@@ -517,7 +643,7 @@ export default function CounselorDashboard() {
 
     api.get<{summary?: string}>('/ai/sentiment-summary', { params }).then(r=>setAiSentimentSummary(r.data?.summary || null)).catch(()=>setAiSentimentSummary(null));
     api.get<{summary?: string}>('/ai/mood-summary', { params }).then(r=>setAiMoodSummary(r.data?.summary || null)).catch(()=>setAiMoodSummary(null));
-  }, [sentimentPeriod, authenticated, globalRange, rangeStart, rangeEnd]);
+  }, [sentimentPeriod, authenticated]);
 
   // Get user info from token
   useEffect(() => {
@@ -667,7 +793,7 @@ export default function CounselorDashboard() {
           />
           <YAxis />
           <RTooltip />
-          <Line type="monotone" dataKey="mood" stroke="#0d8c4f" />
+          <Line type="monotone" dataKey="mood" stroke="var(--primary)" />
         </LineChart>
       </ResponsiveContainer>
     );
@@ -706,7 +832,7 @@ export default function CounselorDashboard() {
             y={0}
             dy={20 + i * 16}
             textAnchor="middle"
-            fill="#0d8c4f"
+            fill="var(--primary)"
             fontSize={12}
           >
             {p}
@@ -779,13 +905,14 @@ export default function CounselorDashboard() {
 
   return (
     <div className="flex flex-col min-h-screen">
-      <div className="flex-1 pr-8 pl-5">
+      <div className="flex-1 pr-8 pl-3 sm:pl-5">
         <div className="flex items-center justify-between p-4">
-          <div>
-            <h1 className={styles.headerTitle}>Counselor Dashboard</h1>
+          <div className="ml-2">
+            <h1 className={styles.headerTitle}>Dashboard</h1>
             <p className={styles.headerSubtitle}>
               Overview of student well-being and risk signals.
             </p>
+            <div />
           </div>
           <div className="flex items-center gap-4">
             <div className={styles.profileChip}>
@@ -894,7 +1021,7 @@ export default function CounselorDashboard() {
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
             <div className="bg-white rounded-2xl shadow-lg p-6 w-full max-w-md">
               <div className="flex items-center justify-between mb-3">
-                <h3 className="text-lg font-semibold text-[#0d8c4f]">Mood Scale</h3>
+                <h3 className="text-lg font-semibold text-primary">Mood Scale</h3>
                 <button
                   type="button"
                   className="text-gray-500 hover:text-gray-700 text-xl"
@@ -973,14 +1100,14 @@ export default function CounselorDashboard() {
                     onClick={() => setPage((p) => Math.max(p - 1, 0))}
                     disabled={page === 0}
                   >
-                    <ChevronLeft className="h-5 w-5 text-[#0d8c4f]" />
+                    <ChevronLeft className="h-5 w-5 text-primary" />
                   </button>
                   <button
                     className={`${styles.pill} ${styles.pillSecondary} ${page === maxPage ? "opacity-40 cursor-not-allowed" : ""}`}
                     onClick={() => setPage((p) => Math.min(p + 1, maxPage))}
                     disabled={page === maxPage}
                   >
-                    <ChevronRight className="h-5 w-5 text-[#0d8c4f]" />
+                    <ChevronRight className="h-5 w-5 text-primary" />
                   </button>
                 </div>
               </div>
@@ -993,14 +1120,14 @@ export default function CounselorDashboard() {
                     <LineChart data={paginatedMoodTrend} margin={{ top: 20, right: 35, bottom: 40, left: 20 }}>
                       <defs>
                         <linearGradient id="moodGradient" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="#16a34a" stopOpacity={0.85} />
-                          <stop offset="100%" stopColor="#0d8c4f" stopOpacity={0.25} />
+                          <stop offset="0%" stopColor="var(--primary)" stopOpacity={0.85} />
+                          <stop offset="100%" stopColor="var(--primary)" stopOpacity={0.25} />
                         </linearGradient>
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                       <XAxis
                         dataKey="week"
-                        stroke="#0d8c4f"
+                        stroke="var(--primary)"
                         interval={0}
                         tick={({ x, y, payload }) => {
                           const parts = payload.value.split("-");
@@ -1013,7 +1140,7 @@ export default function CounselorDashboard() {
                                   y={0}
                                   dy={20 + i * 16}
                                   textAnchor="middle"
-                                  fill="#0d8c4f"
+                                  fill="var(--primary)"
                                   fontSize={12}
                                 >
                                   {p}
@@ -1023,7 +1150,7 @@ export default function CounselorDashboard() {
                           );
                         }}
                       />
-                      <YAxis domain={[1, 7]} ticks={[1,2,3,4,5,6,7]} tickFormatter={(v) => labelForScore(Number(v))} stroke="#0d8c4f" />
+                      <YAxis domain={[1, 7]} ticks={[1,2,3,4,5,6,7]} tickFormatter={(v) => labelForScore(Number(v))} stroke="var(--primary)" />
                       <RTooltip content={({ active, payload }) => {
                         if (active && payload && payload.length) {
                           const val = payload[0].value as number;
@@ -1048,10 +1175,10 @@ export default function CounselorDashboard() {
                       <Line
                         type="monotone"
                         dataKey="avgMood"
-                        stroke="#0d8c4f"
+                        stroke="var(--primary)"
                         strokeWidth={3}
-                        dot={{ r: 6, stroke: "#0d8c4f", strokeWidth: 2, fill: "#fff" }}
-                        activeDot={{ r: 8, fill: "#0d8c4f" }}
+                        dot={{ r: 6, stroke: "var(--primary)", strokeWidth: 2, fill: "#fff" }}
+                        activeDot={{ r: 8, fill: "var(--primary)" }}
                       />
                     </LineChart>
                   </ResponsiveContainer>
@@ -1060,7 +1187,7 @@ export default function CounselorDashboard() {
               <button
                 type="button"
                 onClick={() => setShowScaleInfo(true)}
-                className="mt-2 text-xs text-[#0d8c4f] underline hover:text-[#0a6d3d] cursor-pointer"
+                className="mt-2 text-xs text-primary underline hover:text-[color-mix(in_oklab,var(--primary),black_15%)] cursor-pointer"
                 title="View mood scale"
               >
                 View mood scale
@@ -1072,7 +1199,7 @@ export default function CounselorDashboard() {
           {/* Recent Alerts (1/3 width on desktop) */}
           <div>
             <div className="bg-white rounded-2xl shadow p-4">
-              <h3 className="font-semibold text-[#0d8c4f] text-lg mb-1">Recent Alerts</h3>
+              <h3 className="font-semibold text-primary text-lg mb-1">Recent Alerts</h3>
               <p className="text-[#6b7280] text-sm mb-3">Students who may need attention</p>
               <div className="space-y-3">
                 {recentAlerts.slice(0, 3).map((alert, idx) => (
@@ -1103,10 +1230,10 @@ export default function CounselorDashboard() {
                 ))}
               </div>
               <button
-                className="w-full mt-4 py-2 rounded-xl border-2 border-[#0d8c4f] text-[#0d8c4f] font-semibold bg-gradient-to-r from-[#e0f7ef] to-[#f5faff] hover:scale-105 hover:shadow-lg transition-all duration-150 text-base flex items-center justify-center gap-2 cursor-pointer"
+                className="w-full mt-4 py-2 rounded-xl border-2 border-primary text-primary font-semibold bg-gradient-to-r from-secondary to-[#f5faff] hover:scale-105 hover:shadow-lg transition-all duration-150 text-base flex items-center justify-center gap-2 cursor-pointer"
                 onClick={() => setShowAllAlerts(true)}
               >
-                <Info className="h-5 w-5 text-[#0d8c4f]" />
+                <Info className="h-5 w-5 text-primary" />
                 View All Alerts
               </button>
             </div>
@@ -1117,7 +1244,7 @@ export default function CounselorDashboard() {
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
             <div className="bg-white rounded-2xl shadow-lg p-6 w-full max-w-lg">
               <div className="flex items-center justify-between mb-3">
-                <h2 className="text-lg font-semibold text-[#0d8c4f]">All Alerts</h2>
+                <h2 className="text-lg font-semibold text-primary">All Alerts</h2>
                 <button
                   className="text-gray-500 hover:text-gray-700 text-xl"
                   onClick={() => setShowAllAlerts(false)}
@@ -1286,7 +1413,7 @@ export default function CounselorDashboard() {
               {/* Check-in Breakdown: Mood, Energy, Stress */}
               <div className="mt-6 space-y-3">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-sm font-medium text-[#0d8c4f]">Check-in Breakdown </h3>
+                  <h3 className="text-sm font-medium text-primary">Check-in Breakdown </h3>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   {(() => {
@@ -1419,21 +1546,7 @@ export default function CounselorDashboard() {
                   })()}
                 </div>
                 
-                {/* AI Summary Button Card */}
-                <div className="bg-[#f7fafd] rounded-xl p-3 flex flex-col">
-                  <div className="text-sm font-medium text-[#0d8c4f] mb-2">AI Analysis</div>
-                  <div className="flex-1 flex items-center justify-center">
-                    <button
-                      onClick={() => setShowAISummary(true)}
-                      className="w-full h-full flex flex-col items-center justify-center gap-3 p-4 bg-white rounded-lg border-2 border-dashed border-gray-300 hover:border-indigo-400 hover:bg-indigo-50 transition-all duration-200"
-                      title="Get AI Summary"
-                    >
-                      <Brain className="h-12 w-12 text-indigo-500" />
-                      <span className="text-indigo-600 font-medium">Generate AI Summary</span>
-                      <span className="text-xs text-gray-500 text-center max-w-[200px]">Click to analyze check-in data and get insights</span>
-                    </button>
-                  </div>
-                </div>
+                {/* AI Summary Button Card moved below Appointment Logs */}
 
                 {/* AI Summary Modal */}
                 {showAISummary && (
@@ -1475,22 +1588,17 @@ export default function CounselorDashboard() {
                         <button
                           onClick={async () => {
                             try {
-                              // Replace with your actual API call
-                              // const response = await api.get('/ai/checkin-summary');
-                              // setAICheckinSummary(response.data.summary);
-                              
-                              // Mock response for now
                               setAICheckinSummary('');
-                              setTimeout(() => {
-                                setAICheckinSummary(
-                                  "Based on the check-in data, I'm seeing a generally positive trend in student well-being. " +
-                                  "Most students report being in the 'Good' to 'Happy' range for mood, with energy levels " +
-                                  "concentrated in the 'Moderate' to 'High' categories. Stress levels are mostly 'Low' to " +
-                                  "'Moderate', with a few students reporting higher stress levels that may need attention. " +
-                                  "The distribution suggests a healthy balance, but the few cases of high stress and low mood " +
-                                  "should be monitored."
-                                );
-                              }, 1000);
+                              const [senti, mood] = await Promise.all([
+                                api.get<{ summary?: string }>(`/ai/sentiment-summary`, { params: { range: 'last_week' } }),
+                                api.get<{ summary?: string }>(`/ai/mood-summary`, { params: { range: 'last_week' } }),
+                              ]);
+                              const partA = senti.data?.summary || '';
+                              const partB = mood.data?.summary || '';
+                              const combined = [partA, partB].filter(Boolean).join("\n\n");
+                              setAICheckinSummary(
+                                combined || 'No previous week summary available from the model.'
+                              );
                             } catch (error) {
                               console.error('Error generating AI summary:', error);
                             }
@@ -1508,13 +1616,13 @@ export default function CounselorDashboard() {
           </div>
           {/* Right rail: Appointment Logs */}
           <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow p-5 hover:shadow-md transition-all duration-300 border border-gray-100 flex flex-col self-start">
-            <h2 className="text-lg font-semibold mb-4 text-[#0d8c4f]">Appointment Logs</h2>
+            <h2 className="text-lg font-semibold mb-4 text-primary">Appointment Logs</h2>
             <div className="space-y-3 pr-1 overflow-y-auto max-h-[28rem]">
               {appointmentLogs.length === 0 ? (
                 <div className="text-[#6b7280] text-sm">No logs yet.</div>
               ) : (
-                appointmentLogs.map((log) => (
-                  <div key={log.log_id} className={`${styles.tileRow}`}>
+                appointmentLogs.map((log, idx) => (
+                  <div key={`${String(log?.log_id ?? 'log')}-${String(log?.downloaded_at ?? log?.created_at ?? idx)}-${idx}`} className={`${styles.tileRow}`}>
                     <div className="min-w-0">
                       <div className="text-sm font-semibold text-[#111827]">{log.form_type || 'Form'} downloaded</div>
                       <div className="text-xs text-[#6b7280]">User #{log.user_id} • {formatDate(log.downloaded_at, true)}</div>
@@ -1524,6 +1632,39 @@ export default function CounselorDashboard() {
                   </div>
                 ))
               )}
+            </div>
+            {/* AI Analysis below Appointment Logs */}
+            <div className="mt-5 pt-4 border-t">
+              <div className="text-sm font-medium text-primary mb-2">AI Analysis (Last Week)</div>
+              <div className="flex-1 flex items-center justify-center">
+                <button
+                  onClick={async () => {
+                    try {
+                      setShowAISummary(true);
+                      setAICheckinSummary('');
+                      const [senti, mood] = await Promise.all([
+                        api.get<{ summary?: string }>(`/ai/sentiment-summary`, { params: { range: 'last_week' } }),
+                        api.get<{ summary?: string }>(`/ai/mood-summary`, { params: { range: 'last_week' } }),
+                      ]);
+                      const partA = senti.data?.summary || '';
+                      const partB = mood.data?.summary || '';
+                      const combined = [partA, partB].filter(Boolean).join("\n\n");
+                      setAICheckinSummary(
+                        combined || 'No previous week summary available from the model.'
+                      );
+                    } catch (e) {
+                      console.error('AI summary error', e);
+                      setAICheckinSummary('Failed to generate previous week summary. Please try again later.');
+                    }
+                  }}
+                  className="w-full flex flex-col items-center justify-center gap-3 p-4 bg-white rounded-lg border-2 border-dashed border-gray-300 hover:border-indigo-400 hover:bg-indigo-50 transition-all duration-200"
+                  title="Generate AI summary for last week"
+                >
+                  <Brain className="h-10 w-10 text-indigo-500" />
+                  <span className="text-indigo-600 font-medium">Generate Last Week Summary</span>
+                  <span className="text-xs text-gray-500 text-center max-w-[220px]">Analyzes journals and check-ins for the previous week</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

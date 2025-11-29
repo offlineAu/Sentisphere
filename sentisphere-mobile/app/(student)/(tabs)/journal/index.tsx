@@ -128,11 +128,28 @@ export default function JournalListScreen() {
     }
   };
 
+  // Screen entrance animation (fade + rise) - consistent with dashboard
+  const screenEntrance = useRef(new Animated.Value(0)).current;
+  const runScreenEntrance = () => {
+    screenEntrance.setValue(0);
+    Animated.timing(screenEntrance, {
+      toValue: 1,
+      duration: 340,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  };
+  const screenEntranceStyle = {
+    opacity: screenEntrance,
+    transform: [{ translateY: screenEntrance.interpolate({ inputRange: [0, 1], outputRange: [18, 0] }) }],
+  };
+
   // Close any open swipe row on focus/blur to reset UI when navigating back
   useFocusEffect(
     useCallback(() => {
-      // on focus
+      // on focus - run entrance animation
       openSwipeRef.current?.close();
+      runScreenEntrance();
       return () => {
         // on blur
         openSwipeRef.current?.close();
@@ -203,6 +220,88 @@ export default function JournalListScreen() {
     setCoachInput('');
   };
   const [entries, setEntries] = useState<Entry[]>([]);
+  const [pendingDelete, setPendingDelete] = useState<Entry | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const pendingDeleteScale = useRef(new Animated.Value(0)).current;
+
+  const animateDeleteSheet = useCallback((to: 0 | 1, done?: () => void) => {
+    Animated.timing(pendingDeleteScale, {
+      toValue: to,
+      duration: to === 1 ? 220 : 180,
+      easing: to === 1 ? Easing.out(Easing.cubic) : Easing.in(Easing.cubic),
+      useNativeDriver: true,
+    }).start(done);
+  }, [pendingDeleteScale]);
+
+  const handleRequestDelete = (entry: Entry) => {
+    openSwipeRef.current?.close?.();
+    openSwipeRef.current = null;
+    setDeleteError(null);
+    if (Platform.OS !== 'web') {
+      try { Haptics.selectionAsync(); } catch {}
+    }
+    setPendingDelete(entry);
+    animateDeleteSheet(1);
+  };
+
+  const clearDeleteState = useCallback(() => {
+    setPendingDelete(null);
+    setIsDeleting(false);
+    setDeleteError(null);
+  }, []);
+
+  const handleCancelDelete = () => {
+    if (!pendingDelete) return;
+    animateDeleteSheet(0, clearDeleteState);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!pendingDelete || isDeleting) return;
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      const tok = await getAuthToken();
+      if (!tok) {
+        setIsDeleting(false);
+        Alert.alert('Not signed in', 'Please sign in again.');
+        return;
+      }
+      const res = await fetch(`${API}/api/journals/${pendingDelete.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${tok}` },
+      });
+      if (res.status === 401) {
+        await clearAuthToken();
+        animateDeleteSheet(0, () => {
+          clearDeleteState();
+          Alert.alert('Session expired', 'Please sign in again to continue.', [
+            { text: 'OK', onPress: () => router.replace('/auth') },
+          ]);
+        });
+        return;
+      }
+      if (res.status === 404) {
+        setEntries((prev) => prev.filter((it) => it.id !== pendingDelete.id));
+        animateDeleteSheet(0, clearDeleteState);
+        return;
+      }
+      if (!res.ok) {
+        let detail = '';
+        try { const d = await res.json(); detail = d?.detail || d?.message || ''; } catch {}
+        throw new Error(detail || `Delete failed: ${res.status}`);
+      }
+      setEntries((prev) => prev.filter((it) => it.id !== pendingDelete.id));
+      if (Platform.OS !== 'web') {
+        try { await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
+      }
+      animateDeleteSheet(0, clearDeleteState);
+    } catch (e: any) {
+      setDeleteError(e?.message || 'Unable to delete this entry. Please try again.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const fetchEntries = useCallback(async () => {
     try {
@@ -323,6 +422,7 @@ export default function JournalListScreen() {
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ padding: 16, paddingBottom: 100, backgroundColor: '#FFFFFF' }}
         >
+          <Animated.View style={screenEntranceStyle}>
           <View style={{ height: 16 }} />
           <ThemedText type="title">Journal</ThemedText>
           <ThemedText style={{ color: palette.muted }}>Express your thoughts and track your emotional journey</ThemedText>
@@ -446,7 +546,7 @@ export default function JournalListScreen() {
               <EntryRow
                 key={e.id}
                 entry={e}
-                onDelete={(id) => setEntries((prev) => prev.filter((it) => it.id !== id))}
+                onDeleteRequest={handleRequestDelete}
                 getOpenRef={() => openSwipeRef.current}
                 setOpenRef={(inst) => (openSwipeRef.current = inst)}
               />
@@ -458,6 +558,7 @@ export default function JournalListScreen() {
           )}
         </Animated.View>
       )}
+          </Animated.View>
         </ScrollView>
       </KeyboardAvoidingView>
       {/* Saved toast */}
@@ -498,7 +599,7 @@ export default function JournalListScreen() {
       {/* Analysis Modal */}
       <Modal visible={analysisVisible} transparent animationType="fade" onRequestClose={() => setAnalysisVisible(false)}>
         <View style={styles.overlay}>
-          <View style={[styles.modalCard, { maxHeight: Math.min(winH - 96, 640), maxWidth: Math.min(winW - 32, 560), width: '100%' }]}>
+          <View style={[styles.modalCard, { maxHeight: Math.min(winH - 96, 640), maxWidth: Math.min(winW - 32, 560), width: '100%' }]}> 
             {/* Close button */}
             <Pressable onPress={() => setAnalysisVisible(false)} style={styles.closeBtn} accessibilityRole="button" accessibilityLabel="Close">
               <Feather name="x" size={18} color={palette.icon} />
@@ -654,11 +755,67 @@ export default function JournalListScreen() {
           </View>
         </View>
       </Modal>
+      <Modal visible={!!pendingDelete} transparent animationType="fade" onRequestClose={handleCancelDelete}>
+        <View style={styles.overlay}>
+          <Animated.View
+            style={StyleSheet.flatten([
+              styles.confirmCard,
+              {
+                transform: [
+                  {
+                    scale: pendingDelete
+                      ? pendingDeleteScale.interpolate({ inputRange: [0, 1], outputRange: [0.95, 1] })
+                      : 1,
+                  },
+                  {
+                    translateY: pendingDelete
+                      ? pendingDeleteScale.interpolate({ inputRange: [0, 1], outputRange: [12, 0] })
+                      : 0,
+                  },
+                ],
+                opacity: pendingDelete
+                  ? pendingDeleteScale.interpolate({ inputRange: [0, 1], outputRange: [0, 1] })
+                  : 0,
+              },
+            ])}
+          >
+            <View style={{ alignItems: 'center', gap: 8 }}>
+              <View style={styles.confirmIconWrap}>
+                <Feather name="alert-triangle" size={22} color="#F97316" />
+              </View>
+              <ThemedText type="subtitle" style={{ textAlign: 'center' }}>Oh no, this is your journal!</ThemedText>
+              <ThemedText style={{ color: '#6B7280', textAlign: 'center' }}>
+                Are you sure you want to let this entry go? Once it leaves, the memories go with it.
+              </ThemedText>
+              {pendingDelete ? (
+                <View style={styles.confirmEntryPreview}>
+                  <ThemedText style={{ fontFamily: 'Inter_600SemiBold' }} numberOfLines={1}>
+                    {pendingDelete.title}
+                  </ThemedText>
+                  <ThemedText style={{ color: '#6B7280' }} numberOfLines={2}>
+                    {pendingDelete.body}
+                  </ThemedText>
+                  <ThemedText style={{ color: '#9CA3AF', fontSize: 12 }}>Saved on {pendingDelete.date || 'Unknown date'}</ThemedText>
+                </View>
+              ) : null}
+              {deleteError ? (
+                <View style={StyleSheet.flatten([styles.noticeBox, { borderColor: '#FCA5A5', backgroundColor: '#FEF2F2' }])}>
+                  <ThemedText style={{ color: '#B91C1C' }}>{deleteError}</ThemedText>
+                </View>
+              ) : null}
+            </View>
+            <View style={{ flexDirection: 'row', gap: 10, alignSelf: 'stretch', marginTop: 16 }}>
+              <Button title="Keep it" variant="outline" onPress={handleCancelDelete} disabled={isDeleting} style={{ flex: 1 }} />
+              <Button title="Delete it" onPress={handleConfirmDelete} loading={isDeleting} style={{ flex: 1 }} />
+            </View>
+          </Animated.View>
+        </View>
+      </Modal>
     </ThemedView>
   );
 }
 
-function EntryRow({ entry, onDelete, getOpenRef, setOpenRef }: { entry: Entry; onDelete: (id: string) => void; getOpenRef?: () => Swipeable | null; setOpenRef?: (s: Swipeable | null) => void }) {
+function EntryRow({ entry, onDeleteRequest, getOpenRef, setOpenRef }: { entry: Entry; onDeleteRequest: (entry: Entry) => void; getOpenRef?: () => Swipeable | null; setOpenRef?: (s: Swipeable | null) => void }) {
   const router = useRouter();
   const scheme = useColorScheme() ?? 'light';
   const palette = Colors[scheme] as any;
@@ -713,17 +870,11 @@ function EntryRow({ entry, onDelete, getOpenRef, setOpenRef }: { entry: Entry; o
     const contentScale = progress.interpolate({ inputRange: [0, 1], outputRange: [0.97, 1] });
     const contentTx = dragX.interpolate({ inputRange: [-120, 0], outputRange: [-6, 0], extrapolate: 'clamp' });
     const confirmDelete = () => {
-      Alert.alert('Delete entry?', 'This action cannot be undone.', [
-        { text: 'Cancel', style: 'cancel', onPress: () => swipeRef.current?.close() },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => {
-            onDelete(entry.id);
-            if (getOpenRef?.() === swipeRef.current) setOpenRef?.(null);
-          },
-        },
-      ]);
+      if (Platform.OS !== 'web') {
+        try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); } catch {}
+      }
+      onDeleteRequest(entry);
+      if (getOpenRef?.() === swipeRef.current) setOpenRef?.(null);
     };
     return (
       <Animated.View style={{ flex: 1, opacity: bgOpacity }}>
@@ -1009,6 +1160,21 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 420,
   },
+  confirmCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    paddingVertical: 24,
+    paddingHorizontal: 20,
+    alignItems: 'stretch',
+    gap: 18,
+    width: '100%',
+    maxWidth: 360,
+    shadowColor: '#0f172a',
+    shadowOpacity: 0.16,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 14,
+  },
   loadingOnly: { minHeight: 160, alignItems: 'center', justifyContent: 'center', alignSelf: 'stretch' },
   loadingBrain: { width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center', backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0' },
   loadingCard: { borderWidth: 1, borderRadius: 12, padding: 12, backgroundColor: '#F9FAFB', borderColor: '#E5E7EB', marginTop: 12 },
@@ -1075,4 +1241,22 @@ const styles = StyleSheet.create({
     backgroundColor: '#111827',
   },
   noticeBox: { borderWidth: 1, borderRadius: 12, padding: 12, gap: 4, marginTop: 6 },
+  confirmIconWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(249, 115, 22, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(249, 115, 22, 0.28)',
+  },
+  confirmEntryPreview: {
+    alignSelf: 'stretch',
+    backgroundColor: '#F9FAFB',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 6,
+  },
 });

@@ -44,5 +44,6 @@ def clean_text(text: str | None) -> str:
     return cleaned
 
 
-def tokenize(text: str) -> Iterable[str]:
-    return normalize_whitespace(text).split()
+def tokenize(text: str) -> list[str]:
+    t = clean_text(text)
+    return t.split()

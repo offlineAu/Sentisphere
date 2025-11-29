@@ -193,11 +193,27 @@ export default function Chat() {
     );
   }
 
+  const filteredConversations = conversations
+    .filter((c) => {
+      if (!searchQuery.trim()) return true;
+      const q = searchQuery.toLowerCase();
+      const nickname = (c.initiator_nickname || "").toLowerCase();
+      const subject = (c.subject || "").toLowerCase();
+      if (nickname.includes(q) || subject.includes(q)) return true;
+      const msgs = messagesByConversation[c.conversation_id] || [];
+      return msgs.some((m) => m.content.toLowerCase().includes(q));
+    })
+    .filter((c) => {
+      if (filter === "all") return true;
+      const unread = unreadCounts[c.conversation_id] || 0;
+      return filter === "unread" ? unread > 0 : unread === 0;
+    });
+
   return (
-    <div className="flex bg-[#f5f5f5] min-h-screen">
+    <div className="flex min-h-screen">
       <Sidebar />
       <main
-        className={`transition-all duration-200 bg-[#f5f5f5] min-h-screen space-y-4 ${
+        className={`transition-all duration-200 min-h-screen space-y-4 ${
           open ? "pl-[17rem]" : "pl-[5rem]"
         } pt-1 pr-6 pb-6`}
       >
@@ -205,23 +221,16 @@ export default function Chat() {
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.35 }}
-          className="p-4 sm:p-6 space-y-4 max-w-full min-h-0"
+          className="pr-4 sm:pr-6 pl-2 sm:pl-4 py-4 sm:py-6 space-y-4 max-w-full min-h-0"
         >
           {/* Header */}
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-            <div>
+            <div className="ml-2">
               <h1 className={styles.headerTitle}>Chat Conversations</h1>
               <p className={styles.headerSubtitle}>
                 Manage and respond to student concerns.
               </p>
-            </div>
-            <div className="flex items-center gap-2 self-stretch md:self-auto">
-              <button className="text-xs px-3 py-1.5 rounded-full border border-gray-300 text-gray-600 hover:bg-gray-100">
-                Email
-              </button>
-              <button className="text-xs px-3 py-1.5 rounded-full bg-emerald-600 text-white shadow hover:bg-emerald-700">
-                Chat
-              </button>
+              <div />
             </div>
           </div>
           {/* Chat Section */}
@@ -242,23 +251,13 @@ export default function Chat() {
                   </div>
                 </div>
                 <div className="overflow-y-scroll flex-1 min-h-0" style={{ scrollbarGutter: 'stable both-edges' }}>
-                  <ul>
-                    {conversations
-                      .filter((c) => {
-                        if (!searchQuery.trim()) return true;
-                        const q = searchQuery.toLowerCase();
-                        const nickname = (c.initiator_nickname || "").toLowerCase();
-                        const subject = (c.subject || "").toLowerCase();
-                        if (nickname.includes(q) || subject.includes(q)) return true;
-                        const msgs = messagesByConversation[c.conversation_id] || [];
-                        return msgs.some((m) => m.content.toLowerCase().includes(q));
-                      })
-                      .filter((c) => {
-                        if (filter === "all") return true;
-                        const unread = unreadCounts[c.conversation_id] || 0;
-                        return filter === "unread" ? unread > 0 : unread === 0;
-                      })
-                      .map((c) => {
+                  {filteredConversations.length === 0 ? (
+                    <div className="text-sm text-gray-500 px-2 py-4">
+                      No conversations available yet. You&apos;ll see student chats here once they reach out.
+                    </div>
+                  ) : (
+                    <ul>
+                      {filteredConversations.map((c) => {
                       const convId = c.conversation_id;
                       const total = messagesByConversation[convId]?.length || 0;
                       const unread = unreadCounts[convId] || 0;
@@ -323,7 +322,8 @@ export default function Chat() {
                         </li>
                       );
                     })}
-                  </ul>
+                    </ul>
+                  )}
                 </div>
               </div>
             </div>
@@ -336,7 +336,7 @@ export default function Chat() {
                     {/* Chat Header (compact) */}
                     <div className="px-4 py-3 border-b flex items-center justify-between bg-gradient-to-r from-emerald-50 to-transparent flex-none w-full">
                       <div className="min-w-0">
-                        <h2 className="font-semibold text-[15px] text-[#0d8c4f] truncate">{currentConversation.subject || `Conversation #${currentConversation.conversation_id}`}</h2>
+                        <h2 className="font-semibold text-[15px] text-primary truncate">{currentConversation.subject || `Conversation #${currentConversation.conversation_id}`}</h2>
                         <div className="text-xs text-gray-500 truncate">{participantNickname}</div>
                         <div className="mt-1">
                           <span className={`text-[10px] px-2 py-[2px] rounded-full uppercase tracking-wide ${
@@ -349,7 +349,7 @@ export default function Chat() {
                         </div>
                       </div>
                       <div className="flex items-center gap-3">
-                        <button className="text-xs px-2.5 py-1 rounded-full border border-gray-300 text-gray-600 hover:bg-gray-100">Details</button>
+                        <button className="text-xs px-2.5 py-1 rounded-full border border-gray-300 text-gray-600 hover:bg-gray-100 active:bg-gray-200">Details</button>
                         <User className="h-5 w-5 text-gray-500" />
                       </div>
                     </div>
@@ -392,7 +392,7 @@ export default function Chat() {
                         }
                         className={`flex-1 h-10 border rounded-xl px-4 py-2 outline-none focus:ring-2 ${
                           currentConversation.status === "open"
-                            ? "focus:ring-[#0d8c4f] text-[#222]"
+                            ? "focus:ring-[var(--ring)] text-[#222]"
                             : "bg-gray-100 text-gray-400 cursor-not-allowed"
                         }`}
                         disabled={currentConversation.status !== "open"}
@@ -401,7 +401,7 @@ export default function Chat() {
                         onClick={handleSend}
                         className={`rounded-xl px-4 h-10 flex items-center gap-2 transition ${
                           currentConversation.status === "open"
-                            ? "bg-[#0d8c4f] text-white hover:bg-[#0b6d3f]"
+                            ? "bg-primary text-primary-foreground hover:bg-primary/90 active:bg-primary/80"
                             : "bg-gray-300 text-gray-500 cursor-not-allowed"
                         }`}
                         disabled={currentConversation.status !== "open"}
@@ -411,8 +411,12 @@ export default function Chat() {
                     </div>
                   </>
                 ) : (
-                  <div className="flex-1 flex items-center justify-center text-gray-500">
-                    Select a conversation to start chatting
+                  <div className="flex-1 flex items-center justify-center text-gray-500 text-center px-6">
+                    <p className="max-w-md mx-auto text-sm sm:text-base leading-relaxed">
+                      {conversations.length === 0
+                        ? "There are no conversations yet. You'll see chats here when students start messaging you."
+                        : "Select a conversation to start chatting"}
+                    </p>
                   </div>
                 )}
               </div>

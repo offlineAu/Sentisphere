@@ -1,5 +1,6 @@
-from fastapi import FastAPI, Query, HTTPException, Depends, status, UploadFile
+from fastapi import FastAPI, Query, HTTPException, Depends, status, UploadFile, Header, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from sqlalchemy import case, func, select, text
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta, date
@@ -13,12 +14,17 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import csv
 import logging
+import asyncio
+import time
 from fastapi.security import OAuth2PasswordBearer
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+
 
 from app.core.config import settings
 from app.db.database import engine, ENGINE_INIT_ERROR_MSG
 from app.db.mobile_database import mobile_engine, get_mobile_db
-from app.db.session import get_db
+from app.db.session import get_db, SessionLocal
 from app.api.routes.auth import router as auth_router
 from app.models.alert import Alert, AlertSeverity, AlertStatus
 from app.models.counselor_profile import CounselorProfile
@@ -59,11 +65,17 @@ from app.services.conversation_service import ConversationService
 from app.services.journal_service import JournalService
 from app.services.jwt import decode_token
 from app.services.narrative_insight_service import NarrativeInsightService
+from app.services.insight_generation_service import InsightGenerationService
+from app.services.insight_data_service import build_sanitized_payload, discover_active_user_ids
 from app.services.report_service import ReportService
 from app.services.counselor_report_service import CounselorReportService
 from app.services.sentiment_service import SentimentService
 from app.services.counselor_service import CounselorService
 from app.schemas.counselor_profile import CounselorProfilePayload
+from app.services.embedding_service import EmbeddingService
+from app.schemas.similarity import SimilarJournal
+from app.schemas.sentiment import SentimentResult
+from app.utils.nlp_loader import analyze_text
 from app.utils.date_utils import (
     parse_global_range,
     get_week_range,
@@ -105,6 +117,99 @@ def _extract_user_id(token: str) -> int:
         ) from exc
 
 
+# --- Realtime broadcast manager (WebSocket + SSE) ---
+
+WS_HEARTBEAT_SEC = 25
+SSE_KEEPALIVE_SEC = 15
+
+
+class _WSConn:
+    def __init__(self, ws: WebSocket, user_id: int) -> None:
+        self.ws = ws
+        self.user_id = user_id
+        self.last_pong = time.time()
+
+
+class _SSEClient:
+    def __init__(self, user_id: int) -> None:
+        self.user_id = user_id
+        self.queue: "asyncio.Queue[str]" = asyncio.Queue()
+
+
+class _ConnectionManager:
+    def __init__(self) -> None:
+        self.ws_conns: set[_WSConn] = set()
+        self.sse_clients: set[_SSEClient] = set()
+        self.broadcast_queue: "asyncio.Queue[dict[str, typing.Any]]" = asyncio.Queue()
+        self._lock = asyncio.Lock()
+
+    async def register_ws(self, conn: _WSConn) -> None:
+        async with self._lock:
+            self.ws_conns.add(conn)
+            logging.info("[realtime] WS connected user=%s total_ws=%d", conn.user_id, len(self.ws_conns))
+
+    async def unregister_ws(self, conn: _WSConn) -> None:
+        async with self._lock:
+            if conn in self.ws_conns:
+                self.ws_conns.remove(conn)
+                logging.info("[realtime] WS disconnected user=%s total_ws=%d", conn.user_id, len(self.ws_conns))
+
+    async def register_sse(self, client: _SSEClient) -> None:
+        async with self._lock:
+            self.sse_clients.add(client)
+            logging.info("[realtime] SSE connected user=%s total_sse=%d", client.user_id, len(self.sse_clients))
+
+    async def unregister_sse(self, client: _SSEClient) -> None:
+        async with self._lock:
+            if client in self.sse_clients:
+                self.sse_clients.remove(client)
+                logging.info("[realtime] SSE disconnected user=%s total_sse=%d", client.user_id, len(self.sse_clients))
+
+    async def publish(self, event: dict[str, typing.Any]) -> None:
+        await self.broadcast_queue.put(event)
+
+    async def _send_ws(self, conn: _WSConn, event: dict[str, typing.Any]) -> None:
+        try:
+            await conn.ws.send_json(event)
+        except Exception as exc:  # pragma: no cover - defensive
+            logging.warning("[realtime] WS send failed; dropping conn: %s", exc)
+            await self.unregister_ws(conn)
+
+    async def _send_sse(self, client: _SSEClient, event: dict[str, typing.Any]) -> None:
+        try:
+            data = json.dumps(event, default=str, separators=(",", ":"))
+            await client.queue.put(f"data: {data}\n\n")
+        except Exception as exc:  # pragma: no cover - defensive
+            logging.warning("[realtime] SSE send failed; ignoring client: %s", exc)
+
+    async def broker_loop(self) -> None:
+        while True:
+            event = await self.broadcast_queue.get()
+            # Fan out to WebSocket clients
+            for conn in list(self.ws_conns):
+                await self._send_ws(conn, event)
+            # Fan out to SSE clients
+            for client in list(self.sse_clients):
+                await self._send_sse(client, event)
+
+    async def heartbeat_loop(self) -> None:
+        while True:
+            ping = {
+                "v": 1,
+                "type": "ping",
+                "ts": datetime.utcnow().isoformat() + "Z",
+            }
+            for conn in list(self.ws_conns):
+                try:
+                    await conn.ws.send_json(ping)
+                except Exception:  # pragma: no cover - defensive
+                    await self.unregister_ws(conn)
+            await asyncio.sleep(WS_HEARTBEAT_SEC)
+
+
+_rt_manager = _ConnectionManager()
+
+
 def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db),
@@ -116,6 +221,107 @@ def get_current_user(
     return user
 
 
+# --- Internal Scheduler (APScheduler) ---
+scheduler: Optional[BackgroundScheduler] = None
+
+def _last_completed_week_window() -> tuple[datetime, datetime]:
+    today = datetime.now().date()
+    monday_this_week = today - timedelta(days=today.weekday())  # Monday
+    last_monday = monday_this_week - timedelta(days=7)
+    start_dt = datetime.combine(last_monday, datetime.min.time())
+    end_dt = datetime.combine(last_monday + timedelta(days=6), datetime.max.time())
+    return start_dt, end_dt
+
+def _last_7_full_days_window() -> tuple[datetime, datetime]:
+    today_start = datetime.combine(datetime.now().date(), datetime.min.time())
+    end_dt = today_start - timedelta(seconds=1)  # yesterday 23:59:59
+    start_dt = today_start - timedelta(days=7)   # 7 days ago 00:00:00
+    return start_dt, end_dt
+
+def _run_weekly_insights_job():
+    try:
+        if not settings.INSIGHTS_FEATURE_ENABLED:
+            return
+        start_dt, end_dt = _last_completed_week_window()
+        user_ids = discover_active_user_ids(start_dt, end_dt)
+        # Include platform-level insight (user_id=None)
+        targets: List[Optional[int]] = [None] + user_ids
+        db = SessionLocal()
+        try:
+            for uid in targets:
+                payload = build_sanitized_payload(uid, start_dt, end_dt)
+                InsightGenerationService.compute_and_store(
+                    db=db,
+                    user_id=uid,
+                    timeframe_start=start_dt.date(),
+                    timeframe_end=end_dt.date(),
+                    payload=payload,
+                    insight_type="weekly",
+                )
+            logging.info("[scheduler] weekly insights generated for %d targets (%s to %s)", len(targets), start_dt, end_dt)
+        finally:
+            db.close()
+    except Exception as exc:  # pragma: no cover
+        logging.exception("[scheduler] weekly job failed: %s", exc)
+
+def _run_daily_behavioral_job():
+    try:
+        if not settings.INSIGHTS_FEATURE_ENABLED:
+            return
+        start_dt, end_dt = _last_7_full_days_window()
+        user_ids = discover_active_user_ids(start_dt, end_dt)
+        targets: List[Optional[int]] = [None] + user_ids
+        db = SessionLocal()
+        try:
+            for uid in targets:
+                payload = build_sanitized_payload(uid, start_dt, end_dt)
+                InsightGenerationService.compute_and_store(
+                    db=db,
+                    user_id=uid,
+                    timeframe_start=start_dt.date(),
+                    timeframe_end=end_dt.date(),
+                    payload=payload,
+                    insight_type="behavioral",
+                )
+            logging.info("[scheduler] behavioral insights generated for %d targets (%s to %s)", len(targets), start_dt, end_dt)
+        finally:
+            db.close()
+    except Exception as exc:  # pragma: no cover
+        logging.exception("[scheduler] behavioral job failed: %s", exc)
+
+@app.on_event("startup")
+def _start_scheduler():
+    global scheduler
+    if not settings.INSIGHTS_FEATURE_ENABLED:
+        logging.info("[scheduler] insights disabled; scheduler not started")
+        return
+    try:
+        scheduler = BackgroundScheduler()
+        # Weekly: Monday 00:05
+        scheduler.add_job(_run_weekly_insights_job, CronTrigger(day_of_week='mon', hour=0, minute=5))
+        # Daily: 23:59
+        scheduler.add_job(_run_daily_behavioral_job, CronTrigger(hour=23, minute=59))
+        scheduler.start()
+        logging.info("[scheduler] started (weekly Mon 00:05, daily 23:59)")
+    except Exception as exc:  # pragma: no cover
+        logging.exception("[scheduler] failed to start: %s", exc)
+
+@app.on_event("shutdown")
+def _stop_scheduler():
+    global scheduler
+    if scheduler:
+        try:
+            scheduler.shutdown(wait=False)
+            logging.info("[scheduler] stopped")
+        except Exception:
+            pass
+
+
+@app.on_event("startup")
+async def _start_realtime_loops() -> None:
+    """Launch background tasks for realtime broadcasting and heartbeats."""
+    asyncio.create_task(_rt_manager.broker_loop())
+    asyncio.create_task(_rt_manager.heartbeat_loop())
 def require_counselor(current_user: User = Depends(get_current_user)) -> User:
     if current_user.role != UserRole.counselor:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Counselor access required")
@@ -222,6 +428,23 @@ def create_journal(
             user_id=current_user.user_id,
         )
     created = JournalService.create_journal(db, payload)
+
+    # Publish a realtime journal.created event for connected dashboards
+    try:
+        journal_data = JournalSchema.model_validate(created).model_dump()
+        event = {
+            "v": 1,
+            "type": "journal.created",
+            "id": f"evt_journal_{journal_data.get('journal_id')}",
+            "ts": (journal_data.get("created_at") or datetime.utcnow().isoformat() + "Z"),
+            "user_id": journal_data.get("user_id"),
+            "payload": {"journal": journal_data},
+        }
+        # Fire-and-forget to avoid blocking the request path
+        asyncio.create_task(_rt_manager.publish(event))
+    except Exception as exc:  # pragma: no cover - defensive
+        logging.warning("[realtime] failed to publish journal event: %s", exc)
+
     return created
 
 
@@ -264,6 +487,64 @@ def delete_journal(
     return None
 
 
+# --- Debug: direct sentiment probe (development only) ---
+
+
+class SentimentProbeIn(BaseModel):
+    text: str
+
+
+@app.post("/api/debug/sentiment", response_model=SentimentResult)
+def debug_sentiment_probe(payload: SentimentProbeIn):
+    if settings.ENV.lower() == "production":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not available in production")
+    out = analyze_text(payload.text or "")
+    return SentimentResult(
+        sentiment=out.sentiment,
+        emotions=out.emotions,
+        confidence=out.confidence,
+        model_version=out.model_version,
+    )
+
+
+# --- Journals: Similarity ---
+
+
+@app.get("/api/journals-service/{journal_id}/similar", response_model=List[SimilarJournal])
+def similar_journals_service(
+    journal_id: int,
+    top_k: int = Query(5, ge=1, le=20),
+    same_user_only: bool = Query(False),
+    _current_user: User = Depends(require_counselor),
+    db: Session = Depends(get_db),
+):
+    results = EmbeddingService.similar_journals(
+        db,
+        journal_id=journal_id,
+        top_k=top_k,
+        same_user_only=same_user_only,
+    )
+    return results
+
+
+# Alias path without the -service suffix (kept for flexibility)
+@app.get("/api/journals/{journal_id}/similar", response_model=List[SimilarJournal])
+def similar_journals_alias(
+    journal_id: int,
+    top_k: int = Query(5, ge=1, le=20),
+    same_user_only: bool = Query(False),
+    _current_user: User = Depends(require_counselor),
+    db: Session = Depends(get_db),
+):
+    results = EmbeddingService.similar_journals(
+        db,
+        journal_id=journal_id,
+        top_k=top_k,
+        same_user_only=same_user_only,
+    )
+    return results
+
+
 # --- Mobile ingestion: Alerts ---
 
 
@@ -280,6 +561,98 @@ def create_alert(
         payload_data["user_id"] = current_user.user_id
     alert = AlertService.create_alert(db, AlertCreate(**payload_data))
     return alert
+
+
+# Alias for frontend base URL that includes /api
+@app.post("/api/alerts", response_model=AlertSchema, status_code=status.HTTP_201_CREATED)
+def create_alert_api(
+    alert_in: AlertCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    payload_data = alert_in.model_dump(exclude_unset=True)
+    if current_user.role == UserRole.student:
+        if alert_in.user_id and alert_in.user_id != current_user.user_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot report for another user")
+        payload_data["user_id"] = current_user.user_id
+    alert = AlertService.create_alert(db, AlertCreate(**payload_data))
+    return alert
+
+
+@app.websocket("/api/ws/journals")
+async def journals_ws(websocket: WebSocket, token: Optional[str] = None) -> None:
+    """Authenticated WebSocket stream for journal events.
+
+    The client should pass a valid access token via `?token=...` query parameter.
+    The token is validated using the existing JWT helper, and only a minimal
+    ping/pong protocol is supported from the client side.
+    """
+    raw_token = token
+    if not raw_token:
+        # Fallback: try to read token from Sec-WebSocket-Protocol if needed later
+        await websocket.close(code=4401)
+        return
+    try:
+        user_id = _extract_user_id(raw_token)
+    except HTTPException:
+        await websocket.close(code=4401)
+        return
+
+    await websocket.accept()
+    conn = _WSConn(websocket, user_id)
+    await _rt_manager.register_ws(conn)
+
+    try:
+        while True:
+            msg = await websocket.receive_text()
+            try:
+                data = json.loads(msg)
+            except Exception:
+                continue
+            if data.get("type") == "pong":
+                conn.last_pong = time.time()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await _rt_manager.unregister_ws(conn)
+
+
+@app.get("/api/events/journals")
+async def journals_sse(request: Request, token: str) -> StreamingResponse:
+    """SSE fallback endpoint for journal events.
+
+    The client passes a `token` query parameter with a valid JWT.
+    """
+    user_id = _extract_user_id(token)
+    client = _SSEClient(user_id)
+    await _rt_manager.register_sse(client)
+
+    async def event_stream() -> typing.AsyncGenerator[bytes, None]:
+        try:
+            last_keepalive = time.time()
+            while True:
+                if await request.is_disconnected():
+                    break
+                # Periodic keep-alive comment to avoid idle timeouts
+                now = time.time()
+                if now - last_keepalive > SSE_KEEPALIVE_SEC:
+                    yield b":keep-alive\n\n"
+                    last_keepalive = now
+                try:
+                    chunk = await asyncio.wait_for(client.queue.get(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    continue
+                yield chunk.encode("utf-8")
+        finally:
+            await _rt_manager.unregister_sse(client)
+
+    headers = {
+        "Cache-Control": "no-cache, no-transform",
+        "Content-Type": "text/event-stream",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+    }
+    return StreamingResponse(event_stream(), headers=headers)
 @app.get("/api/auth/me")
 def auth_me(token: str = Depends(oauth2_scheme)):
     """Return the current authenticated user id from JWT (subject)."""
@@ -593,6 +966,7 @@ def mood_trend(
     ]
 
 
+@app.get("/api/alerts")
 @app.get("/alerts")
 @app.get("/api/alerts")
 def list_alerts(
@@ -1046,6 +1420,43 @@ def get_journal(journal_id: int, token: str = Depends(oauth2_scheme)):
             "created_at": row["created_at"].strftime("%Y-%m-%dT%H:%M:%S") if row["created_at"] else None,
         }
 
+
+@app.delete("/api/journals/{journal_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_journal_mobile(journal_id: int, token: str = Depends(oauth2_scheme)):
+    """Delete a journal entry (soft delete) for mobile app."""
+    try:
+        data = decode_token(token)
+        uid = int(data.get("sub"))
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    # Check ownership first
+    check_q = text(
+        """
+        SELECT journal_id FROM journal
+        WHERE journal_id = :jid AND user_id = :uid AND (deleted_at IS NULL)
+        LIMIT 1
+        """
+    )
+    with mobile_engine.connect() as conn:
+        row = conn.execute(check_q, {"jid": journal_id, "uid": uid}).mappings().first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Journal not found")
+
+    # Soft delete by setting deleted_at
+    delete_q = text(
+        """
+        UPDATE journal SET deleted_at = NOW()
+        WHERE journal_id = :jid AND user_id = :uid
+        """
+    )
+    with mobile_engine.connect() as conn:
+        conn.execute(delete_q, {"jid": journal_id, "uid": uid})
+        conn.commit()
+
+    return None
+
+
 @app.get("/reports/top-stats")
 def get_top_stats(
     _user: User = Depends(require_counselor),
@@ -1251,6 +1662,7 @@ def _ensure_conversation_access(
 def list_conversations(
     include_messages: bool = Query(False),
     initiator_user_id: Optional[int] = Query(None),
+    user_id: Optional[int] = Query(None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -2063,6 +2475,179 @@ def reports_engagement(
         participation_change=part_change,
     )
 
+
+# --- Reports: Insights helpers (backed by ai_insights) ---
+def _collect_week_windows(start_dt: datetime, end_dt: datetime) -> list[tuple[date, date]]:
+    # Align to Mondays -> Sundays
+    start_day = start_dt.date()
+    end_day = end_dt.date()
+    start_monday = start_day - timedelta(days=start_day.weekday())
+    end_sunday = end_day + timedelta(days=(6 - end_day.weekday()))
+    windows: list[tuple[date, date]] = []
+    cur = start_monday
+    while cur <= end_sunday:
+        ws = cur
+        we = cur + timedelta(days=6)
+        windows.append((ws, we))
+        cur = cur + timedelta(days=7)
+    return windows
+
+
+def _get_or_compute_weekly_insight(db: Session, tf_start: date, tf_end: date) -> Dict[str, Any]:
+    # Try reading from ai_insights first
+    row = None
+    with engine.connect() as conn:
+        row = conn.execute(
+            text(
+                """
+                SELECT data FROM ai_insights
+                WHERE user_id IS NULL AND type = 'weekly'
+                  AND timeframe_start = :ts AND timeframe_end = :te
+                LIMIT 1
+                """
+            ),
+            {"ts": tf_start, "te": tf_end},
+        ).mappings().first()
+    if row and row.get("data"):
+        try:
+            stored = row["data"] if isinstance(row["data"], dict) else json.loads(row["data"])
+            return stored
+        except Exception:
+            pass
+
+    # Compute now and upsert
+    start_dt = datetime.combine(tf_start, datetime.min.time())
+    end_dt = datetime.combine(tf_end, datetime.max.time())
+    payload = build_sanitized_payload(None, start_dt, end_dt)
+    data, stored = InsightGenerationService.compute_and_store(
+        db=db,
+        user_id=None,
+        timeframe_start=tf_start,
+        timeframe_end=tf_end,
+        payload=payload,
+        insight_type="weekly",
+    )
+    return data
+
+
+def _reports_weekly_insights(db: Session, range: str | None, start: Optional[str], end: Optional[str]) -> List[Dict[str, Any]]:
+    start_dt, end_dt = parse_global_range(range or "this_week", start, end)
+    insights: List[Dict[str, Any]] = []
+    for ws, we in _collect_week_windows(start_dt, end_dt):
+        data = _get_or_compute_weekly_insight(db, ws, we)
+        insights.append(
+            {
+                "week_start": ws.isoformat(),
+                "week_end": we.isoformat(),
+                "event_name": None,
+                "event_type": None,
+                "title": str(data.get("title") or "Weekly Summary"),
+                "description": str(data.get("summary") or ""),
+                "recommendation": str(
+                    data.get("recommendation")
+                    or (data.get("recommendations", [""]) or [""])[0]
+                ),
+            }
+        )
+    return insights
+
+
+def _reports_behavior_insights(db: Session, range: str | None, start: Optional[str], end: Optional[str]) -> List[Dict[str, Any]]:
+    this_start, this_end = parse_global_range(range or "this_week", start, end)
+    tf_start = this_start.date()
+    tf_end = this_end.date()
+
+    # Try read from ai_insights
+    row = None
+    with engine.connect() as conn:
+        row = conn.execute(
+            text(
+                """
+                SELECT data FROM ai_insights
+                WHERE user_id IS NULL AND type = 'behavioral'
+                  AND timeframe_start = :ts AND timeframe_end = :te
+                LIMIT 1
+                """
+            ),
+            {"ts": tf_start, "te": tf_end},
+        ).mappings().first()
+    if row and row.get("data"):
+        try:
+            data = row["data"] if isinstance(row["data"], dict) else json.loads(row["data"])
+        except Exception:
+            data = None
+    else:
+        payload = build_sanitized_payload(None, this_start, this_end)
+        data, _ = InsightGenerationService.compute_and_store(
+            db=db,
+            user_id=None,
+            timeframe_start=tf_start,
+            timeframe_end=tf_end,
+            payload=payload,
+            insight_type="behavioral",
+        )
+
+    if not data:
+        return []
+
+    insights: List[Dict[str, Any]] = []
+
+    # 1) Recurring Emotional Patterns
+    patterns = data.get("recurring_emotional_patterns") or []
+    insights.append(
+        {
+            "title": "Recurring Emotional Patterns",
+            "description": "Top recurring emotional patterns detected in the selected period.",
+            "metrics": [{"label": str(p), "value": "present"} for p in patterns[:6]],
+        }
+    )
+
+    # 2) Irregular Changes
+    irr = data.get("irregular_changes") or []
+    insights.append(
+        {
+            "title": "Irregular Mood Changes",
+            "description": f"Detected {len(irr)} large day-to-day mood swings (>= 15 points).",
+            "metrics": [
+                {"label": str(i.get("date")), "value": f"Δ {i.get('delta')}"}
+                for i in irr[:5]
+            ],
+        }
+    )
+
+    # 3) Risk Flags
+    rf = data.get("risk_flags") or {}
+    insights.append(
+        {
+            "title": "Risk Flags",
+            "description": "Key risk indicators for the selected period.",
+            "metrics": [
+                {"label": "Negative sentiment ratio", "value": f"{rf.get('negative_sentiment_ratio_percent', 0)}%"},
+                {"label": "High-stress days", "value": rf.get("high_stress_days", 0)},
+                {"label": "Late-night journals", "value": rf.get("late_night_journals", 0)},
+            ],
+        }
+    )
+
+    # 4) Behavioral Clusters
+    bc = data.get("behavioral_clusters") or {}
+    tod = bc.get("time_of_day") or {}
+    dow = bc.get("day_of_week") or {}
+    dow_names = {0: "Mon", 1: "Tue", 2: "Wed", 3: "Thu", 4: "Fri", 5: "Sat", 6: "Sun"}
+    cluster_metrics = [
+        *[{"label": f"TOD: {k}", "value": v} for k, v in list(tod.items())[:4]],
+        *[{"label": f"DOW: {dow_names.get(int(k), str(k))}", "value": v} for k, v in list(dow.items())[:4]],
+    ]
+    insights.append(
+        {
+            "title": "Behavioral Clusters",
+            "description": "Time-of-day and day-of-week activity distributions.",
+            "metrics": cluster_metrics,
+        }
+    )
+
+    return insights
+
 @app.get("/api/reports/weekly-insights")
 def weekly_insights(
     range: str = Query("this_week"),
@@ -2071,45 +2656,7 @@ def weekly_insights(
     current_user: str = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    start_dt, end_dt = parse_global_range(range, start, end)
-    weeks = CheckinService.weekly_trend_rolling(db, start=start_dt.date(), end=end_dt.date())
-    insights: List[Dict[str, Any]] = []
-    events = _load_events()
-
-    for idx, wk in enumerate(weeks):
-        prev_idx = weeks[idx - 1]["index"] if idx > 0 else wk["index"]
-        change = int(wk["index"] - prev_idx)
-        change_abs = abs(change)
-        start_label = wk["week_start"]
-        end_label = wk["week_end"]
-
-        title = "Stable Wellness"
-        if change > 5:
-            title = "Wellness Surge"
-        elif change < -5:
-            title = "Wellness Dip"
-
-        s_date = datetime.fromisoformat(start_label).date()
-        e_date = datetime.fromisoformat(end_label).date()
-        description = f"Wellness index {('rose' if change >= 0 else 'fell')} by {change_abs} points to {wk['index']}."
-        recommendation = _build_recommendation(change, _journal_themes(
-            datetime.combine(s_date, datetime.min.time()),
-            datetime.combine(e_date, datetime.max.time()),
-        ))
-
-        matched_event = next((ev for ev in events if _event_overlaps(ev, s_date, e_date)), None)
-
-        insights.append({
-            "week_start": start_label,
-            "week_end": end_label,
-            "event_name": matched_event.get("name") if matched_event else None,
-            "event_type": matched_event.get("type") if matched_event else None,
-            "title": title,
-            "description": description,
-            "recommendation": recommendation,
-        })
-
-    return insights
+    return _reports_weekly_insights(db, range, start, end)
 
 
 @app.get("/api/reports/behavior-insights")
@@ -2118,72 +2665,31 @@ def behavior_insights(
     start: Optional[str] = Query(None),
     end: Optional[str] = Query(None),
     current_user: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
-    # Apply global date filter to derive the current window and previous equal-length window
-    this_start, this_end = parse_global_range(range, start, end)
-    delta = this_end - this_start
-    last_end = this_start - timedelta(seconds=1)
-    last_start = last_end - delta
-
-    def _stress_cases(start_dt: datetime, end_dt: datetime) -> int:
-        q = text(
-            """
-            SELECT COUNT(*) FROM emotional_checkin
-            WHERE created_at >= :start AND created_at < :end
-              AND stress_level IN ('High Stress', 'Very High Stress')
-            """
-        )
-        with engine.connect() as conn:
-            return conn.execute(q, {
-                "start": start_dt.strftime('%Y-%m-%d %H:%M:%S'),
-                "end": (end_dt + timedelta(seconds=1)).strftime('%Y-%m-%d %H:%M:%S')
-            }).scalar() or 0
-
-    this_stress = _stress_cases(this_start, this_end)
-    last_stress = _stress_cases(last_start, last_end)
-
-    journaling_q = text(
-        """
-        SELECT COUNT(*) FROM journal
-        WHERE created_at >= :start AND created_at < :end
-        """
-    )
-    with engine.connect() as conn:
-        journals_this = conn.execute(journaling_q, {
-            "start": this_start.strftime('%Y-%m-%d %H:%M:%S'),
-            "end": (this_end + timedelta(seconds=1)).strftime('%Y-%m-%d %H:%M:%S')
-        }).scalar() or 0
-        journals_last = conn.execute(journaling_q, {
-            "start": last_start.strftime('%Y-%m-%d %H:%M:%S'),
-            "end": (last_end + timedelta(seconds=1)).strftime('%Y-%m-%d %H:%M:%S')
-        }).scalar() or 0
-
-    stress_change = this_stress - last_stress
-    stress_change_pct = round(((this_stress - last_stress) / max(last_stress, 1e-9)) * 100) if last_stress else 0
-
-    return [
-        {
-            "title": "Stress Spike Patterns",
-            "description": "Weekly comparison of high-stress check-ins shows how acute events affect students.",
-            "metrics": [
-                {"label": "High stress cases (current)", "value": this_stress},
-                {"label": "High stress cases (last)", "value": last_stress},
-                {"label": "Change", "value": f"{stress_change:+}"},
-                {"label": "% Change", "value": f"{stress_change_pct:+}%"},
-            ],
-        },
-        {
-            "title": "Journaling Correlation",
-            "description": "Journal activity often mirrors engagement and emotional processing.",
-            "metrics": [
-                {"label": "Journals (current week)", "value": journals_this},
-                {"label": "Journals (last week)", "value": journals_last},
-                {"label": "Change", "value": f"{journals_this - journals_last:+}"},
-            ],
-        },
-    ]
+    return _reports_behavior_insights(db, range, start, end)
 
 
+@app.get("/api/ai/sentiment-summary")
+def ai_sentiment_summary(
+    period: str = Query("month", enum=["week", "month", "year"]),
+    current_user: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    days_map = {"week": 7, "month": 30, "year": 365}
+    days = days_map.get(period, 30)
+    return NarrativeInsightService.behavior_highlights(db, days=days)
+
+
+@app.get("/api/ai/mood-summary")
+def ai_mood_summary(
+    period: str = Query("month", enum=["week", "month", "year"]),
+    current_user: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    days_map = {"week": 7, "month": 30, "year": 365}
+    days = days_map.get(period, 30)
+    return NarrativeInsightService.mood_shift_summary(db, days=days)
 @app.get("/api/events")
 def list_events(current_user: str = Depends(get_current_user)):
     return _load_events()
@@ -2543,6 +3049,74 @@ def get_participation():
         participation = round((submitted / total) * 100, 1) if total > 0 else 0
     return {"total": total, "submitted": submitted, "participation": participation}
 
+
+class GenerateWeeklyInsightsRequest(BaseModel):
+    user_id: Optional[int] = None
+    week_start: date
+    week_end: date
+
+
+class GenerateBehavioralPatternsRequest(BaseModel):
+    user_id: Optional[int] = None
+    timeframe_start: date
+    timeframe_end: date
+
+
+def _require_internal(token: Optional[str]) -> None:
+    if not settings.INSIGHTS_FEATURE_ENABLED:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Insights feature disabled")
+    expected = settings.INTERNAL_API_TOKEN or ""
+    if not expected or token != expected:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid internal token")
+
+
+@app.post("/generate-weekly-insights")
+def generate_weekly_insights(
+    req: GenerateWeeklyInsightsRequest,
+    x_internal_token: Optional[str] = Header(default=None, alias="X-Internal-Token"),
+    db: Session = Depends(get_db),
+):
+    _require_internal(x_internal_token)
+    # Build payload internally from DB
+    start_dt = datetime.combine(req.week_start, datetime.min.time())
+    end_dt = datetime.combine(req.week_end, datetime.max.time())
+    payload = build_sanitized_payload(req.user_id, start_dt, end_dt)
+    data, stored = InsightGenerationService.compute_and_store(
+        db=db,
+        user_id=req.user_id,
+        timeframe_start=req.week_start,
+        timeframe_end=req.week_end,
+        payload=payload,
+        insight_type="weekly",
+    )
+    if not stored:
+        # Pass through insufficient-data style response
+        return {"insight": None, "stored": False, **data}
+    return {"insight": data, "stored": True}
+
+
+@app.post("/generate-behavioral-patterns")
+def generate_behavioral_patterns(
+    req: GenerateBehavioralPatternsRequest,
+    x_internal_token: Optional[str] = Header(default=None, alias="X-Internal-Token"),
+    db: Session = Depends(get_db),
+):
+    _require_internal(x_internal_token)
+    start_dt = datetime.combine(req.timeframe_start, datetime.min.time())
+    end_dt = datetime.combine(req.timeframe_end, datetime.max.time())
+    payload = build_sanitized_payload(req.user_id, start_dt, end_dt)
+    data, stored = InsightGenerationService.compute_and_store(
+        db=db,
+        user_id=req.user_id,
+        timeframe_start=req.timeframe_start,
+        timeframe_end=req.timeframe_end,
+        payload=payload,
+        insight_type="behavioral",
+    )
+    if not stored:
+        return {"insight": None, "stored": False, **data}
+    return {"insight": data, "stored": True}
+
 @app.get("/api/users/{user_id}")
 def get_user(user_id: int):
     query = """
@@ -2561,6 +3135,51 @@ def get_user(user_id: int):
             "nickname": row["nickname"],
             "role": row["role"],
         }
+
+
+def _latest_insight_record(insight_type: str, user_id: Optional[int]) -> Optional[Dict[str, Any]]:
+    base_sql = """
+        SELECT insight_id, user_id, timeframe_start, timeframe_end, data, risk_level
+        FROM ai_insights
+        WHERE type = :type
+    """
+    params: Dict[str, Any] = {"type": insight_type}
+    if user_id is None:
+        sql = base_sql + " AND user_id IS NULL ORDER BY timeframe_end DESC LIMIT 1"
+    else:
+        sql = base_sql + " AND user_id = :uid ORDER BY timeframe_end DESC LIMIT 1"
+        params["uid"] = user_id
+    with engine.connect() as conn:
+        row = conn.execute(text(sql), params).mappings().first()
+        return dict(row) if row else None
+
+
+@app.get("/api/insights/weekly")
+@app.get("/api/insights/weekly/{user_id}")
+def get_latest_weekly_insight(user_id: Optional[int] = None):
+    rec = _latest_insight_record("weekly", user_id)
+    if not rec:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No weekly insight found")
+    return {
+        "timeframe_start": rec["timeframe_start"].isoformat() if rec.get("timeframe_start") else None,
+        "timeframe_end": rec["timeframe_end"].isoformat() if rec.get("timeframe_end") else None,
+        "risk_level": rec.get("risk_level"),
+        "data": rec.get("data"),
+    }
+
+
+@app.get("/api/insights/behavioral")
+@app.get("/api/insights/behavioral/{user_id}")
+def get_latest_behavioral_insight(user_id: Optional[int] = None):
+    rec = _latest_insight_record("behavioral", user_id)
+    if not rec:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No behavioral insight found")
+    return {
+        "timeframe_start": rec["timeframe_start"].isoformat() if rec.get("timeframe_start") else None,
+        "timeframe_end": rec["timeframe_end"].isoformat() if rec.get("timeframe_end") else None,
+        "risk_level": rec.get("risk_level"),
+        "data": rec.get("data"),
+    }
     
 # --- Dashboard: Appointment Logs ---
 @app.get("/api/appointment-logs")

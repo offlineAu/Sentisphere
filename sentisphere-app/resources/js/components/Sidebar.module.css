@@ -4,12 +4,12 @@
   left: 0;
   height: 100vh;
   width: 17rem; /* align with motion animate open width */
-  background: #f9fafb;
+  background: var(--sidebar);
   display: flex;
   flex-direction: column;
-  border-right: 1px solid #e5e7eb;
+  border-right: 1px solid var(--sidebar-border);
   transition: width 0.3s ease;
-  box-shadow: 0 0 8px rgba(0, 0, 0, 0.03);
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.08);
   overflow: hidden; /* avoid overlap when collapsed */
 }
 
@@ -41,7 +41,7 @@
   width: 2.25rem;
   height: 2.25rem;
   border-radius: 50%;
-  background: #0d8c4f;
+  background: var(--sidebar-primary);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -50,20 +50,20 @@
 .logoText {
   font-size: 1.4rem;
   font-weight: 700;
-  color: #0d8c4f;
+  color: var(--sidebar-foreground);
   white-space: nowrap;
 }
 
 .divider {
   height: 1px;
-  background: #e5e7eb;
+  background: var(--sidebar-border);
   margin: 1rem 0;
 }
 
 .menuTitle {
   font-size: 0.75rem;
   font-weight: 700;
-  color: #9ca3af;
+  color: rgba(236, 253, 245, 0.6); /* subtle on dark sidebar */
   letter-spacing: 0.08em;
   margin: 0 1.5rem 0.5rem 1.5rem;
 }
@@ -72,14 +72,14 @@
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
-  padding: 0 0.5rem;
+  padding: 0 0.5rem 0 0; /* remove left padding so active pill can stick to screen edge */
 }
 
 .navLink {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  color: #6b7280;
+  color: var(--sidebar-foreground);
   text-decoration: none;
   font-weight: 500;
   border-radius: 0.75rem;
@@ -89,22 +89,23 @@
 }
 
 .navLink:hover {
-  background: #f0fdf4;
-  color: #0d8c4f;
+  background: var(--sidebar-accent);
+  color: var(--sidebar-accent-foreground);
 }
 
 .active {
-  color: #0d8c4f;
+  color: var(--sidebar-accent-foreground);
+  background: var(--sidebar-accent);
   font-weight: 700;
 }
 
 .active::before {
   content: "";
   position: absolute;
-  left: 0.5rem;
+  left: 0; /* flush to the left edge of the sidebar */
   width: 6px;
   height: 24px;
-  background: #0d8c4f;
+  background: var(--sidebar-primary);
   border-radius: 4px;
 }
 
@@ -119,18 +120,19 @@
 .navLink svg {
   width: 20px;
   height: 20px;
+  color: #94a3b8; /* gray-400 outline look for inactive */
 }
 
 /* Disabled nav item (e.g., Coming Soon) */
 .navLinkDisabled {
-  color: #9ca3af; /* muted */
+  color: rgba(236, 253, 245, 0.6); /* muted */
   opacity: 0.7;
   cursor: not-allowed;
 }
 
 .navLinkDisabled:hover {
   background: transparent; /* disable hover background */
-  color: #9ca3af; /* keep muted color */
+  color: rgba(236, 253, 245, 0.6); /* keep muted color */
 }
 
 .spacer {
@@ -155,20 +157,29 @@
 }
 
 .signoutBtn:hover {
-  background: #fee2e2;
+  background: rgba(239, 68, 68, 0.12); /* red-500 / 12% */
   color: #b91c1c;
+}
+
+.signoutBtn:focus-visible {
+  outline: 2px solid rgba(239, 68, 68, 0.5);
+  outline-offset: 2px;
+}
+
+.signoutBtn:active {
+  background: rgba(239, 68, 68, 0.18);
 }
 
 /* --- LOGO --- */
 .logoCircle {
-  background: #0d8c4f;
+  background: var(--sidebar-primary);
   width: 2.8rem;
   height: 2.8rem;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 2px 8px rgba(13, 140, 79, 0.15);
+  box-shadow: 0 2px 8px rgba(47, 143, 93, 0.3);
   flex-shrink: 0;
   overflow: hidden; /* crop any image whitespace when scaled */
 }
@@ -185,13 +196,11 @@
 
 /* --- ACTIVE ICON BG --- */
 .iconActive {
-  background: #0d8c4f !important;
-  color: #fff !important;
-  border-radius: 0.75rem;
+  color: var(--sidebar-primary) !important; /* active icon becomes green */
 }
 
 .iconActive svg {
-  color: #fff !important;
+  color: var(--sidebar-primary) !important;
 }
 
 /* --- GENERAL FIX --- */
@@ -213,15 +222,16 @@
   width: 2rem;
   height: 2rem;
   border-radius: 0.5rem;
-  border: 1px solid #e5e7eb;
-  background: #fff;
-  color: #0f172a;
+  border: 1px solid var(--sidebar-border);
+  background: transparent;
+  color: var(--sidebar-foreground);
   cursor: pointer;
   margin-left: auto; /* push to far right */
 }
 
 .chevron:hover {
-  background: #f3f4f6;
+  background: var(--sidebar-accent);
+  color: var(--sidebar-accent-foreground);
 }
 
 /* Closed state adjustments: keep chevron visible */
@@ -248,7 +258,7 @@
 }
 
 .closed .logoWrap:focus {
-  outline: 2px solid #0d8c4f;
+  outline: 2px solid var(--sidebar-primary);
   outline-offset: 2px;
 }
 

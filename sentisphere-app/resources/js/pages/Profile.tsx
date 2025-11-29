@@ -345,11 +345,13 @@ function Profile() {
 
   return (
     <main
-      className={`transition-all duration-200 bg-[#f9fafb] min-h-screen space-y-6 pt-6 pr-6 pb-6`}
+      className={`transition-all duration-200 min-h-screen space-y-6 pt-6 pr-6 pb-6 pl-3 sm:pl-5`}
+      style={{ backgroundColor: "transparent" }}
     >
-      <div className="pl-4 md:pl-6">
-        <h1 className="text-2xl font-bold text-[#0d8c4f]">Profile</h1>
+      <div className="ml-2">
+        <h1 className="text-2xl font-bold text-primary">Profile</h1>
         <p className="text-sm text-[#6b7280]">Manage your professional profile and settings</p>
+        <div />
         {error && <div className="text-red-600 text-sm">{error}</div>}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-4">
           <div>
@@ -493,7 +495,7 @@ function Profile() {
                         </div>
                       ))}
                       <div>
-                        <button className="px-3 py-2 rounded-xl bg-[#0d8c4f] text-white" onClick={addSlot}>Add time slot</button>
+                        <button className="px-3 py-2 rounded-xl bg-primary text-primary-foreground" onClick={addSlot}>Add time slot</button>
                       </div>
                     </div>
                   </div>
@@ -563,7 +565,7 @@ function Profile() {
               )}
               <div className="flex items-center gap-3 mt-3">
                 <button
-                  className={`px-4 py-2 rounded-xl font-semibold disabled:opacity-60 ${isDirty ? 'bg-[#0d8c4f] text-white' : 'bg-[#e5e7eb] text-[#374151]'}`}
+                  className={`px-4 py-2 rounded-xl font-semibold disabled:opacity-60 ${isDirty ? 'bg-primary text-primary-foreground' : 'bg-[#e5e7eb] text-[#374151]'}`}
                   onClick={save}
                   disabled={saving || loading || !isDirty}
                   title={"Save counselor profile"}
