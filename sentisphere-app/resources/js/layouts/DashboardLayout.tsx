@@ -6,9 +6,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   return (
     <div className="flex min-h-screen">
       <Sidebar />
-      <main
-        className={`transition-all duration-200 w-full ${open ? 'pl-[17rem]' : 'pl-[5rem]'} pt-2 pr-6 pb-6`}
-      >
+      <main className={`transition-all duration-200 w-full ${open ? 'pl-[17rem]' : 'pl-[5rem]'} pt-0 pr-0 pb-6`}>
         {children}
       </main>
     </div>

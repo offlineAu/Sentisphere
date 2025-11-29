@@ -1,5 +1,5 @@
 .headerTitle {
-  color: #0d8c4f;
+  color: var(--primary);
   font-size: 2rem;
   font-weight: bold;
 }
@@ -10,7 +10,7 @@
 }
 
 .sectionTitle {
-  color: #0d8c4f;
+  color: var(--primary);
   font-size: 1.25rem;
   font-weight: 600;
 }
@@ -27,7 +27,7 @@
 
 .riskLow {
   background: #e5e5e5;
-  color: #0d8c4f;
+  color: var(--primary);
 }
 
 .riskNone {
@@ -47,7 +47,7 @@
 
 .alertLow {
   background: #e5e5e5;
-  color: #0d8c4f;
+  color: var(--primary);
 }
 
 .tableTitle {
