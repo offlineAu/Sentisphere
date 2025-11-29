@@ -1420,6 +1420,43 @@ def get_journal(journal_id: int, token: str = Depends(oauth2_scheme)):
             "created_at": row["created_at"].strftime("%Y-%m-%dT%H:%M:%S") if row["created_at"] else None,
         }
 
+
+@app.delete("/api/journals/{journal_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_journal_mobile(journal_id: int, token: str = Depends(oauth2_scheme)):
+    """Delete a journal entry (soft delete) for mobile app."""
+    try:
+        data = decode_token(token)
+        uid = int(data.get("sub"))
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    # Check ownership first
+    check_q = text(
+        """
+        SELECT journal_id FROM journal
+        WHERE journal_id = :jid AND user_id = :uid AND (deleted_at IS NULL)
+        LIMIT 1
+        """
+    )
+    with mobile_engine.connect() as conn:
+        row = conn.execute(check_q, {"jid": journal_id, "uid": uid}).mappings().first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Journal not found")
+
+    # Soft delete by setting deleted_at
+    delete_q = text(
+        """
+        UPDATE journal SET deleted_at = NOW()
+        WHERE journal_id = :jid AND user_id = :uid
+        """
+    )
+    with mobile_engine.connect() as conn:
+        conn.execute(delete_q, {"jid": journal_id, "uid": uid})
+        conn.commit()
+
+    return None
+
+
 @app.get("/reports/top-stats")
 def get_top_stats(
     _user: User = Depends(require_counselor),

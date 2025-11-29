@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, View, Animated, Easing, Pressable, Platform, useWindowDimensions } from 'react-native';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { Alert, StyleSheet, View, Animated, Easing, Pressable, Platform, useWindowDimensions, Modal, ScrollView } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -8,6 +8,8 @@ import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { Button } from '@/components/ui/button';
+import * as Haptics from 'expo-haptics';
 
 export default function JournalDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -15,12 +17,18 @@ export default function JournalDetailScreen() {
   const scheme = useColorScheme() ?? 'light';
   const palette = Colors[scheme] as any;
   const API = process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8010';
-  const { width: winW } = useWindowDimensions();
+  const { width: winW, height: winH } = useWindowDimensions();
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [content, setContent] = useState('');
   const [createdAt, setCreatedAt] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const confirmScale = useRef(new Animated.Value(0)).current;
+  const cardScale = useRef(new Animated.Value(0.96)).current;
+  const cardOpacity = useRef(new Animated.Value(0)).current;
 
   const getAuthToken = async (): Promise<string | null> => {
     if (Platform.OS === 'web') {
@@ -73,96 +81,398 @@ export default function JournalDetailScreen() {
     return first.slice(0, 80) || 'Journal Entry';
   }, [content]);
 
+  // Format date as "Saturday, November 29, 2025"
   const when = useMemo(() => {
     if (!createdAt) return '';
-    try { return new Date(createdAt).toLocaleString(); } catch { return createdAt || ''; }
+    try {
+      const d = new Date(createdAt);
+      return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+    } catch {
+      return createdAt || '';
+    }
   }, [createdAt]);
 
-  const scrollY = useRef(new Animated.Value(0)).current;
-  const ease = Easing.bezier(0.22, 1, 0.36, 1);
-  const headerH = scrollY.interpolate({ inputRange: [0, 140], outputRange: [170, 88], extrapolate: 'clamp' });
-  const titleSize = scrollY.interpolate({ inputRange: [0, 140], outputRange: [22, 16], extrapolate: 'clamp' });
-  const titleTx = scrollY.interpolate({ inputRange: [0, 140], outputRange: [0, -6], extrapolate: 'clamp' });
+  // Entrance animation
+  useEffect(() => {
+    if (!loading) {
+      Animated.parallel([
+        Animated.spring(cardScale, { toValue: 1, useNativeDriver: true, tension: 60, friction: 12 }),
+        Animated.timing(cardOpacity, { toValue: 1, duration: 320, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      ]).start();
+    }
+  }, [loading]);
 
-  const [contentH, setContentH] = useState(1);
-  const [viewH, setViewH] = useState(1);
-  const [progress, setProgress] = useState(0);
+  const animateConfirm = useCallback((to: 0 | 1, done?: () => void) => {
+    Animated.timing(confirmScale, {
+      toValue: to,
+      duration: to === 1 ? 220 : 180,
+      easing: to === 1 ? Easing.out(Easing.cubic) : Easing.in(Easing.cubic),
+      useNativeDriver: true,
+    }).start(done);
+  }, [confirmScale]);
+
+  const closeConfirm = useCallback((after?: () => void) => {
+    animateConfirm(0, () => {
+      setShowDeleteConfirm(false);
+      setIsDeleting(false);
+      setDeleteError(null);
+      after?.();
+    });
+  }, [animateConfirm]);
+
+  const handleDeletePress = () => {
+    if (Platform.OS !== 'web') {
+      try { Haptics.selectionAsync(); } catch {}
+    }
+    setDeleteError(null);
+    confirmScale.setValue(0);
+    setShowDeleteConfirm(true);
+    requestAnimationFrame(() => animateConfirm(1));
+  };
+
+  const handleConfirmDelete = async () => {
+    if (isDeleting) return;
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      const tok = await getAuthToken();
+      if (!tok) {
+        setIsDeleting(false);
+        Alert.alert('Not signed in', 'Please sign in again.');
+        return;
+      }
+      const res = await fetch(`${API}/api/journals/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${tok}` },
+      });
+      if (res.status === 401) {
+        await clearAuthToken();
+        closeConfirm(() => router.replace('/auth'));
+        return;
+      }
+      if (res.status === 404) {
+        closeConfirm(() => router.replace('/(student)/(tabs)/journal'));
+        return;
+      }
+      if (!res.ok) {
+        let detail = '';
+        try { const d = await res.json(); detail = d?.detail || d?.message || ''; } catch {}
+        throw new Error(detail || `Delete failed: ${res.status}`);
+      }
+      if (Platform.OS !== 'web') {
+        try { await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
+      }
+      // Use replace to ensure list refreshes on both web and mobile
+      closeConfirm(() => router.replace('/(student)/(tabs)/journal'));
+    } catch (e: any) {
+      setDeleteError(e?.message || 'Unable to delete this journal entry. Please try again.');
+      setIsDeleting(false);
+    }
+  };
+
+  const handleCancelDelete = () => closeConfirm();
 
   return (
-    <ThemedView style={styles.container}>
-      <View style={[styles.progressTrack, { backgroundColor: '#EEF2F7' }]}> 
-        <View style={[styles.progressFill, { width: `${Math.round(progress * 100)}%`, backgroundColor: '#10B981' }]} />
+    <View style={styles.container}>
+      <LinearGradient
+        colors={['#d1fae5', '#ecfdf5', '#ffffff']}
+        start={{ x: 0.5, y: 0 }}
+        end={{ x: 0.5, y: 0.5 }}
+        style={StyleSheet.absoluteFillObject}
+      />
+
+      {/* Floating back button */}
+      <View style={styles.floatingHeader}>
+        <Pressable onPress={() => router.replace('/(student)/(tabs)/journal')} accessibilityRole="button" style={styles.floatingBtn} accessibilityLabel="Go back to journal list">
+          <Icon name="arrow-left" size={20} color="#047857" />
+        </Pressable>
       </View>
 
-      <Animated.View style={[styles.header, { height: headerH }]}> 
-        <LinearGradient colors={["#ECFDF5", "#D1FAE5"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFillObject} />
-        <View style={styles.headerBar}>
-          <Pressable onPress={() => router.back()} accessibilityRole="button" style={styles.backBtn}>
-            <Icon name="arrow-left" size={18} color="#065F46" />
-          </Pressable>
-          <ThemedText style={{ color: '#065F46', fontFamily: 'Inter_600SemiBold' }}>Journal</ThemedText>
-          <View style={{ width: 40 }} />
+      {loading ? (
+        <View style={styles.loadingWrap}>
+          <View style={styles.skeletonIcon} />
+          <View style={[styles.skeletonLine, { width: '60%', height: 24, marginTop: 24 }]} />
+          <View style={[styles.skeletonLine, { width: '40%', height: 14, marginTop: 8 }]} />
+          <View style={[styles.skeletonLine, { width: '100%', marginTop: 32 }]} />
+          <View style={[styles.skeletonLine, { width: '92%' }]} />
+          <View style={[styles.skeletonLine, { width: '88%' }]} />
+          <View style={[styles.skeletonLine, { width: '96%' }]} />
         </View>
-        <Animated.Text
-          numberOfLines={2}
-          style={{
-            fontFamily: 'Inter_700Bold',
-            color: '#065F46',
-            fontSize: titleSize as any,
-            transform: [{ translateY: titleTx as any }],
-            paddingHorizontal: 16,
-            textAlign: 'left',
-          }}
-        >
-          {title}
-        </Animated.Text>
-        <ThemedText style={{ color: '#047857', paddingHorizontal: 16, marginTop: 4 }}>{when}</ThemedText>
-      </Animated.View>
+      ) : error ? (
+        <View style={styles.errorWrap}>
+          <Icon name="book-open" size={48} color="#DC2626" />
+          <ThemedText style={{ color: '#DC2626', marginTop: 12, textAlign: 'center' }}>{error}</ThemedText>
+          <Button title="Go back" variant="outline" onPress={() => router.replace('/(student)/(tabs)/journal')} style={{ marginTop: 16 }} />
+        </View>
+      ) : (
+        <Animated.View style={[styles.cardWrap, { opacity: cardOpacity, transform: [{ scale: cardScale }] }]}>
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.cardContent}
+          >
+            {/* Icon badge */}
+            <View style={styles.iconBadge}>
+              <Icon name="book-open" size={28} color="#047857" />
+            </View>
 
-      <Animated.ScrollView
-        showsVerticalScrollIndicator={false}
-        onLayout={(e) => setViewH(e.nativeEvent.layout.height)}
-        onContentSizeChange={(_, h) => setContentH(h)}
-        onScroll={Animated.event(
-          [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-          {
-            useNativeDriver: true,
-            listener: (e: any) => {
-              const y = e.nativeEvent.contentOffset?.y || 0;
-              const total = Math.max(1, contentH - viewH);
-              setProgress(Math.min(1, Math.max(0, y / total)));
-            },
-          }
-        )}
-        scrollEventThrottle={16}
-        contentContainerStyle={{ padding: 16, paddingBottom: 32 }}
-      >
-        {loading ? (
-          <View style={{ paddingTop: 24 }}>
-            <View style={{ height: 18, backgroundColor: '#F3F4F6', borderRadius: 6, marginBottom: 10 }} />
-            <View style={{ height: 14, backgroundColor: '#F3F4F6', borderRadius: 6, marginBottom: 8, width: '92%' }} />
-            <View style={{ height: 14, backgroundColor: '#F3F4F6', borderRadius: 6, marginBottom: 8, width: '88%' }} />
-            <View style={{ height: 14, backgroundColor: '#F3F4F6', borderRadius: 6, marginBottom: 8, width: '96%' }} />
+            {/* Title */}
+            <ThemedText style={styles.cardTitle}>{title}</ThemedText>
+
+            {/* Date subtitle */}
+            {when ? (
+              <ThemedText style={styles.cardDate}>{when}</ThemedText>
+            ) : null}
+
+            {/* Content body */}
+            <ThemedText style={styles.cardBody}>{content}</ThemedText>
+          </ScrollView>
+
+          {/* Delete action button at bottom */}
+          <View style={styles.cardFooter}>
+            <Pressable
+              onPress={handleDeletePress}
+              accessibilityRole="button"
+              accessibilityLabel="Delete journal entry"
+              style={({ pressed }) => [
+                styles.deleteBtn,
+                pressed && { opacity: 0.85, transform: [{ scale: 0.98 }] },
+              ]}
+            >
+              <Icon name="trash-2" size={18} color="#b91c1c" />
+              <ThemedText style={styles.deleteBtnText}>Delete Entry</ThemedText>
+            </Pressable>
           </View>
-        ) : error ? (
-          <ThemedText style={{ color: '#DC2626' }}>{error}</ThemedText>
-        ) : (
-          <View style={styles.paper}>
-            <ThemedText style={styles.contentText}>{content}</ThemedText>
-          </View>
-        )}
-      </Animated.ScrollView>
-    </ThemedView>
+        </Animated.View>
+      )}
+
+      {/* Delete confirmation modal */}
+      <Modal visible={showDeleteConfirm} transparent animationType="fade" onRequestClose={handleCancelDelete}>
+        <View style={styles.overlay}>
+          <Animated.View
+            style={StyleSheet.flatten([
+              styles.confirmCard,
+              {
+                transform: [
+                  { scale: confirmScale.interpolate({ inputRange: [0, 1], outputRange: [0.94, 1] }) },
+                  { translateY: confirmScale.interpolate({ inputRange: [0, 1], outputRange: [18, 0] }) },
+                ],
+                opacity: confirmScale,
+              },
+            ])}
+          >
+            <View style={styles.confirmIconWrap}>
+              <Icon name="trash-2" size={28} color="#b91c1c" />
+            </View>
+            <ThemedText style={styles.confirmTitle}>Let this story go?</ThemedText>
+            <ThemedText style={styles.confirmMessage}>
+              Oh no, this is your journal! Deleting it will permanently remove this entry from your history.
+            </ThemedText>
+            {deleteError ? (
+              <View style={[styles.noticeBox, { backgroundColor: '#FEF2F2', borderColor: '#FCA5A5' }]}>
+                <ThemedText style={{ color: '#B91C1C', fontSize: 13 }}>{deleteError}</ThemedText>
+              </View>
+            ) : null}
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
+              <Button
+                title="Keep it"
+                variant="ghost"
+                onPress={handleCancelDelete}
+                disabled={isDeleting}
+                style={{ flex: 1, paddingVertical: 12, backgroundColor: 'rgba(13,140,79,0.08)', borderWidth: 0 }}
+                textStyle={{ fontSize: 14 }}
+              />
+              <Button
+                title={isDeleting ? 'Deleting…' : 'Delete entry'}
+                variant="ghost"
+                onPress={handleConfirmDelete}
+                loading={isDeleting}
+                style={{ flex: 1, paddingVertical: 12, backgroundColor: 'rgba(239,68,68,0.08)', borderWidth: 0 }}
+                textStyle={{ fontSize: 14, color: '#b91c1c' }}
+              />
+            </View>
+          </Animated.View>
+        </View>
+      </Modal>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFFFFF' },
-  progressTrack: { height: 2, width: '100%' },
-  progressFill: { height: 2 },
-  header: { paddingTop: 14, justifyContent: 'flex-start', gap: 6 },
-  headerBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 10, marginBottom: 2 },
-  backBtn: { width: 40, height: 32, alignItems: 'flex-start', justifyContent: 'center' },
-  paper: { backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: '#E5E7EB', padding: 16 },
-  contentText: { fontSize: 16, lineHeight: 24, color: '#111827' },
+  container: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  floatingHeader: {
+    position: 'absolute',
+    top: 56,
+    left: 20,
+    zIndex: 10,
+  },
+  floatingBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#064e3b',
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+  },
+  loadingWrap: {
+    flex: 1,
+    paddingTop: 120,
+    paddingHorizontal: 32,
+    alignItems: 'center',
+    gap: 10,
+  },
+  skeletonIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+  },
+  skeletonLine: {
+    height: 16,
+    borderRadius: 10,
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    alignSelf: 'stretch',
+  },
+  errorWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+  },
+  cardWrap: {
+    flex: 1,
+    marginTop: 116,
+    marginHorizontal: 20,
+    marginBottom: 24,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 32,
+    shadowColor: '#064e3b',
+    shadowOpacity: 0.12,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 10,
+    overflow: 'hidden',
+  },
+  cardContent: {
+    paddingTop: 32,
+    paddingHorizontal: 28,
+    paddingBottom: 100,
+    alignItems: 'center',
+  },
+  iconBadge: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: 'rgba(16, 185, 129, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
+  cardTitle: {
+    fontFamily: 'Inter_700Bold',
+    fontSize: 26,
+    color: '#064e3b',
+    textAlign: 'center',
+    letterSpacing: -0.5,
+    lineHeight: 34,
+  },
+  cardDate: {
+    fontFamily: 'Inter_500Medium',
+    fontSize: 14,
+    color: '#6b7280',
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  cardBody: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 16,
+    lineHeight: 26,
+    color: '#374151',
+    marginTop: 28,
+    textAlign: 'left',
+    alignSelf: 'stretch',
+  },
+  cardFooter: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 24,
+    paddingVertical: 20,
+    backgroundColor: '#FFFFFF',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#E5E7EB',
+  },
+  deleteBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingVertical: 16,
+    borderRadius: 999,
+    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.2)',
+  },
+  deleteBtnText: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 15,
+    color: '#b91c1c',
+  },
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  confirmCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 28,
+    padding: 28,
+    gap: 20,
+    width: '100%',
+    maxWidth: 360,
+    shadowColor: '#0f172a',
+    shadowOpacity: 0.2,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 14,
+  },
+  confirmIconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignSelf: 'center',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+  },
+  confirmTitle: {
+    fontSize: 21,
+    fontFamily: 'Inter_700Bold',
+    textAlign: 'center',
+    color: '#111827',
+    marginTop: 4,
+  },
+  confirmMessage: {
+    fontSize: 15,
+    textAlign: 'center',
+    color: '#6b7280',
+    marginHorizontal: 8,
+    marginTop: -2,
+  },
+  noticeBox: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 12,
+    marginTop: 8,
+  },
 });
