@@ -1,5 +1,5 @@
 .headerTitle {
-  color: #0d8c4f;
+  color: var(--primary);
   font-size: 2rem;
   font-weight: 600;
 }
@@ -30,7 +30,7 @@
 }
 
 .sectionTitle {
-  color: #0d8c4f;
+  color: var(--primary);
   font-size: 1.25rem;
   font-weight: 600;
   margin-bottom: 0.5rem;
@@ -44,7 +44,7 @@
 }
 
 .appointmentStatus {
-  color: #0d8c4f;
+  color: var(--primary);
   background: #e5e5e5;
   border-radius: 0.5rem;
   padding: 0.25rem 0.5rem;
@@ -87,14 +87,16 @@
 }
 
 .pillPrimary {
-  background: linear-gradient(180deg, #0ea768 0%, #0d8c4f 100%);
+  background: var(--primary);
   color: #ffffff;
-  border-color: #0d8c4f;
+  border-color: var(--primary);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
 }
 
 .pillSecondary {
-  background: #f8fafc;
-  color: #0d8c4f;
+  background: #ffffff;
+  color: #2f8f5d;
+  border-color: #cbd5e1;
 }
 
   /* Hover state for pills (e.g., messages icon button) */
@@ -158,7 +160,7 @@
 }
 
 .profileChip:hover {
-  border-color: #0d8c4f;
+  border-color: var(--primary);
   box-shadow: 0 6px 18px rgba(16, 24, 40, 0.08);
   cursor: pointer;
 }

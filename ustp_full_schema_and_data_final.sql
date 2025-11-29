@@ -113,12 +113,12 @@ CREATE TABLE conversations (
     initiator_user_id INT NOT NULL,
     initiator_role ENUM('student') NOT NULL,
     subject VARCHAR(100),
-    preferred_counselor_id INT,
+    counselor_id INT,
     status ENUM('open', 'ended') DEFAULT 'open',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     last_activity_at DATETIME,
     FOREIGN KEY (initiator_user_id) REFERENCES user(user_id),
-    FOREIGN KEY (preferred_counselor_id) REFERENCES user(user_id)
+    FOREIGN KEY (counselor_id) REFERENCES user(user_id)
 );
 CREATE TABLE messages (
     message_id INT PRIMARY KEY AUTO_INCREMENT,

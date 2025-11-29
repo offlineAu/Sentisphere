@@ -153,7 +153,7 @@
 }
 
 .headerTitle {
-  color: #0d8c4f;
+  color: var(--primary);
   font-size: 2rem;
   font-weight: 600;
 }

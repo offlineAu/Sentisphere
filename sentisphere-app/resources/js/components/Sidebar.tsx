@@ -2,25 +2,21 @@ import React, { useEffect, useState } from 'react';
 import { useSidebar } from "./SidebarContext";
 import { router, usePage } from '@inertiajs/react';
 import { logoutFastApi, sessionStatus } from '../lib/auth';
-import {
-  Home,
-  MessageCircle,
-  CalendarDays,
-  FileText,
-  User,
-  LogOut,
-  ChevronLeft,
-  ChevronRight,
-} from "lucide-react";
+import { Home as HomeOutline, MessageDots as MessageDotsOutline, FileLines as FileLinesOutline, User as UserOutline, ChevronLeft, OpenDoor as OpenDoorOutline } from "flowbite-react-icons/outline";
+import { Home as HomeSolid, MessageDots as MessageDotsSolid, FileLines as FileLinesSolid, User as UserSolid } from "flowbite-react-icons/solid";
 import { motion, AnimatePresence } from "framer-motion";
 import styles from "./Sidebar.module.css";
 
-const mainNavLinks = [
-  { href: "/", label: "Dashboard", icon: <Home /> },
-  { href: "/chat", label: "Chat", icon: <MessageCircle /> },
-  { href: "/reports", label: "Reports", icon: <FileText /> },
-  { href: "/profile", label: "Profile", icon: <User /> },
-  { href: "/appointments", label: "Appointments (Soon)", icon: <CalendarDays /> },
+const mainNavLinks: Array<{
+  href: string;
+  label: string;
+  iconOutline: React.ComponentType<any>;
+  iconSolid: React.ComponentType<any>;
+}> = [
+  { href: "/", label: "Overview", iconOutline: HomeOutline, iconSolid: HomeSolid },
+  { href: "/chat", label: "Chat", iconOutline: MessageDotsOutline, iconSolid: MessageDotsSolid },
+  { href: "/reports", label: "Reports", iconOutline: FileLinesOutline, iconSolid: FileLinesSolid },
+  { href: "/profile", label: "Profile", iconOutline: UserOutline, iconSolid: UserSolid },
 ];
 
 export default function Sidebar() {
@@ -53,6 +49,7 @@ export default function Sidebar() {
 
   return (
     <motion.aside
+      aria-label="Primary sidebar"
       className={`${styles.sidebar} ${open ? styles.open : styles.closed}`}
       animate={{ width: open ? "17rem" : "5rem" }}
       transition={{ duration: 0.35, ease: "easeInOut" }}
@@ -94,7 +91,7 @@ export default function Sidebar() {
             onClick={() => setOpen(false)}
             title="Collapse sidebar"
           >
-            <ChevronLeft size={18} />
+            <ChevronLeft className="w-[18px] h-[18px]" />
           </button>
         )}
       </div>
@@ -103,40 +100,9 @@ export default function Sidebar() {
 
       {/* Menu Section */}
       <div className={styles.menuTitle}>MENU</div>
-      <nav className={styles.nav}>
+      <nav className={styles.nav} aria-label="Main navigation">
         {mainNavLinks.map((link) => {
-          const isAppointments = link.href === "/appointments";
-          const isActive = !isAppointments && currentPath === link.href;
-
-          if (isAppointments) {
-            return (
-              <motion.div
-                key={link.href}
-                className={`${styles.navLink} ${styles.navLinkDisabled}`}
-                whileHover={{ scale: 1.0 }}
-                transition={{ duration: 0.15 }}
-                aria-disabled="true"
-                title="Coming soon"
-                tabIndex={-1}
-              >
-                <div className={`${styles.iconWrap}`}>
-                  {link.icon}
-                </div>
-                <AnimatePresence>
-                  {open && (
-                    <motion.span
-                      initial={{ opacity: 0, x: -10 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: -10 }}
-                      transition={{ duration: 0.2 }}
-                    >
-                      {link.label}
-                    </motion.span>
-                  )}
-                </AnimatePresence>
-              </motion.div>
-            );
-          }
+          const isActive = currentPath === link.href;
 
           return (
             <motion.a
@@ -146,13 +112,17 @@ export default function Sidebar() {
               whileHover={{ scale: 1.03 }}
               transition={{ duration: 0.15 }}
               tabIndex={open ? 0 : -1}
+              aria-current={isActive ? 'page' : undefined}
             >
-              <div
-                className={`${styles.iconWrap} ${
-                  isActive ? styles.iconActive : ""
-                }`}
-              >
-                {link.icon}
+              <div className={`${styles.iconWrap} ${isActive ? styles.iconActive : ""}`}>
+                {(() => {
+                  const Icon = isActive ? link.iconSolid : link.iconOutline;
+                  return (
+                    <Icon
+                      className={isActive ? "text-[var(--sidebar-primary)]" : "text-slate-400"}
+                    />
+                  );
+                })()}
               </div>
               <AnimatePresence>
                 {open && (
@@ -191,7 +161,7 @@ export default function Sidebar() {
         }}
       >
         <div className={styles.iconWrap}>
-          <LogOut />
+          <OpenDoorOutline />
         </div>
         <AnimatePresence>
           {open && (

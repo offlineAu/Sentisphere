@@ -19,16 +19,7 @@
             })();
         </script>
 
-        {{-- Inline style to allow the Vanta background to show behind the app content --}}
-        <style>
-            html {
-                background-color: transparent;
-            }
-
-            html.dark {
-                background-color: transparent;
-            }
-        </style>
+        
 
         <title inertia>{{ config('app.name', 'Laravel') }}</title>
 
@@ -45,30 +36,7 @@
         @vite(['resources/js/app.tsx', "resources/js/pages/{$page['component']}.tsx"])
         @inertiaHead
     </head>
-    <body class="font-sans antialiased" style="background: transparent;">
-        <div id="vanta-bg" style="position: fixed; inset: 0; z-index: 0;"></div>
-        <div id="app-content" style="position: relative; min-height: 100vh; z-index: 1;">
-            @inertia
-        </div>
-
-        <script src="/js/three.r134.min.js"></script>
-        <script src="/js/vanta.net.min.js"></script>
-        <script>
-            document.addEventListener('DOMContentLoaded', function () {
-                if (window.VANTA && window.VANTA.WAVES) {
-                    window.VANTA.WAVES({
-                        el: "#vanta-bg",
-                        mouseControls: true,
-                        touchControls: true,
-                        gyroControls: false,
-                        minHeight: 200.00,
-                        minWidth: 200.00,
-                        scale: 1.00,
-                        scaleMobile: 1.00,
-                        color: 0xc0c0c0,
-                    });
-                }
-            });
-        </script>
+    <body class="font-sans antialiased">
+        @inertia
     </body>
 </html>

@@ -121,7 +121,7 @@ function CustomWeekTick({ x, y, payload }: any) {
   return (
     <g transform={`translate(${x},${y})`}>
       {parts.map((p: string, i: number) => (
-        <text key={i} x={0} y={0} dy={20 + i * 16} textAnchor="middle" fill="#0d8c4f" fontSize={12}>
+        <text key={i} x={0} y={0} dy={20 + i * 16} textAnchor="middle" fill="var(--primary)" fontSize={12}>
           {p}
         </text>
       ))}
@@ -259,10 +259,10 @@ function Reports() {
 
   // --- Fetch participation ---
   useEffect(() => {
-    api.get<{ participation: number }>(`/reports/participation`)
+    api.get<{ participation: number }>(`/reports/participation`, { params: filterParams })
       .then(({ data }) => setParticipation(Number(data?.participation || 0)))
       .catch(err => console.error(err));
-  }, []);
+  }, [globalRange, rangeStart, rangeEnd]);
 
   // --- Fetch reports (respects global date filter for time-dependent data) ---
   useEffect(() => {
@@ -352,13 +352,13 @@ function Reports() {
         setAlertsLoading(true);
         setAlertsError(null);
         try {
-          const res = await api.get<ApiAlert[]>(`/alerts`);
+          const res = await api.get<ApiAlert[]>(`/alerts`, { params: filterParams });
           const data = Array.isArray(res.data) ? res.data : [];
           // Sort newest first
           data.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
           setAlertsApi(data);
           // Fetch all alerts for totals (counts include all-time, not just recent)
-          const allRes = await api.get<any[]>(`/all-alerts`);
+          const allRes = await api.get<any[]>(`/all-alerts`, { params: filterParams });
           const allDataRaw = Array.isArray(allRes.data) ? allRes.data : [];
           const allData: ApiAlert[] = allDataRaw.map((r: any) => ({ severity: r.severity, created_at: r.created_at }));
           setAllAlertsApi(allData);
@@ -370,18 +370,18 @@ function Reports() {
           setAlertsLoading(false);
         }
 
-        const concernsRes = await api.get<any[]>(`/reports/concerns`);
+        const concernsRes = await api.get<any[]>(`/reports/concerns`, { params: filterParams });
         const concernsData = concernsRes.data || [];
         setConcerns(concernsData.map((c: any) => ({ ...c, barColor: "#2563eb" })));
 
-        const interventionsRes = await api.get<any>(`/reports/interventions`);
+        const interventionsRes = await api.get<any>(`/reports/interventions`, { params: filterParams });
         const interventionsData = interventionsRes.data || {};
         setInterventionSummary(interventionsData.summary || null);
         const byType = Array.isArray(interventionsData.by_type) ? interventionsData.by_type : [];
-        setInterventions(byType.map((i: any) => ({ ...i, barColor: "#0d8c4f" })));
+        setInterventions(byType.map((i: any) => ({ ...i, barColor: "var(--primary)" })));
 
         // Chat-based KPI
-        const kpiRes = await api.get<any>(`/analytics/intervention-success`);
+        const kpiRes = await api.get<any>(`/analytics/intervention-success`, { params: filterParams });
         setChatKpi(kpiRes.data || null);
 
         const attentionRes = await api.get<any[]>(`/reports/attention`, { params: filterParams });
@@ -433,21 +433,22 @@ function Reports() {
 
   return (
     <main
-      className={`transition-all duration-200 min-h-screen pt-1 pr-6 pb-6 w-full p-4 sm:p-5 space-y-5 max-w-full pl-6`}
+      className={`transition-all duration-200 min-h-screen pt-1 pr-6 pb-6 w-full p-4 sm:p-5 space-y-5 max-w-full`}
       style={{ minHeight: "100vh", backgroundColor: "transparent" }}
     >
       {/* Header */}
-      <div>
+      <div className="ml-2">
         <h1 className={styles.headerTitle}>Reports & Analytics</h1>
         <p className={styles.headerSubtitle}>
           Comprehensive insights into student wellness and platform usage
         </p>
+        <div />
       </div>
 
       {/* Global Date Filter */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <Filter className="h-4 w-4 text-[#0d8c4f]" />
+          <Filter className="h-4 w-4 text-primary" />
           <select
             className="border rounded-lg px-2 py-1 text-sm"
             value={globalRange}
@@ -492,7 +493,7 @@ function Reports() {
           const isActive = stat.label === "Active Users";
           const isWellness = stat.label === "Avg. Wellness Score";
           const baseCard = "rounded-2xl shadow p-4";
-          const gradientGreen = "bg-gradient-to-br from-[#0ea768] to-[#0d8c4f] text-white";
+          const gradientGreen = "bg-gradient-to-br from-primary/85 to-primary text-white";
           const gradientRed = "bg-gradient-to-br from-[#f87171] to-[#dc2626] text-white";
           const gradientBlue = "bg-gradient-to-br from-[#38bdf8] to-[#0ea5e9] text-white"; // Active Users
           const gradientYellow = "bg-gradient-to-br from-[#facc15] to-[#eab308] text-white"; // Avg. Wellness Score
@@ -545,14 +546,14 @@ function Reports() {
                 onClick={() => setPage(p => Math.max(p - 1, 0))}
                 disabled={page === 0}
               >
-                <ChevronLeft className="h-5 w-5 text-[#0d8c4f]" />
+                <ChevronLeft className="h-5 w-5 text-primary" />
               </button>
               <button
                 className={`p-2 rounded-full border ${page === maxPage ? "opacity-40 cursor-not-allowed" : "hover:bg-gray-100"}`}
                 onClick={() => setPage(p => Math.min(p + 1, maxPage))}
                 disabled={page === maxPage}
               >
-                <ChevronRight className="h-5 w-5 text-[#0d8c4f]" />
+                <ChevronRight className="h-5 w-5 text-primary" />
               </button>
             </div>
           </div>
@@ -565,16 +566,16 @@ function Reports() {
                 <LineChart data={paginatedTrendData} margin={{ top: 20, right: 60, bottom: 64, left: 0 }}>
                   <defs>
                     <linearGradient id="lineWellness" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#0d8c4f" stopOpacity={0.85} />
+                      <stop offset="0%" stopColor="var(--primary)" stopOpacity={0.85} />
                       <stop offset="100%" stopColor="#86efac" stopOpacity={0.25} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="week_label" interval={0} stroke="#0d8c4f" angle={0} height={64} tick={{ fill: "#0f172a", fontSize: 12 }} />
-                  <YAxis domain={[0, 100]} tick={{ fill: "#0f172a", fontSize: 12 }} stroke="#0d8c4f" />
+                  <XAxis dataKey="week_label" interval={0} stroke="var(--primary)" angle={0} height={64} tick={{ fill: "var(--foreground)", fontSize: 12 }} />
+                  <YAxis domain={[0, 100]} tick={{ fill: "var(--foreground)", fontSize: 12 }} stroke="var(--primary)" />
                   <RTooltip formatter={(value: number) => `${value}%`} labelFormatter={(label) => `Week ${label}`} />
                   <Legend verticalAlign="top" height={32} wrapperStyle={{ fontSize: "0.75rem" }} />
-                  <Line type="monotone" dataKey="wellness" name="Wellness Index" stroke="#0d8c4f" strokeWidth={3} dot={{ r: 5, strokeWidth: 2 }} activeDot={{ r: 7 }} />
+                  <Line type="monotone" dataKey="wellness" name="Wellness Index" stroke="var(--primary)" strokeWidth={3} dot={{ r: 5, strokeWidth: 2 }} activeDot={{ r: 7 }} />
                   <Line type="monotone" dataKey="mood" name="Mood" stroke="#22c55e" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
                   <Line type="monotone" dataKey="energy" name="Energy" stroke="#3b82f6" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
                   <Line type="monotone" dataKey="stress" name="Stress" stroke="#ef4444" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
@@ -643,14 +644,14 @@ function Reports() {
               return (
                 <div
                   key={`${date.toISOString()}-${idx}`}
-                  className={`rounded-xl border p-2 min-h-[56px] flex flex-col gap-1 text-[10px] ${inMonth ? "bg-gray-50" : "bg-gray-100/60 text-gray-400"} ${isToday ? "border-[#0d8c4f]" : "border-gray-200"}`}
+                  className={`rounded-xl border p-2 min-h-[56px] flex flex-col gap-1 text-[10px] ${inMonth ? "bg-gray-50" : "bg-gray-100/60 text-gray-400"} ${isToday ? "border-primary" : "border-gray-200"}`}
                 >
                   <div className="flex items-center justify-between">
                     <span className={`font-semibold text-base ${inMonth ? "text-[#111827]" : "text-gray-400"}`}>{date.getDate()}</span>
-                    {dayEvents.length > 0 && <span className="text-[10px] text-[#0d8c4f] font-semibold">{dayEvents.length}</span>}
+                    {dayEvents.length > 0 && <span className="text-[10px] text-primary font-semibold">{dayEvents.length}</span>}
                   </div>
                   {dayEvents.slice(0, 2).map((ev, i) => (
-                    <div key={i} className="rounded-md bg-[#0d8c4f]/10 px-1 py-0.5 text-[10px] text-[#0d8c4f] truncate">
+                    <div key={i} className="rounded-md bg-primary/10 px-1 py-0.5 text-[10px] text-primary truncate">
                       {ev.name}
                     </div>
                   ))}
@@ -697,8 +698,8 @@ function Reports() {
                         <h3 className="text-base font-semibold text-[#111827]">{insight.title}</h3>
                         <p className="text-[#374151] mt-1 leading-relaxed">{insight.description}</p>
                       </div>
-                      <div className="bg-white rounded-lg p-3 border border-dashed border-[#0d8c4f]/40">
-                        <div className="text-xs uppercase tracking-wide text-[#0d8c4f] font-semibold mb-1">Recommendation</div>
+                      <div className="bg-white rounded-lg p-3 border border-dashed border-primary/40">
+                        <div className="text-xs uppercase tracking-wide text-primary font-semibold mb-1">Recommendation</div>
                         <p className="text-sm text-[#0f172a] leading-relaxed">{insight.recommendation}</p>
                       </div>
                     </div>

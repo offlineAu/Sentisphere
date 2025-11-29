@@ -6,6 +6,7 @@ import { createRoot } from 'react-dom/client';
 import { initializeTheme } from './hooks/use-appearance';
 import React, { useEffect, useState } from "react";
 import { SidebarProvider } from "./components/SidebarContext";
+import BackgroundOrnaments from "./components/background-ornaments";
 import { LoadingSpinner } from './components/loading-spinner';
 import { ErrorBoundary } from './components/error-boundary';
 
@@ -41,6 +42,7 @@ createInertiaApp({
                 <ErrorBoundary>
                     <SidebarProvider>
                         <div className="relative min-h-screen">
+                            <BackgroundOrnaments />
                             {loading && (
                                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
                                     <LoadingSpinner size="lg" className="text-primary" />
