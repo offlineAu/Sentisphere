@@ -14,6 +14,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors } from '@/constants/theme';
 import { Icon } from '@/components/ui/icon';
+import { router } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type Counselor = { id: string; name: string; title: string };
 
@@ -30,6 +32,14 @@ export default function AppointmentsScreen() {
   const scheme = useColorScheme() ?? 'light';
   const palette = Colors[scheme] as any;
   const focusBlue = '#3B82F6';
+  const insets = useSafeAreaInsets();
+
+  const goBack = () => {
+    if (Platform.OS !== 'web') {
+      try { Haptics.selectionAsync() } catch {}
+    }
+    router.back();
+  };
   const API = process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8010';
 
   // Form state (survey-style)
@@ -367,35 +377,61 @@ export default function AppointmentsScreen() {
         contentContainerStyle={{ padding: 24, paddingBottom: 60 }}
       >
         <View style={styles.page}>
-          <View style={{ height: 8 }} />
-          <View style={{ alignItems: 'center', justifyContent: 'center', marginTop: 4, marginBottom: 10 }}>
-            <Image
-              source={require('../../../assets/images/calendar green.png')}
-              style={{ width: 56, height: 56, marginBottom: 6 }}
-              resizeMode="contain"
-              accessible
-              accessibilityLabel="Calendar icon"
-            />
-            <ThemedText type="title" style={{ textAlign: 'center' }}>Appointment Request Form</ThemedText>
-          </View>
-          <ThemedText style={{ color: palette.muted, textAlign: 'center', marginBottom: 14 }}>
-            Fill out this form to request a face-to-face meeting with a counselor. You can download a PDF copy to bring to the guidance office.
-          </ThemedText>
+          {/* Back Button */}
+          <Pressable onPress={goBack} style={styles.backButton}>
+            <Icon name="chevron-left" size={24} color="#111827" />
+          </Pressable>
 
-          <View style={styles.infoCard}>
-            <ThemedText style={styles.infoTitle}>How to use this form:</ThemedText>
-            <ThemedText style={styles.infoItem}>1. Fill out all required fields marked with an asterisk (*)</ThemedText>
-            <ThemedText style={styles.infoItem}>2. Click "Download PDF" to generate a printable copy</ThemedText>
-            <ThemedText style={styles.infoItem}>3. Bring the printed form to the Guidance Office (Building A, 2nd Floor)</ThemedText>
-            <ThemedText style={styles.infoItem}>4. A counselor will review your request and contact you within 24-48 hours</ThemedText>
+          {/* Header */}
+          <View style={styles.headerSection}>
+            <View style={styles.iconContainer}>
+              <Image
+                source={require('../../../assets/images/calendar green.png')}
+                style={styles.headerIcon}
+                resizeMode="contain"
+                accessible
+                accessibilityLabel="Calendar icon"
+              />
+            </View>
+            <ThemedText type="title" style={styles.headerTitle}>Request an{'\n'}Appointment</ThemedText>
+            <ThemedText style={styles.headerSubtitle}>
+              Submit a request for a face-to-face session with a guidance counselor
+            </ThemedText>
           </View>
-          <View style={{ height: 12 }} />
+
+          {/* Info Card */}
+          <View style={styles.infoCard}>
+            <View style={styles.infoHeader}>
+              <View style={styles.infoIconWrap}>
+                <Icon name="bookmark" size={16} color="#3B82F6" />
+              </View>
+              <ThemedText style={styles.infoTitle}>How it works</ThemedText>
+            </View>
+            <View style={styles.infoSteps}>
+              <View style={styles.infoStep}>
+                <View style={styles.stepNumber}><ThemedText style={styles.stepNumberText}>1</ThemedText></View>
+                <ThemedText style={styles.infoItem}>Fill out all required fields below</ThemedText>
+              </View>
+              <View style={styles.infoStep}>
+                <View style={styles.stepNumber}><ThemedText style={styles.stepNumberText}>2</ThemedText></View>
+                <ThemedText style={styles.infoItem}>Download the PDF form</ThemedText>
+              </View>
+              <View style={styles.infoStep}>
+                <View style={styles.stepNumber}><ThemedText style={styles.stepNumberText}>3</ThemedText></View>
+                <ThemedText style={styles.infoItem}>Submit to Guidance Office (Bldg A, 2F)</ThemedText>
+              </View>
+              <View style={styles.infoStep}>
+                <View style={styles.stepNumber}><ThemedText style={styles.stepNumberText}>4</ThemedText></View>
+                <ThemedText style={styles.infoItem}>Expect a response within 24-48 hours</ThemedText>
+              </View>
+            </View>
+          </View>
 
           <Card>
             <CardContent style={{ paddingVertical: 8, gap: 8 }}>
               <View style={{ height: 8 }} />
-              <ThemedText type="subtitle">Student Counseling Services</ThemedText>
-              <ThemedText style={{ color: palette.muted, marginBottom: 8 }}>Complete all required fields. Download the PDF to bring to the guidance office.</ThemedText>
+              <ThemedText style={styles.cardTitle}>Student Counseling Services</ThemedText>
+              <ThemedText style={styles.cardSubtitle}>Complete all required fields. Download the PDF to bring to the guidance office.</ThemedText>
 
               {/* Student Information */}
               <View style={styles.sectionHeader}><ThemedText style={styles.sectionHeaderText}>STUDENT INFORMATION</ThemedText></View>
@@ -461,7 +497,7 @@ export default function AppointmentsScreen() {
               >
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                   <Icon name="calendar" size={18} color={palette.icon} />
-                  <ThemedText style={{ color: preferredDate ? palette.text : '#9CA3AF' }}>{preferredDate || 'Pick a date'}</ThemedText>
+                  <ThemedText style={[styles.fieldText, { color: preferredDate ? palette.text : '#9CA3AF' }]}>{preferredDate || 'Pick a date'}</ThemedText>
                 </View>
                 <Icon name="arrow-right" size={18} color={palette.icon} />
               </Pressable>
@@ -502,9 +538,9 @@ export default function AppointmentsScreen() {
                     ))}
                   </View>
                   {/* Grid */}
-                  <View style={styles.grid}>
+                  <View style={styles.calendarGrid}>
                     {days.map((d) => {
-                      if (!d.day) return <View key={d.key} style={{ width: '14.2857%', aspectRatio: 1 }} />;
+                      if (!d.day) return <View key={d.key} style={styles.dayCell} />;
                       const isSelected = !!(date && d.date && date.toDateString() === d.date.toDateString());
                       const isToday = !!(d.date && d.date.toDateString() === new Date().toDateString());
                       return (
@@ -553,7 +589,7 @@ export default function AppointmentsScreen() {
               >
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                   <Icon name="clock" size={18} color={palette.icon} />
-                  <ThemedText style={{ color: preferredTime ? palette.text : '#9CA3AF' }}>{preferredTime || 'Select preferred time'}</ThemedText>
+                  <ThemedText style={[styles.fieldText, { color: preferredTime ? palette.text : '#9CA3AF' }]}>{preferredTime || 'Select preferred time'}</ThemedText>
                 </View>
                 <Icon name="arrow-right" size={18} color={palette.icon} />
               </Pressable>
@@ -575,7 +611,7 @@ export default function AppointmentsScreen() {
                       onPress={() => { setPreferredTime(t); LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); setOpenTimeList(false); doHaptic('selection'); showToast('Time selected'); }}
                       style={({ pressed }) => [styles.option, { backgroundColor: pressed ? '#F3F4F6' : 'transparent' }]}
                     >
-                      <ThemedText>{t}</ThemedText>
+                      <ThemedText style={styles.optionText}>{t}</ThemedText>
                     </Pressable>
                   ))}
                 </Animated.View>
@@ -588,7 +624,7 @@ export default function AppointmentsScreen() {
               >
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                   <Icon name="user" size={18} color={palette.icon} />
-                  <ThemedText style={{ color: preferredCounselor ? palette.text : '#9CA3AF' }}>{preferredCounselor || 'Select a counselor'}</ThemedText>
+                  <ThemedText style={[styles.fieldText, { color: preferredCounselor ? palette.text : '#9CA3AF' }]}>{preferredCounselor || 'Select a counselor'}</ThemedText>
                 </View>
                 <Icon name="arrow-right" size={18} color={palette.icon} />
               </Pressable>
@@ -610,8 +646,8 @@ export default function AppointmentsScreen() {
                       onPress={() => { setCounselor(c); setPreferredCounselor(c.name); LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); setOpenCounselorList(false); doHaptic('selection'); showToast('Counselor selected'); }}
                       style={({ pressed }) => [styles.option, { backgroundColor: pressed ? '#F3F4F6' : 'transparent' }]}
                     >
-                      <ThemedText>{c.name}</ThemedText>
-                      <ThemedText style={{ color: palette.muted }}>{c.title}</ThemedText>
+                      <ThemedText style={styles.optionText}>{c.name}</ThemedText>
+                      <ThemedText style={styles.optionSubtext}>{c.title}</ThemedText>
                     </Pressable>
                   ))}
                 </Animated.View>
@@ -625,10 +661,10 @@ export default function AppointmentsScreen() {
                 { key: 'urgent', label: 'Urgent - Same day if possible' },
               ] as const).map((u) => (
                 <Pressable key={u.key} onPress={() => { setUrgency(u.key as any); doHaptic('selection'); }} style={styles.radioRow}>
-                  <View style={[styles.radioOuter, { borderColor: palette.border }]}>
+                  <View style={[styles.radioOuter, { borderColor: urgency === u.key ? '#111827' : palette.border }]}>
                     {urgency === u.key && <View style={styles.radioInner} />}
                   </View>
-                  <ThemedText>{u.label}</ThemedText>
+                  <ThemedText style={styles.radioLabel}>{u.label}</ThemedText>
                 </Pressable>
               ))}
 
@@ -645,26 +681,23 @@ export default function AppointmentsScreen() {
                 { key: 'other', label: 'Yes, at another institution' },
               ] as const).map((o) => (
                 <Pressable key={o.key} onPress={() => { setPrevious(o.key as any); doHaptic('selection'); }} style={styles.radioRow}>
-                  <View style={[styles.radioOuter, { borderColor: palette.border }]}>
+                  <View style={[styles.radioOuter, { borderColor: previous === o.key ? '#111827' : palette.border }]}>
                     {previous === o.key && <View style={styles.radioInner} />}
                   </View>
-                  <ThemedText>{o.label}</ThemedText>
+                  <ThemedText style={styles.radioLabel}>{o.label}</ThemedText>
                 </Pressable>
               ))}
 
               <ThemedText style={styles.label}>Additional Information</ThemedText>
               <Textarea value={additional} onChangeText={setAdditional} placeholder="Any additional information you'd like to share..." style={{ height: 100 }} onFocus={() => { doHaptic('selection'); }} />
-              <View style={[styles.noticeBox, { borderColor: palette.text, marginTop: 8 }]}>
-                <ThemedText style={{ fontFamily: 'Inter_700Bold' }}>MEETING TYPE: FACE-TO-FACE ONLY</ThemedText>
-                <ThemedText style={{ color: palette.muted }}>
+              <View style={styles.noticeBox}>
+                <ThemedText style={styles.noticeTitle}>MEETING TYPE: FACE-TO-FACE ONLY</ThemedText>
+                <ThemedText style={styles.noticeText}>
                   All meetings will be conducted in person at the Student Counseling Center, Building A, 2nd Floor. Please arrive 10 minutes early for your appointment.
                 </ThemedText>
               </View>
 
               <Button title="Download PDF" onPress={onDownloadPdf} disabled={!canDownload} />
-              <ThemedText style={styles.footnote}>
-                * Fill in all required fields (Name, Student ID, Email, and Reason), then download the PDF to bring to the Student Counseling Center.
-              </ThemedText>
             </CardContent>
           </Card>
         </View>
@@ -734,20 +767,90 @@ const styles = StyleSheet.create({
     maxWidth: 720,
     alignSelf: 'center',
   },
-  infoCard: {
-    backgroundColor: '#F3F4F6',
-    borderRadius: 12,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    marginTop: 12,
-    gap: 4,
+  // Header Section
+  headerSection: {
+    alignItems: 'center',
+    marginBottom: 20,
   },
-  infoTitle: { fontFamily: 'Inter_600SemiBold' },
-  infoItem: { fontSize: 13 },
-  sectionHeader: { marginTop: 16, marginBottom: 8, paddingTop: 6, borderBottomWidth: 2, borderBottomColor: '#E5E7EB' },
-  sectionHeaderText: { fontFamily: 'Inter_700Bold', fontSize: 14, color: '#111827', marginBottom: 6 },
-  label: { fontSize: 13, marginTop: 8, marginBottom: 6, color: '#111827', fontFamily: 'Inter_600SemiBold' },
+  iconContainer: {
+    width: 72,
+    height: 72,
+    borderRadius: 20,
+    backgroundColor: '#ECFDF5',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  headerIcon: {
+    width: 44,
+    height: 44,
+  },
+  headerTitle: {
+    textAlign: 'center',
+    fontSize: 28,
+    lineHeight: 34,
+    marginBottom: 8,
+  },
+  headerSubtitle: {
+    color: '#6B7280',
+    textAlign: 'center',
+    fontSize: 14,
+    lineHeight: 20,
+    maxWidth: 300,
+  },
+  // Info Card
+  infoCard: {
+    backgroundColor: '#EFF6FF',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#DBEAFE',
+    marginBottom: 20,
+  },
+  infoHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 14,
+  },
+  infoIconWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: '#DBEAFE',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  infoTitle: { fontFamily: 'Inter_600SemiBold', color: '#1E40AF', fontSize: 15 },
+  infoSteps: { gap: 10 },
+  infoStep: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  stepNumber: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#3B82F6',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepNumberText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontFamily: 'Inter_700Bold',
+  },
+  infoItem: { fontSize: 14, color: '#1E40AF', flex: 1, lineHeight: 20 },
+  
+  // Card Styles
+  cardTitle: { fontSize: 18, fontFamily: 'Inter_700Bold', color: '#111827', marginBottom: 4 },
+  cardSubtitle: { fontSize: 14, color: '#6B7280', marginBottom: 12, lineHeight: 20 },
+  
+  // Section Headers & Labels
+  sectionHeader: { marginTop: 20, marginBottom: 10, paddingTop: 8, borderBottomWidth: 2, borderBottomColor: '#E5E7EB' },
+  sectionHeaderText: { fontFamily: 'Inter_700Bold', fontSize: 12, color: '#6B7280', letterSpacing: 0.5, marginBottom: 8 },
+  label: { fontSize: 14, marginTop: 10, marginBottom: 6, color: '#111827', fontFamily: 'Inter_600SemiBold' },
   input: {
     borderWidth: 1,
     borderRadius: 10,
@@ -755,12 +858,25 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 12,
     marginBottom: 6,
+    fontSize: 14,
   },
-  radioRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 },
-  radioOuter: { width: 18, height: 18, borderRadius: 9, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  fieldText: { fontSize: 14 },
+  radioRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10 },
+  radioOuter: { width: 20, height: 20, borderRadius: 10, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
   radioInner: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#111827' },
-  noticeBox: { borderWidth: 1, borderRadius: 12, padding: 14, gap: 6, marginBottom: 10 },
-  footnote: { color: '#6B7280', fontSize: 12, marginTop: 8 },
+  radioLabel: { fontSize: 14, color: '#374151', flex: 1 },
+  noticeBox: { 
+    borderWidth: 1, 
+    borderRadius: 14, 
+    padding: 16, 
+    gap: 8, 
+    marginTop: 16, 
+    marginBottom: 12,
+    borderColor: '#E5E7EB',
+    backgroundColor: '#F9FAFB',
+  },
+  noticeTitle: { fontSize: 13, fontFamily: 'Inter_700Bold', color: '#111827', letterSpacing: 0.3 },
+  noticeText: { fontSize: 14, color: '#6B7280', lineHeight: 20 },
   segment: {
     flexDirection: 'row',
     borderRadius: 999,
@@ -807,6 +923,8 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#EEF2F7',
   },
+  optionText: { fontSize: 14, color: '#111827' },
+  optionSubtext: { fontSize: 13, color: '#6B7280' },
   calendar: {
     borderWidth: 1,
     borderRadius: 10,
@@ -827,29 +945,34 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: '#F3F4F6',
   },
-  weekRow: { flexDirection: 'row', marginBottom: 6 },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  weekRow: { flexDirection: 'row', marginBottom: 8 },
+  calendarGrid: { flexDirection: 'row', flexWrap: 'wrap' },
+  dayCell: {
+    width: '14.2857%',
+    aspectRatio: 1,
+  },
   day: {
     width: '14.2857%',
     aspectRatio: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 999,
+    padding: 2,
   },
   dayInner: {
-    width: '84%',
-    aspectRatio: 1,
-    borderRadius: 999,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
   },
   weekdayText: {
-    width: '14.2857%',
+    flex: 1,
     textAlign: 'center',
-    fontSize: 14,
+    fontSize: 13,
+    fontFamily: 'Inter_600SemiBold',
   },
   dayText: {
-    fontSize: 16,
+    fontSize: 14,
     fontFamily: 'Inter_600SemiBold',
   },
   emptyWrap: {
@@ -879,5 +1002,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#F3F4F6',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
   },
 });

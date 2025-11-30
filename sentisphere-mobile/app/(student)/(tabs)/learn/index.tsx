@@ -216,46 +216,65 @@ export default function LearnScreen() {
 
   const CourseCard = ({ item, saved, onToggle }: { item: Course; saved: boolean; onToggle: (id: string) => void }) => {
     const scale = useRef(new Animated.Value(1)).current;
+    const cardScale = useRef(new Animated.Value(1)).current;
     const to = (v: number, d = 120) => Animated.timing(scale, { toValue: v, duration: d, easing: Easing.out(Easing.quad), useNativeDriver: true }).start();
     const springTo = (v: number) => Animated.spring(scale, { toValue: v, stiffness: 260, damping: 20, mass: 0.6, useNativeDriver: true }).start();
+    const cardSpringTo = (v: number) => Animated.spring(cardScale, { toValue: v, stiffness: 300, damping: 20, mass: 0.5, useNativeDriver: true }).start();
     return (
-      <Card>
-        <CardContent style={styles.courseContent}>
-          <View style={styles.courseHeader}>
-            <View style={styles.badgeRow}>
-              {item.tags.map((t) => (
-                <Badge key={t} style={StyleSheet.flatten([styles.badge, styles.badgeGray])}>{t}</Badge>
-              ))}
-            </View>
-            <Pressable
-              accessibilityLabel={saved ? 'Unsave topic' : 'Save topic'}
-              hitSlop={8}
-              onPress={() => { onToggle(item.id); }}
-              onPressIn={() => { if (Platform.OS !== 'web') { try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light) } catch {} } to(1.1, 90); }}
-              onPressOut={() => { springTo(1); }}
-              style={({ pressed }) => [{ opacity: pressed ? 0.9 : 1 }]}
-            >
-              <Animated.View style={{ transform: [{ scale }] }}>
-                <Icon
-                  name="bookmark"
-                  size={20}
-                  color={saved ? palette.learningAccent : palette.muted}
-                  fill={saved ? (palette.learningAccent as string) : 'transparent'}
-                />
-              </Animated.View>
-            </Pressable>
-          </View>
-          <ThemedText type="subtitle" style={styles.courseTitle}>{item.title}</ThemedText>
-          <ThemedText style={[styles.courseDesc, { color: palette.muted }]} numberOfLines={2}>{item.description}</ThemedText>
-          <View style={styles.courseMeta}>
-            <View style={styles.metaItem}><Icon name="message-circle" size={16} color={palette.muted} /><ThemedText style={[styles.metaText, { color: palette.muted }]}>{item.comments}</ThemedText></View>
-            <View style={styles.metaItem}><Icon name="book-open" size={16} color={palette.muted} /><ThemedText style={[styles.metaText, { color: palette.muted }]}>{item.lessons} lessons</ThemedText></View>
-          </View>
-          <Link href={{ pathname: '/(student)/(tabs)/learn/[id]', params: { id: item.id } }} asChild>
-            <Button title="Start Learning" style={{ paddingVertical: 12, paddingHorizontal: 16 }} />
-          </Link>
-        </CardContent>
-      </Card>
+      <Link href={{ pathname: '/(student)/(tabs)/learn/[id]', params: { id: item.id } }} asChild>
+        <Pressable
+          onPressIn={() => { 
+            if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} } 
+            cardSpringTo(0.98);
+          }}
+          onPressOut={() => cardSpringTo(1)}
+        >
+          <Animated.View style={{ transform: [{ scale: cardScale }] }}>
+            <Card>
+              <CardContent style={styles.courseContent}>
+                <View style={styles.courseHeader}>
+                  <View style={styles.badgeRow}>
+                    {item.tags.map((t) => (
+                      <Badge key={t} style={StyleSheet.flatten([styles.badge, styles.badgeGray])}>{t}</Badge>
+                    ))}
+                  </View>
+                  <Pressable
+                    accessibilityLabel={saved ? 'Unsave topic' : 'Save topic'}
+                    hitSlop={8}
+                    onPress={(e) => { e.stopPropagation(); onToggle(item.id); }}
+                    onPressIn={(e) => { 
+                      e.stopPropagation();
+                      if (Platform.OS !== 'web') { try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light) } catch {} } 
+                      to(1.1, 90); 
+                    }}
+                    onPressOut={(e) => { e.stopPropagation(); springTo(1); }}
+                    style={({ pressed }) => [{ opacity: pressed ? 0.9 : 1 }]}
+                  >
+                    <Animated.View style={{ transform: [{ scale }] }}>
+                      <Icon
+                        name="bookmark"
+                        size={20}
+                        color={saved ? palette.learningAccent : palette.muted}
+                        fill={saved ? (palette.learningAccent as string) : 'transparent'}
+                      />
+                    </Animated.View>
+                  </Pressable>
+                </View>
+                <ThemedText type="subtitle" style={styles.courseTitle}>{item.title}</ThemedText>
+                <ThemedText style={[styles.courseDesc, { color: palette.muted }]} numberOfLines={2}>{item.description}</ThemedText>
+                <View style={styles.courseMeta}>
+                  <View style={styles.metaItem}><Icon name="message-circle" size={16} color={palette.muted} /><ThemedText style={[styles.metaText, { color: palette.muted }]}>{item.comments}</ThemedText></View>
+                  <View style={styles.metaItem}><Icon name="book-open" size={16} color={palette.muted} /><ThemedText style={[styles.metaText, { color: palette.muted }]}>{item.lessons} lessons</ThemedText></View>
+                </View>
+                <View style={styles.startLearningRow}>
+                  <ThemedText style={styles.startLearningText}>Start Learning</ThemedText>
+                  <Icon name="arrow-right" size={16} color="#0D8C4F" />
+                </View>
+              </CardContent>
+            </Card>
+          </Animated.View>
+        </Pressable>
+      </Link>
     );
   };
 
@@ -296,14 +315,6 @@ export default function LearnScreen() {
             </Card>
           </>
         )}
-
-        {/* Search */}
-        <Animated.View style={[styles.searchRow, makeFadeUp(entrance.search)]}>
-          <Input placeholder="Search topics, articles, or keywords..." style={styles.searchInput} />
-          <Pressable accessibilityLabel="Search options" style={styles.searchAction}>
-            <Icon name="sparkles" size={18} color="#111827" />
-          </Pressable>
-        </Animated.View>
 
         {/* Segmented tabs (same as Journal) */}
         <Animated.View
@@ -473,6 +484,8 @@ const styles = StyleSheet.create({
   metaRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   metaItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   metaText: { fontSize: 12 },
+  startLearningRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 12, backgroundColor: 'rgba(13, 140, 79, 0.1)', borderRadius: 12, marginTop: 4 },
+  startLearningText: { fontSize: 14, fontFamily: 'Inter_600SemiBold', color: '#0D8C4F' },
 
   // Continue learning
   sectionSpacer: { height: 10 },

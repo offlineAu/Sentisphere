@@ -1,4 +1,4 @@
-import { StyleSheet, View, FlatList, TextInput, KeyboardAvoidingView, Platform, Pressable, useWindowDimensions, Modal, ActivityIndicator, Animated, Easing } from 'react-native';
+import { StyleSheet, View, FlatList, TextInput, KeyboardAvoidingView, Platform, Pressable, useWindowDimensions, Modal, ActivityIndicator, Animated, Easing, ScrollView, Alert } from 'react-native';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
@@ -242,6 +242,44 @@ export default function ChatScreen() {
     }
   };
 
+  const deleteConversation = async (conversationId: number) => {
+    const confirmDelete = () => {
+      if (Platform.OS === 'web') {
+        return window.confirm('Are you sure you want to delete this conversation? This action cannot be undone.');
+      }
+      return new Promise<boolean>((resolve) => {
+        Alert.alert(
+          'Delete Conversation',
+          'Are you sure you want to delete this conversation? This action cannot be undone.',
+          [
+            { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'Delete', style: 'destructive', onPress: () => resolve(true) },
+          ]
+        );
+      });
+    };
+
+    const confirmed = await confirmDelete();
+    if (!confirmed) return;
+
+    try {
+      const tok = await getAuthToken();
+      if (!tok) return;
+      
+      const res = await fetch(`${API_BASE_URL}/api/mobile/conversations/${conversationId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${tok}` },
+      });
+      
+      if (res.ok) {
+        await doHaptic('success');
+        setConversations((prev) => prev.filter((c) => c.conversation_id !== conversationId));
+      }
+    } catch (e) {
+      console.error('Error deleting conversation:', e);
+    }
+  };
+
   const StatusBadge = ({ open }: { open: boolean }) => (
     <View
       style={StyleSheet.flatten([
@@ -348,70 +386,94 @@ export default function ChatScreen() {
           </Pressable>
         </Animated.View>
 
-        {/* Title section */}
-        <Animated.View style={[styles.titleSection, makeFadeUp(entrance.title)]}>
-          <Image source={require('@/assets/images/chatting.png')} style={styles.titleImage} contentFit="contain" />
-          <ThemedText type="title" style={styles.pageTitle}>Chat</ThemedText>
-          <ThemedText style={styles.pageSubtitle}>Connect with your counselor for support</ThemedText>
-        </Animated.View>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 32 }}>
+          {/* Title section */}
+          <Animated.View style={[styles.titleSection, makeFadeUp(entrance.title)]}>
+            <Image source={require('@/assets/images/chatting.png')} style={styles.titleImage} contentFit="contain" />
+            <ThemedText type="title" style={styles.pageTitle}>Chat</ThemedText>
+            <ThemedText style={styles.pageSubtitle}>Connect with your counselor for support</ThemedText>
+          </Animated.View>
 
-        <Animated.View style={[styles.main, makeFadeUp(entrance.content)]}>
-          <Card>
-            <CardContent style={{ gap: 12 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                <View style={[styles.iconPill, { backgroundColor: '#ECFDF5', borderColor: '#D1FAE5' }]}><Icon name="message-square" size={16} color="#0D8C4F" /></View>
-                <ThemedText type="subtitle" style={{ fontSize: 16, fontFamily: 'Inter_600SemiBold' }}>Conversations</ThemedText>
-              </View>
-              {(!loading && conversations.length === 0) && (
-                <View style={styles.emptyState}>
-                  <Icon name="message-circle" size={32} color="#9CA3AF" />
-                  <ThemedText style={styles.emptyText}>No conversations yet</ThemedText>
-                  <Pressable
-                    onPressIn={() => doHaptic('selection')}
-                    onPress={handleCreate}
-                    style={styles.startChatButton}
-                  >
-                    <Icon name="plus" size={18} color="#FFFFFF" />
-                    <ThemedText style={styles.startChatButtonText}>Start a Conversation</ThemedText>
-                  </Pressable>
+          <Animated.View style={[styles.main, makeFadeUp(entrance.content)]}>
+            <Card>
+              <CardContent style={{ gap: 12 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <View style={[styles.iconPill, { backgroundColor: '#ECFDF5', borderColor: '#D1FAE5' }]}><Icon name="message-square" size={16} color="#0D8C4F" /></View>
+                  <ThemedText type="subtitle" style={{ fontSize: 16, fontFamily: 'Inter_600SemiBold' }}>Conversations</ThemedText>
                 </View>
-              )}
+                {(!loading && conversations.length === 0) && (
+                  <View style={styles.emptyState}>
+                    <Icon name="message-circle" size={32} color="#9CA3AF" />
+                    <ThemedText style={styles.emptyText}>No conversations yet</ThemedText>
+                    <Pressable
+                      onPressIn={() => doHaptic('selection')}
+                      onPress={handleCreate}
+                      style={styles.startChatButton}
+                    >
+                      <Icon name="plus" size={18} color="#FFFFFF" />
+                      <ThemedText style={styles.startChatButtonText}>Start a Conversation</ThemedText>
+                    </Pressable>
+                  </View>
+                )}
 
-              {conversations.map((c) => {
-                const msgs = c.messages || [];
-                const last = msgs.length > 0 ? msgs[msgs.length - 1] : undefined;
-                const unreadCount = currentUserId ? msgs.filter((m) => !m.is_read && m.sender_id !== currentUserId).length : 0;
-                const name = c.subject || `Conversation #${c.conversation_id}`;
-                return (
-                  <Pressable
-                    key={c.conversation_id}
-                    onPressIn={() => doHaptic('selection')}
-                    onPress={() => router.push({ pathname: '/(student)/(tabs)/chat/[id]', params: { id: String(c.conversation_id), name } })}
-                    style={({ pressed }) => [styles.convItem, { backgroundColor: palette.background, borderColor: palette.border, opacity: pressed ? 0.96 : 1 }]}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Open chat ${name}`}
-                  >
-                    <View style={styles.convLeft}>
-                      <View style={[styles.avatar, { backgroundColor: '#111827' }]}><ThemedText style={{ color: '#FFFFFF', fontFamily: 'Inter_700Bold', fontSize: 15 }}>{(name[0] || 'C').toString().toUpperCase()}</ThemedText></View>
-                      <View style={styles.convTextWrap}>
-                        <ThemedText style={{ fontFamily: 'Inter_600SemiBold', fontSize: 15, color: '#111827' }} numberOfLines={1}>{name}</ThemedText>
-                        <ThemedText style={{ color: '#6B7280', fontSize: 13 }} numberOfLines={1}>{last?.content || 'No messages yet'}</ThemedText>
-                      </View>
-                    </View>
-                    <View style={styles.rightMeta}>
-                      <ThemedText style={{ color: '#9CA3AF', fontSize: 12, fontFamily: 'Inter_500Medium' }}>{formatTime(last?.timestamp || c.last_activity_at)}</ThemedText>
-                      {unreadCount > 0 && (
-                        <View style={[styles.unreadBadge, { backgroundColor: palette.tint }]}>
-                          <ThemedText style={{ color: '#FFFFFF', fontSize: 11, fontFamily: 'Inter_600SemiBold' }}>{unreadCount}</ThemedText>
+                {conversations.map((c) => {
+                  const msgs = c.messages || [];
+                  const last = msgs.length > 0 ? msgs[msgs.length - 1] : undefined;
+                  const unreadCount = currentUserId ? msgs.filter((m) => !m.is_read && m.sender_id !== currentUserId).length : 0;
+                  const name = c.subject || `Conversation #${c.conversation_id}`;
+                  const isClosed = c.status === 'ended';
+                  return (
+                    <View key={c.conversation_id} style={styles.convItemWrapper}>
+                      <Pressable
+                        onPressIn={() => doHaptic('selection')}
+                        onPress={() => router.push({ pathname: '/(student)/(tabs)/chat/[id]', params: { id: String(c.conversation_id), name } })}
+                        style={({ pressed }) => [styles.convItem, { backgroundColor: palette.background, borderColor: palette.border, opacity: pressed ? 0.96 : 1, flex: 1 }]}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Open chat ${name}`}
+                      >
+                        <View style={styles.convLeft}>
+                          <View style={[styles.avatar, { backgroundColor: isClosed ? '#6B7280' : '#111827' }]}>
+                            <ThemedText style={{ color: '#FFFFFF', fontFamily: 'Inter_700Bold', fontSize: 15 }}>{(name[0] || 'C').toString().toUpperCase()}</ThemedText>
+                          </View>
+                          <View style={styles.convTextWrap}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                              <ThemedText style={{ fontFamily: 'Inter_600SemiBold', fontSize: 15, color: '#111827' }} numberOfLines={1}>{name}</ThemedText>
+                              {isClosed && (
+                                <View style={styles.closedBadge}>
+                                  <ThemedText style={styles.closedBadgeText}>Closed</ThemedText>
+                                </View>
+                              )}
+                            </View>
+                            <ThemedText style={{ color: '#6B7280', fontSize: 13 }} numberOfLines={1}>{last?.content || 'No messages yet'}</ThemedText>
+                          </View>
                         </View>
+                        <View style={styles.rightMeta}>
+                          <ThemedText style={{ color: '#9CA3AF', fontSize: 12, fontFamily: 'Inter_500Medium' }}>{formatTime(last?.timestamp || c.last_activity_at)}</ThemedText>
+                          {unreadCount > 0 && (
+                            <View style={[styles.unreadBadge, { backgroundColor: palette.tint }]}>
+                              <ThemedText style={{ color: '#FFFFFF', fontSize: 11, fontFamily: 'Inter_600SemiBold' }}>{unreadCount}</ThemedText>
+                            </View>
+                          )}
+                        </View>
+                      </Pressable>
+                      {isClosed && (
+                        <Pressable
+                          onPressIn={() => doHaptic('selection')}
+                          onPress={() => deleteConversation(c.conversation_id)}
+                          style={styles.deleteButton}
+                          accessibilityRole="button"
+                          accessibilityLabel="Delete conversation"
+                        >
+                          <Icon name="trash-2" size={18} color="#EF4444" />
+                        </Pressable>
                       )}
                     </View>
-                  </Pressable>
-                );
-              })}
-            </CardContent>
-          </Card>
-        </Animated.View>
+                  );
+                })}
+              </CardContent>
+            </Card>
+          </Animated.View>
+        </ScrollView>
         {/* Counselor picker modal */}
         <Modal visible={pickerOpen} transparent animationType="fade" onRequestClose={() => setPickerOpen(false)}>
           <Pressable style={styles.overlay} onPress={() => setPickerOpen(false)}>
@@ -631,6 +693,11 @@ const styles = StyleSheet.create({
   badgeText: { fontSize: 12, fontFamily: 'Inter_600SemiBold' },
 
   // Sidebar conversation item
+  convItemWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   convItem: {
     borderWidth: 1,
     borderRadius: 14,
@@ -638,6 +705,25 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+  },
+  closedBadge: {
+    backgroundColor: '#FEE2E2',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  closedBadgeText: {
+    fontSize: 11,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#991B1B',
+  },
+  deleteButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: '#FEE2E2',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   convLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1, minWidth: 0 },
   convTextWrap: { flex: 1, minWidth: 0, gap: 3 },

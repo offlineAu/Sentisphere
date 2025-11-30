@@ -3,6 +3,7 @@ import { Animated, Easing, Pressable, StyleSheet, TextInput, View, Keyboard, Ale
 import * as Haptics from 'expo-haptics';
 import Swipeable from 'react-native-gesture-handler/Swipeable';
 import { Feather } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
 import { Card, CardContent } from '@/components/ui/card';
@@ -14,6 +15,8 @@ import { Link, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as SecureStore from 'expo-secure-store';
+
+const JournalListIcon = require('@/assets/images/journal list.png');
 
 import { analyzeSentiment, makeCoachIntro, coachReply, Analysis } from '@/utils/sentiment';
 
@@ -446,14 +449,32 @@ export default function JournalListScreen() {
               style={[styles.segment, { backgroundColor: '#EEF2F7', borderColor: palette.border, marginTop: 16 }]}
               onLayout={(e) => setSegW(e.nativeEvent.layout.width)}
             >
-              <Animated.View pointerEvents="none" style={[styles.segmentIndicator, { backgroundColor: '#ffffff' }, indicatorStyle]} />
-              <Pressable style={styles.segmentItem} onPress={() => onTabChange(0)} accessibilityRole="button" accessibilityState={tab === 0 ? { selected: true } : {}}>
-                <Feather name="edit-3" size={16} color={palette.text} />
-                <ThemedText style={styles.segmentText}>Write Entry</ThemedText>
+              {Platform.OS !== 'web' && (
+                <Animated.View pointerEvents="none" style={[styles.segmentIndicator, { backgroundColor: '#ffffff' }, indicatorStyle]} />
+              )}
+              <Pressable 
+                style={[
+                  styles.segmentItem, 
+                  Platform.OS === 'web' && tab === 0 && styles.segmentItemActiveWeb
+                ]} 
+                onPress={() => onTabChange(0)} 
+                accessibilityRole="button" 
+                accessibilityState={tab === 0 ? { selected: true } : {}}
+              >
+                <Feather name="edit-3" size={16} color={tab === 0 ? '#111827' : '#6B7280'} />
+                <ThemedText style={[styles.segmentText, { color: tab === 0 ? '#111827' : '#6B7280' }]}>Write Entry</ThemedText>
               </Pressable>
-              <Pressable style={styles.segmentItem} onPress={() => onTabChange(1)} accessibilityRole="button" accessibilityState={tab === 1 ? { selected: true } : {}}>
-                <Feather name="book-open" size={16} color={palette.text} />
-                <ThemedText style={styles.segmentText}>My Entries</ThemedText>
+              <Pressable 
+                style={[
+                  styles.segmentItem,
+                  Platform.OS === 'web' && tab === 1 && styles.segmentItemActiveWeb
+                ]} 
+                onPress={() => onTabChange(1)} 
+                accessibilityRole="button" 
+                accessibilityState={tab === 1 ? { selected: true } : {}}
+              >
+                <Feather name="book-open" size={16} color={tab === 1 ? '#111827' : '#6B7280'} />
+                <ThemedText style={[styles.segmentText, { color: tab === 1 ? '#111827' : '#6B7280' }]}>My Entries</ThemedText>
               </Pressable>
             </View>
           </Animated.View>
@@ -574,21 +595,35 @@ export default function JournalListScreen() {
           </TouchableWithoutFeedback>
         )
       ) : (
-        <Animated.View style={{ gap: 8, marginTop: 12, opacity: contentOpacity, transform: [{ translateY: contentTranslateY }] }}>
+        <Animated.View style={{ marginTop: 16, opacity: contentOpacity, transform: [{ translateY: contentTranslateY }] }}>
           {entries.length > 0 ? (
-            entries.map((e) => (
-              <EntryRow
-                key={e.id}
-                entry={e}
-                onDeleteRequest={handleRequestDelete}
-                getOpenRef={() => openSwipeRef.current}
-                setOpenRef={(inst) => (openSwipeRef.current = inst)}
-              />
-            ))
+            <>
+              <View style={{ gap: 10 }}>
+                {entries.map((e) => (
+                  <EntryRow
+                    key={e.id}
+                    entry={e}
+                    onDeleteRequest={handleRequestDelete}
+                    getOpenRef={() => openSwipeRef.current}
+                    setOpenRef={(inst) => (openSwipeRef.current = inst)}
+                  />
+                ))}
+              </View>
+            </>
           ) : (
-            <ThemedText style={{ textAlign: 'center', color: palette.muted, marginTop: 12 }}>
-              {loadingEntries ? 'Loading entries...' : 'No entries yet'}
-            </ThemedText>
+            <View style={{ alignItems: 'center', paddingVertical: 40 }}>
+              <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
+                <Feather name="book-open" size={28} color="#9CA3AF" />
+              </View>
+              <ThemedText style={{ fontSize: 16, fontFamily: 'Inter_600SemiBold', color: '#374151', marginBottom: 4 }}>
+                {loadingEntries ? 'Loading entries...' : 'No entries yet'}
+              </ThemedText>
+              {!loadingEntries && (
+                <ThemedText style={{ textAlign: 'center', color: '#9CA3AF', fontSize: 14 }}>
+                  Start writing to see your entries here
+                </ThemedText>
+              )}
+            </View>
           )}
         </Animated.View>
       )}
@@ -920,10 +955,6 @@ function EntryRow({ entry, onDeleteRequest, getOpenRef, setOpenRef }: { entry: E
                 backgroundColor: 'rgba(255,255,255,0.35)',
                 borderWidth: 1,
                 borderColor: 'rgba(255,255,255,0.7)',
-                shadowColor: '#7f1d1d',
-                shadowOpacity: 0.35,
-                shadowRadius: 8,
-                shadowOffset: { width: 0, height: 2 },
               }}
             >
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -964,14 +995,21 @@ function EntryRow({ entry, onDeleteRequest, getOpenRef, setOpenRef }: { entry: E
     >
       <Animated.View style={{ transform: [{ scale }] }}>
         <Pressable onPressIn={() => animate(0.98, 90)} onPressOut={() => animate(1, 120)} onPress={open}>
-          <Card>
-            <CardContent>
-              <ThemedText type="subtitle">{entry.title}</ThemedText>
-              <ThemedText numberOfLines={1} style={{ color: palette.muted }}>
+          <View style={entryRowStyles.card}>
+            <View style={entryRowStyles.iconWrap}>
+              <Image source={JournalListIcon} style={{ width: 28, height: 28 }} contentFit="contain" />
+            </View>
+            <View style={entryRowStyles.content}>
+              <ThemedText style={entryRowStyles.title} numberOfLines={1}>{entry.title}</ThemedText>
+              <ThemedText numberOfLines={2} style={entryRowStyles.body}>
                 {entry.body}
               </ThemedText>
-            </CardContent>
-          </Card>
+              <ThemedText style={entryRowStyles.date}>{entry.date || 'No date'}</ThemedText>
+            </View>
+            <View style={entryRowStyles.chevron}>
+              <Feather name="chevron-right" size={18} color="#9CA3AF" />
+            </View>
+          </View>
         </Pressable>
       </Animated.View>
     </Swipeable>
@@ -1108,6 +1146,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
     paddingVertical: 10,
+    borderRadius: 999,
+  },
+  segmentItemActiveWeb: {
+    backgroundColor: '#FFFFFF',
   },
   segmentText: { fontFamily: 'Inter_500Medium' },
 
@@ -1294,5 +1336,51 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
     gap: 6,
+  },
+});
+
+const entryRowStyles = StyleSheet.create({
+  card: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    padding: 14,
+    gap: 12,
+  },
+  iconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: '#F5F3FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  content: {
+    flex: 1,
+    gap: 2,
+  },
+  title: {
+    fontSize: 15,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#111827',
+  },
+  body: {
+    fontSize: 13,
+    color: '#6B7280',
+    lineHeight: 18,
+  },
+  date: {
+    fontSize: 12,
+    color: '#9CA3AF',
+    marginTop: 2,
+  },
+  chevron: {
+    width: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

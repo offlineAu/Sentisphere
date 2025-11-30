@@ -51,6 +51,7 @@ import { useFocusEffect } from '@react-navigation/native';
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [conv, setConv] = useState<ApiConversation | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
 
   // Entrance animations
   const entrance = useRef({
@@ -223,6 +224,85 @@ import { useFocusEffect } from '@react-navigation/native';
     const interval = setInterval(fetchNewMessages, 3000); // Poll every 3 seconds
     return () => clearInterval(interval);
   }, [conv, loading, fetchNewMessages, messages.length]);
+
+  // WebSocket for real-time updates
+  useEffect(() => {
+    if (!conv || !id) return;
+    
+    const connectWebSocket = async () => {
+      try {
+        const tok = await getAuthToken();
+        if (!tok) return;
+        
+        // Construct WebSocket URL
+        const wsProtocol = API_BASE_URL.startsWith('https') ? 'wss' : 'ws';
+        const wsHost = API_BASE_URL.replace(/^https?:\/\//, '');
+        const wsUrl = `${wsProtocol}://${wsHost}/ws/chat/${id}?token=${tok}`;
+        
+        const ws = new WebSocket(wsUrl);
+        wsRef.current = ws;
+        
+        ws.onopen = () => {
+          console.log('WebSocket connected for conversation', id);
+        };
+        
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            
+            // Handle conversation status updates
+            if (data.type === 'status_update') {
+              const newStatus = data.status;
+              setChatOpen(newStatus === 'open');
+              setConv((prev) => prev ? { ...prev, status: newStatus } : prev);
+              if (newStatus === 'ended') {
+                doHaptic('selection');
+              }
+            }
+            
+            // Handle new messages
+            if (data.type === 'new_message' && data.message) {
+              const m = data.message as ApiMessage;
+              const role: 'user' | 'ai' = m.sender_id === currentUserId ? 'user' : 'ai';
+              const createdAt = new Date(m.timestamp).getTime();
+              const time = new Date(m.timestamp).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+              const newMsg: Msg = { id: String(m.message_id), role, text: m.content, time, createdAt, status: 'read' };
+              
+              setMessages((prev) => {
+                // Avoid duplicates
+                if (prev.some((x) => x.id === newMsg.id)) return prev;
+                return [...prev, newMsg];
+              });
+              
+              // Auto-scroll to bottom
+              requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
+            }
+          } catch (e) {
+            console.log('WebSocket message parse error:', e);
+          }
+        };
+        
+        ws.onerror = (error) => {
+          console.log('WebSocket error:', error);
+        };
+        
+        ws.onclose = () => {
+          console.log('WebSocket disconnected');
+        };
+      } catch (e) {
+        console.log('WebSocket connection error:', e);
+      }
+    };
+    
+    connectWebSocket();
+    
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+    };
+  }, [conv, id, API_BASE_URL, getAuthToken, currentUserId]);
 
   const formatDateLabel = (ts: number) => {
     const d = new Date(ts);
@@ -412,49 +492,65 @@ import { useFocusEffect } from '@react-navigation/native';
         </Animated.View>
 
           <Animated.View style={[styles.inputBarWrap, { borderTopColor: palette.border, backgroundColor: palette.background, paddingBottom: insets.bottom || 8 }, makeFadeUp(entrance.input)]}> 
-            <View
-              style={[
-                styles.inputBar,
-                {
-                  backgroundColor: palette.background,
-                  borderColor: inputFocused ? '#0D8C4F' : palette.border,
-                  borderWidth: inputFocused ? 1.5 : 1,
-                },
-              ]}
-            > 
-              <Pressable onPressIn={() => doHaptic('light')} style={({ pressed }) => [styles.attachBtn, { opacity: pressed ? 0.8 : 1 }]} accessibilityRole="button" accessibilityLabel="Add attachment">
-                <Icon name="plus" size={18} color={palette.icon} />
-              </Pressable>
-              <TextInput
-                value={input}
-                onChangeText={setInput}
-                placeholder={chatOpen ? 'Type your message...' : 'Chat is closed'}
-                placeholderTextColor={palette.muted}
-                // @ts-ignore - web outline
-                style={[styles.input, { height: inputHeight, outlineStyle: 'none' } as any]}
-                onSubmitEditing={send}
-                editable={chatOpen}
-                multiline
-                onFocus={() => setInputFocused(true)}
-                onBlur={() => setInputFocused(false)}
-                selectionColor="#0D8C4F"
-                underlineColorAndroid="transparent"
-                onContentSizeChange={(e) => setInputHeight(Math.min(120, Math.max(40, e.nativeEvent.contentSize.height)))}
-              />
-              <Pressable
-                disabled={!canSend}
-                onPress={send}
-                onPressIn={() => canSend && doHaptic('light')}
-                accessibilityRole="button"
-                accessibilityLabel="Send message"
-                style={({ pressed }) => ({ padding: 6, borderRadius: 8, opacity: !canSend ? 0.4 : (pressed ? 0.6 : 1) })}
-              >
-                <Icon name="send" size={20} color={palette.text} />
-              </Pressable>
-            </View>
-            {!chatOpen && (
-              <View style={styles.closedNotice}>
-                <ThemedText style={{ fontSize: 13, color: palette.muted }}>This chat is closed. Tap the status to reopen.</ThemedText>
+            {chatOpen ? (
+              <View
+                style={[
+                  styles.inputBar,
+                  {
+                    backgroundColor: palette.background,
+                    borderColor: inputFocused ? '#0D8C4F' : palette.border,
+                    borderWidth: inputFocused ? 1.5 : 1,
+                  },
+                ]}
+              > 
+                <Pressable onPressIn={() => doHaptic('light')} style={({ pressed }) => [styles.attachBtn, { opacity: pressed ? 0.8 : 1 }]} accessibilityRole="button" accessibilityLabel="Add attachment">
+                  <Icon name="plus" size={18} color={palette.icon} />
+                </Pressable>
+                <TextInput
+                  value={input}
+                  onChangeText={setInput}
+                  placeholder="Type your message..."
+                  placeholderTextColor={palette.muted}
+                  // @ts-ignore - web outline
+                  style={[styles.input, { height: inputHeight, outlineStyle: 'none' } as any]}
+                  onSubmitEditing={send}
+                  multiline
+                  onFocus={() => setInputFocused(true)}
+                  onBlur={() => setInputFocused(false)}
+                  selectionColor="#0D8C4F"
+                  underlineColorAndroid="transparent"
+                  onContentSizeChange={(e) => setInputHeight(Math.min(120, Math.max(40, e.nativeEvent.contentSize.height)))}
+                />
+                <Pressable
+                  disabled={!canSend}
+                  onPress={send}
+                  onPressIn={() => canSend && doHaptic('light')}
+                  accessibilityRole="button"
+                  accessibilityLabel="Send message"
+                  style={({ pressed }) => ({ padding: 6, borderRadius: 8, opacity: !canSend ? 0.4 : (pressed ? 0.6 : 1) })}
+                >
+                  <Icon name="send" size={20} color={palette.text} />
+                </Pressable>
+              </View>
+            ) : (
+              <View style={styles.closedChatContainer}>
+                <View style={styles.closedChatContent}>
+                  <View style={styles.closedIconWrap}>
+                    <Icon name="message-circle" size={20} color="#6B7280" />
+                  </View>
+                  <View style={styles.closedTextWrap}>
+                    <ThemedText style={styles.closedTitle}>Conversation Ended</ThemedText>
+                    <ThemedText style={styles.closedSubtitle}>This chat has been closed by your counselor</ThemedText>
+                  </View>
+                </View>
+                <Pressable 
+                  onPress={toggleChat} 
+                  onPressIn={() => doHaptic('selection')}
+                  style={({ pressed }) => [styles.reopenButton, { opacity: pressed ? 0.8 : 1 }]}
+                >
+                  <Icon name="refresh-ccw" size={16} color="#0D8C4F" />
+                  <ThemedText style={styles.reopenButtonText}>Reopen Chat</ThemedText>
+                </Pressable>
               </View>
             )}
           </Animated.View>
@@ -522,4 +618,56 @@ import { useFocusEffect } from '@react-navigation/native';
   attachBtn: { padding: 8, borderRadius: 10 },
   input: { flex: 1, padding: 8, fontSize: 18, lineHeight: 22 },
   closedNotice: { paddingHorizontal: 16, paddingBottom: 12 },
+  // Closed chat styles
+  closedChatContainer: {
+    padding: 16,
+    gap: 12,
+  },
+  closedChatContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: '#F9FAFB',
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  closedIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#E5E7EB',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  closedTextWrap: {
+    flex: 1,
+    gap: 2,
+  },
+  closedTitle: {
+    fontSize: 15,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#374151',
+  },
+  closedSubtitle: {
+    fontSize: 13,
+    color: '#6B7280',
+  },
+  reopenButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#ECFDF5',
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+  },
+  reopenButtonText: {
+    fontSize: 14,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#0D8C4F',
+  },
 });

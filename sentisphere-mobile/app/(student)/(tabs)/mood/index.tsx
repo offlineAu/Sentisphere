@@ -79,15 +79,15 @@ export default function MoodScreen() {
   });
 
   const moods: MoodOption[] = [
-    { key: 'excellent', emoji: '🤩', label: 'Excellent', color: '#22C55E' },
-    { key: 'very-happy', emoji: '😁', label: 'Very Happy', color: '#84CC16' },
-    { key: 'happy', emoji: '😊', label: 'Happy', color: '#EAB308' },
-    { key: 'good', emoji: '🙂', label: 'Good', color: '#F59E0B' },
-    { key: 'neutral', emoji: '😐', label: 'Neutral', color: '#9CA3AF' },
-    { key: 'sad', emoji: '😔', label: 'Sad', color: '#6B7280' },
-    { key: 'very-sad', emoji: '😢', label: 'Very Sad', color: '#3B82F6' },
-    { key: 'anxious', emoji: '😰', label: 'Anxious', color: '#8B5CF6' },
-    { key: 'angry', emoji: '😠', label: 'Upset', color: '#EF4444' },
+    { key: 'awesome', emoji: '🤩', label: 'Awesome', color: '#FB923C' },
+    { key: 'great', emoji: '😊', label: 'Great', color: '#FBBF24' },
+    { key: 'loved', emoji: '🥰', label: 'Loved', color: '#FDBA74' },
+    { key: 'okay', emoji: '😐', label: 'Okay', color: '#FDE68A' },
+    { key: 'meh', emoji: '😒', label: 'Meh', color: '#9CA3AF' },
+    { key: 'anxious', emoji: '😨', label: 'Anxious', color: '#6EE7B7' },
+    { key: 'bad', emoji: '😢', label: 'Bad', color: '#7DD3FC' },
+    { key: 'terrible', emoji: '😫', label: 'Terrible', color: '#C4B5FD' },
+    { key: 'upset', emoji: '😡', label: 'Upset', color: '#FCA5A5' },
   ];
 
   const energies: EnergyOption[] = [
@@ -107,15 +107,15 @@ export default function MoodScreen() {
   ];
 
   const moodLabelMap: Record<string, string> = {
-    'excellent': 'Excellent',
-    'very-happy': 'Very Happy',
-    'happy': 'Happy',
-    'good': 'Good',
-    'neutral': 'Neutral',
-    'sad': 'Sad',
-    'very-sad': 'Very Sad',
-    'anxious': 'Neutral',
-    'angry': 'Neutral',
+    'awesome': 'Awesome',
+    'great': 'Great',
+    'loved': 'Loved',
+    'okay': 'Okay',
+    'meh': 'Meh',
+    'anxious': 'Anxious',
+    'bad': 'Bad',
+    'terrible': 'Terrible',
+    'upset': 'Upset',
   };
 
   const energyLabelMap: Record<string, string> = {

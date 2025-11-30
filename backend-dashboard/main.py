@@ -1006,7 +1006,7 @@ def mobile_mark_read(
 
 
 @app.patch("/api/mobile/conversations/{conversation_id}")
-def mobile_update_conversation(
+async def mobile_update_conversation(
     conversation_id: int,
     conversation_in: ConversationUpdate,
     token: str = Depends(oauth2_scheme),
@@ -1022,17 +1022,155 @@ def mobile_update_conversation(
     if conversation_in.last_activity_at is not None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="last_activity_at cannot be updated")
     updates = {}
+    new_status = None
     if conversation_in.status is not None:
-        updates["status"] = conversation_in.status.value if hasattr(conversation_in.status, "value") else conversation_in.status
+        new_status = conversation_in.status.value if hasattr(conversation_in.status, "value") else conversation_in.status
+        updates["status"] = new_status
     if updates:
         set_clause = ", ".join(f"{k} = :{k}" for k in updates.keys())
         mdb.execute(text(f"UPDATE conversations SET {set_clause} WHERE conversation_id = :cid"), {**updates, "cid": conversation_id})
         mdb.commit()
+        
+        # Broadcast status change via WebSocket
+        if new_status:
+            await broadcast_conversation_status(conversation_id, new_status)
+    
     convo = mdb.execute(
         text("SELECT conversation_id, initiator_user_id, initiator_role, subject, counselor_id, status, created_at, last_activity_at FROM conversations WHERE conversation_id = :cid"),
         {"cid": conversation_id},
     ).mappings().first()
     return dict(convo) if convo else {"conversation_id": conversation_id, **updates}
+
+
+@app.delete("/api/mobile/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+def mobile_delete_conversation(
+    conversation_id: int,
+    token: str = Depends(oauth2_scheme),
+    mdb: Session = Depends(get_mobile_db),
+):
+    """Delete a conversation. Only the initiator can delete, and only if conversation is closed."""
+    uid = _extract_user_id(token)
+    convo = mdb.execute(
+        text("SELECT initiator_user_id, status FROM conversations WHERE conversation_id = :cid"),
+        {"cid": conversation_id},
+    ).mappings().first()
+    
+    if not convo:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+    
+    if int(convo["initiator_user_id"]) != int(uid):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to delete this conversation")
+    
+    if convo["status"] != "ended":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Can only delete closed conversations")
+    
+    # Delete messages first (foreign key constraint)
+    mdb.execute(text("DELETE FROM messages WHERE conversation_id = :cid"), {"cid": conversation_id})
+    # Delete conversation
+    mdb.execute(text("DELETE FROM conversations WHERE conversation_id = :cid"), {"cid": conversation_id})
+    mdb.commit()
+    return None
+
+
+# --- WebSocket Manager for Real-time Chat Updates ---
+
+class ConnectionManager:
+    def __init__(self):
+        # Dict of conversation_id -> list of WebSocket connections
+        self.active_connections: Dict[int, List[WebSocket]] = {}
+    
+    async def connect(self, websocket: WebSocket, conversation_id: int):
+        await websocket.accept()
+        if conversation_id not in self.active_connections:
+            self.active_connections[conversation_id] = []
+        self.active_connections[conversation_id].append(websocket)
+    
+    def disconnect(self, websocket: WebSocket, conversation_id: int):
+        if conversation_id in self.active_connections:
+            if websocket in self.active_connections[conversation_id]:
+                self.active_connections[conversation_id].remove(websocket)
+            if not self.active_connections[conversation_id]:
+                del self.active_connections[conversation_id]
+    
+    async def broadcast_to_conversation(self, conversation_id: int, message: dict):
+        if conversation_id in self.active_connections:
+            disconnected = []
+            for connection in self.active_connections[conversation_id]:
+                try:
+                    await connection.send_json(message)
+                except Exception:
+                    disconnected.append(connection)
+            # Clean up disconnected
+            for conn in disconnected:
+                self.disconnect(conn, conversation_id)
+
+ws_manager = ConnectionManager()
+
+
+@app.websocket("/ws/chat/{conversation_id}")
+async def websocket_chat(websocket: WebSocket, conversation_id: int, token: str = Query(None)):
+    """WebSocket endpoint for real-time chat updates."""
+    # Validate token
+    if not token:
+        await websocket.close(code=4001, reason="Missing token")
+        return
+    
+    try:
+        data = decode_token(token)
+        user_id = int(data.get("sub"))
+    except Exception:
+        await websocket.close(code=4001, reason="Invalid token")
+        return
+    
+    # Verify user has access to this conversation
+    with mobile_engine.connect() as conn:
+        convo = conn.execute(
+            text("SELECT initiator_user_id, counselor_id FROM conversations WHERE conversation_id = :cid"),
+            {"cid": conversation_id}
+        ).mappings().first()
+        
+        if not convo:
+            await websocket.close(code=4004, reason="Conversation not found")
+            return
+        
+        # Check if user is initiator or counselor
+        if int(convo["initiator_user_id"]) != user_id and (convo["counselor_id"] is None or int(convo["counselor_id"]) != user_id):
+            await websocket.close(code=4003, reason="Not authorized")
+            return
+    
+    await ws_manager.connect(websocket, conversation_id)
+    
+    try:
+        while True:
+            # Keep connection alive, wait for messages (ping/pong handled automatically)
+            data = await websocket.receive_text()
+            # Client can send ping messages to keep connection alive
+            if data == "ping":
+                await websocket.send_text("pong")
+    except WebSocketDisconnect:
+        ws_manager.disconnect(websocket, conversation_id)
+    except Exception:
+        ws_manager.disconnect(websocket, conversation_id)
+
+
+# Helper function to broadcast status updates
+async def broadcast_conversation_status(conversation_id: int, status: str):
+    """Broadcast conversation status change to all connected clients."""
+    await ws_manager.broadcast_to_conversation(conversation_id, {
+        "type": "status_update",
+        "conversation_id": conversation_id,
+        "status": status,
+    })
+
+
+# Helper function to broadcast new messages
+async def broadcast_new_message(conversation_id: int, message: dict):
+    """Broadcast new message to all connected clients."""
+    await ws_manager.broadcast_to_conversation(conversation_id, {
+        "type": "new_message",
+        "conversation_id": conversation_id,
+        "message": message,
+    })
 
 
 # --- Counselor Conversation Endpoints (for web dashboard, uses mobile DB) ---
