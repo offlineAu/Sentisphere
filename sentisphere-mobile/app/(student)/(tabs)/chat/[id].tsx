@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, View, FlatList, TextInput, KeyboardAvoidingView, Platform, Pressable, useWindowDimensions, Alert, type AlertButton } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { StyleSheet, View, FlatList, TextInput, KeyboardAvoidingView, Platform, Pressable, useWindowDimensions, Alert, type AlertButton, Animated, Easing } from 'react-native';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
@@ -9,6 +9,7 @@ import * as Haptics from 'expo-haptics';
 import * as SecureStore from 'expo-secure-store';
 import { Stack, useLocalSearchParams, router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 
  type Msg = { id: string; role: 'user' | 'ai'; text: string; time: string; createdAt: number; status?: 'sent' | 'delivered' | 'read' };
 
@@ -50,6 +51,32 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [conv, setConv] = useState<ApiConversation | null>(null);
+
+  // Entrance animations
+  const entrance = useRef({
+    header: new Animated.Value(0),
+    messages: new Animated.Value(0),
+    input: new Animated.Value(0),
+  }).current;
+
+  const runEntrance = useCallback(() => {
+    entrance.header.setValue(0);
+    entrance.messages.setValue(0);
+    entrance.input.setValue(0);
+    Animated.stagger(80, [
+      Animated.timing(entrance.header, { toValue: 1, duration: 300, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(entrance.messages, { toValue: 1, duration: 300, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(entrance.input, { toValue: 1, duration: 300, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+    ]).start();
+  }, []);
+
+  const makeFadeUp = (v: Animated.Value) => ({
+    opacity: v,
+    transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }],
+  });
+
+  useEffect(() => { runEntrance(); }, []);
+  useFocusEffect(useCallback(() => { runEntrance(); return () => {}; }, []));
 
   const doHaptic = async (kind: 'light' | 'selection' | 'success' = 'light') => {
     if (Platform.OS === 'web') return;
@@ -124,6 +151,79 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
     return () => { mounted = false };
   }, [API_BASE_URL, getAuthToken, id]);
 
+  // Auto-refresh: Poll for new messages every 3 seconds
+  const lastMessageIdRef = useRef<string | null>(null);
+  
+  const fetchNewMessages = useCallback(async () => {
+    if (!chatOpen) return; // Don't poll if chat is closed
+    try {
+      const tok = await getAuthToken();
+      if (!tok || !conv) return;
+      
+      const mRes = await fetch(`${API_BASE_URL}/api/mobile/conversations/${id}/messages`, { 
+        headers: { Authorization: `Bearer ${tok}` } 
+      });
+      if (!mRes.ok) return;
+      
+      const msgs: ApiMessage[] = await mRes.json();
+      if (!msgs.length) return;
+      
+      // Get the latest message ID from fetched messages
+      const latestMsgId = String(msgs[msgs.length - 1].message_id);
+      
+      // Only update if there are new messages
+      if (lastMessageIdRef.current !== latestMsgId) {
+        lastMessageIdRef.current = latestMsgId;
+        
+        const mapped: Msg[] = msgs.map((m) => {
+          const createdAt = new Date(m.timestamp).getTime();
+          const time = new Date(m.timestamp).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+          const role: 'user' | 'ai' = currentUserId && m.sender_id === currentUserId ? 'user' : 'ai';
+          const status: 'sent' | 'delivered' | 'read' | undefined = role === 'user' ? 'read' : undefined;
+          return { id: String(m.message_id), role, text: m.content, time, createdAt, status };
+        });
+        
+        setMessages((prev) => {
+          // Check if we actually have new messages
+          const prevIds = new Set(prev.map(p => p.id));
+          const hasNew = mapped.some(m => !prevIds.has(m.id));
+          if (hasNew) {
+            // Play haptic for new incoming message (not from user)
+            const newOthers = mapped.filter(m => !prevIds.has(m.id) && m.role === 'ai');
+            if (newOthers.length > 0) {
+              doHaptic('light');
+            }
+            // Scroll to bottom after state update
+            setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
+            return mapped;
+          }
+          return prev;
+        });
+        
+        // Mark messages as read
+        try {
+          await fetch(`${API_BASE_URL}/api/mobile/conversations/${id}/read`, { 
+            method: 'POST', 
+            headers: { Authorization: `Bearer ${tok}` } 
+          });
+        } catch {}
+      }
+    } catch {}
+  }, [API_BASE_URL, getAuthToken, id, conv, chatOpen, currentUserId]);
+
+  // Set up polling interval
+  useEffect(() => {
+    if (!conv || loading) return;
+    
+    // Update lastMessageIdRef with current latest message
+    if (messages.length > 0) {
+      lastMessageIdRef.current = messages[messages.length - 1].id;
+    }
+    
+    const interval = setInterval(fetchNewMessages, 3000); // Poll every 3 seconds
+    return () => clearInterval(interval);
+  }, [conv, loading, fetchNewMessages, messages.length]);
+
   const formatDateLabel = (ts: number) => {
     const d = new Date(ts);
     const today = new Date();
@@ -194,8 +294,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
   };
 
   const StatusBadge = ({ open }: { open: boolean }) => (
-    <View style={[styles.badge, { backgroundColor: palette.background, borderColor: palette.border }]}>
-      <ThemedText style={[styles.badgeText, { color: open ? (palette.learningAccent ?? '#16A34A') : (palette.destructive ?? '#DC2626') }]}>{open ? 'Open' : 'Closed'}</ThemedText>
+    <View style={[styles.badge, open ? { backgroundColor: '#ECFDF5', borderColor: '#A7F3D0' } : { backgroundColor: '#FEF2F2', borderColor: '#FECACA' }]}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: open ? '#0D8C4F' : '#DC2626' }} />
+        <ThemedText style={[styles.badgeText, { color: open ? '#0D8C4F' : '#DC2626' }]}>{open ? 'Open' : 'Closed'}</ThemedText>
+      </View>
     </View>
   );
 
@@ -225,8 +328,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
   const renderRow = ({ item }: { item: any }) => {
     if (item.type === 'sep') {
       return (
-        <View style={styles.sepWrap}>
-          <ThemedText style={[styles.sepText, { color: palette.muted }]}>{item.label}</ThemedText>
+        <View style={styles.sepContainer}>
+          <View style={styles.sepLine} />
+          <View style={styles.sepWrap}>
+            <Icon name="calendar" size={12} color="#0D8C4F" />
+            <ThemedText style={styles.sepText}>{item.label}</ThemedText>
+          </View>
+          <View style={styles.sepLine} />
         </View>
       );
     }
@@ -261,31 +369,31 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
       <ThemedView style={[styles.container, { paddingTop: insets.top }] }>
         <Stack.Screen options={{ title: (name as string) || 'Chat' }} />
         {/* In-app header */}
-        <View style={[styles.chatHeader, { backgroundColor: palette.background, borderBottomColor: palette.border }]}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+        <Animated.View style={[styles.chatHeader, { backgroundColor: palette.background, borderBottomColor: palette.border }, makeFadeUp(entrance.header)]}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Go back"
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
               onPressIn={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} } }}
-              onPress={() => router.replace('/(student)/(tabs)/dashboard')}
-              style={({ pressed }) => ({ padding: 6, borderRadius: 10, opacity: pressed ? 0.7 : 1 })}
+              onPress={() => router.replace('/(student)/(tabs)/chat')}
+              style={({ pressed }) => [styles.backBtn, { opacity: pressed ? 0.8 : 1 }]}
             >
-              <Icon name="arrow-left" size={20} color={palette.text} />
+              <Icon name="chevron-left" size={20} color="#111827" />
             </Pressable>
-            <View style={[styles.avatar, { backgroundColor: palette.primary }]}><ThemedText style={{ color: '#FFFFFF', fontFamily: 'Inter_700Bold' }}>{(name || 'C')?.[0]?.toString().toUpperCase()}</ThemedText></View>
+            <View style={[styles.avatar, { backgroundColor: '#111827' }]}><ThemedText style={{ color: '#FFFFFF', fontFamily: 'Inter_700Bold', fontSize: 17 }}>{(name || 'C')?.[0]?.toString().toUpperCase()}</ThemedText></View>
             <View>
-              <ThemedText type="subtitle" style={{ fontSize: 18 }}>{name || 'Counselor'}</ThemedText>
-              <ThemedText style={{ color: palette.muted, fontSize: 12 }}>Counseling Conversation</ThemedText>
+              <ThemedText style={{ fontSize: 16, fontFamily: 'Inter_600SemiBold', color: '#111827', lineHeight: 20 }}>{name || 'Counselor'}</ThemedText>
+              <ThemedText style={{ color: '#9CA3AF', fontSize: 12, marginTop: -1 }}>Counseling Conversation</ThemedText>
             </View>
           </View>
-          <Pressable onPress={toggleChat} onPressIn={() => doHaptic('selection')} style={({ pressed }) => [styles.toggleBtn, { opacity: pressed ? 0.9 : 1, borderColor: palette.border }]}> 
+          <Pressable onPress={toggleChat} onPressIn={() => doHaptic('selection')} style={({ pressed }) => ({ opacity: pressed ? 0.8 : 1 })}> 
             <StatusBadge open={chatOpen} />
           </Pressable>
-        </View>
+        </Animated.View>
 
         {/* Chat list + Composer */}
-        <View style={{ flex: 1 }}>
+        <Animated.View style={[{ flex: 1 }, makeFadeUp(entrance.messages)]}>
           <FlatList
             ref={listRef}
             data={listData}
@@ -301,15 +409,16 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
             removeClippedSubviews
             ListFooterComponent={typing ? <TypingIndicator palette={palette} /> : null}
           />
+        </Animated.View>
 
-          <View style={[styles.inputBarWrap, { borderTopColor: palette.border, backgroundColor: palette.background, paddingBottom: insets.bottom || 8 }]}> 
+          <Animated.View style={[styles.inputBarWrap, { borderTopColor: palette.border, backgroundColor: palette.background, paddingBottom: insets.bottom || 8 }, makeFadeUp(entrance.input)]}> 
             <View
               style={[
                 styles.inputBar,
                 {
                   backgroundColor: palette.background,
-                  borderColor: inputFocused ? palette.tint : palette.border,
-                  borderWidth: inputFocused ? 2 : 1,
+                  borderColor: inputFocused ? '#0D8C4F' : palette.border,
+                  borderWidth: inputFocused ? 1.5 : 1,
                 },
               ]}
             > 
@@ -321,13 +430,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
                 onChangeText={setInput}
                 placeholder={chatOpen ? 'Type your message...' : 'Chat is closed'}
                 placeholderTextColor={palette.muted}
-                style={[styles.input, { height: inputHeight }]}
+                // @ts-ignore - web outline
+                style={[styles.input, { height: inputHeight, outlineStyle: 'none' } as any]}
                 onSubmitEditing={send}
                 editable={chatOpen}
                 multiline
                 onFocus={() => setInputFocused(true)}
                 onBlur={() => setInputFocused(false)}
-                selectionColor={palette.tint}
+                selectionColor="#0D8C4F"
                 underlineColorAndroid="transparent"
                 onContentSizeChange={(e) => setInputHeight(Math.min(120, Math.max(40, e.nativeEvent.contentSize.height)))}
               />
@@ -347,8 +457,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
                 <ThemedText style={{ fontSize: 13, color: palette.muted }}>This chat is closed. Tap the status to reopen.</ThemedText>
               </View>
             )}
-          </View>
-        </View>
+          </Animated.View>
       </ThemedView>
     </KeyboardAvoidingView>
   );
@@ -361,28 +470,30 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 14,
     borderBottomWidth: 1,
     borderBottomColor: '#E5E7EB',
     backgroundColor: '#FFFFFF',
   },
-  toggleBtn: {
-    borderWidth: 1,
-    borderRadius: 999,
-    padding: 4,
-    backgroundColor: 'transparent',
+  backBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: '#F3F4F6',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   badge: {
     borderWidth: 1,
-    paddingVertical: 4,
-    paddingHorizontal: 10,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
     borderRadius: 999,
   },
   badgeText: { fontSize: 12, fontFamily: 'Inter_600SemiBold' },
   avatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: '#111827',
     alignItems: 'center',
     justifyContent: 'center',
@@ -393,8 +504,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
   timeText: { fontSize: 11, marginTop: 4 },
   metaLine: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 },
   statusText: { fontSize: 11 },
-  sepWrap: { alignSelf: 'center', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, borderWidth: 1, marginVertical: 8 },
-  sepText: { fontSize: 12 },
+  sepContainer: { flexDirection: 'row', alignItems: 'center', marginVertical: 16, paddingHorizontal: 16 },
+  sepLine: { flex: 1, height: 1, backgroundColor: '#E5E7EB' },
+  sepWrap: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 6, borderRadius: 999, backgroundColor: '#ECFDF5', marginHorizontal: 12 },
+  sepText: { fontSize: 12, fontFamily: 'Inter_600SemiBold', color: '#0D8C4F' },
   inputBarWrap: { borderTopWidth: 1, backgroundColor: '#FFFFFF' },
   inputBar: {
     flexDirection: 'row',

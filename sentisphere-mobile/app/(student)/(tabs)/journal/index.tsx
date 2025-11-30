@@ -129,21 +129,24 @@ export default function JournalListScreen() {
     }
   };
 
-  // Screen entrance animation (fade + rise) - consistent with dashboard
-  const screenEntrance = useRef(new Animated.Value(0)).current;
+  // Screen entrance animation (staggered fade + rise) - consistent with dashboard
+  const entranceHeader = useRef(new Animated.Value(0)).current;
+  const entranceTabs = useRef(new Animated.Value(0)).current;
+  const entranceContent = useRef(new Animated.Value(0)).current;
   const runScreenEntrance = () => {
-    screenEntrance.setValue(0);
-    Animated.timing(screenEntrance, {
-      toValue: 1,
-      duration: 340,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
+    entranceHeader.setValue(0);
+    entranceTabs.setValue(0);
+    entranceContent.setValue(0);
+    Animated.stagger(70, [
+      Animated.timing(entranceHeader, { toValue: 1, duration: 280, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(entranceTabs, { toValue: 1, duration: 280, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(entranceContent, { toValue: 1, duration: 280, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+    ]).start();
   };
-  const screenEntranceStyle = {
-    opacity: screenEntrance,
-    transform: [{ translateY: screenEntrance.interpolate({ inputRange: [0, 1], outputRange: [18, 0] }) }],
-  };
+  const makeFadeUp = (v: Animated.Value) => ({
+    opacity: v,
+    transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }],
+  });
 
   // Close any open swipe row on focus/blur to reset UI when navigating back
   useFocusEffect(
@@ -431,27 +434,31 @@ export default function JournalListScreen() {
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ padding: 16, paddingBottom: 100, backgroundColor: '#FFFFFF' }}
         >
-          <Animated.View style={screenEntranceStyle}>
-          <View style={{ height: 16 }} />
-          <ThemedText type="title">Journal</ThemedText>
-          <ThemedText style={{ color: palette.muted }}>Express your thoughts and track your emotional journey</ThemedText>
+          <Animated.View style={makeFadeUp(entranceHeader)}>
+            <View style={{ height: 16 }} />
+            <ThemedText type="title">Journal</ThemedText>
+            <ThemedText style={{ color: palette.muted }}>Express your thoughts and track your emotional journey</ThemedText>
+          </Animated.View>
 
-      {/* Segmented control */}
-      <View
-        style={[styles.segment, { backgroundColor: '#EEF2F7', borderColor: palette.border, marginTop: 16 }]}
-        onLayout={(e) => setSegW(e.nativeEvent.layout.width)}
-      >
-        <Animated.View pointerEvents="none" style={[styles.segmentIndicator, { backgroundColor: '#ffffff' }, indicatorStyle]} />
-        <Pressable style={styles.segmentItem} onPress={() => onTabChange(0)} accessibilityRole="button" accessibilityState={tab === 0 ? { selected: true } : {}}>
-          <Feather name="edit-3" size={16} color={palette.text} />
-          <ThemedText style={styles.segmentText}>Write Entry</ThemedText>
-        </Pressable>
-        <Pressable style={styles.segmentItem} onPress={() => onTabChange(1)} accessibilityRole="button" accessibilityState={tab === 1 ? { selected: true } : {}}>
-          <Feather name="book-open" size={16} color={palette.text} />
-          <ThemedText style={styles.segmentText}>My Entries</ThemedText>
-        </Pressable>
-      </View>
+          {/* Segmented control */}
+          <Animated.View style={makeFadeUp(entranceTabs)}>
+            <View
+              style={[styles.segment, { backgroundColor: '#EEF2F7', borderColor: palette.border, marginTop: 16 }]}
+              onLayout={(e) => setSegW(e.nativeEvent.layout.width)}
+            >
+              <Animated.View pointerEvents="none" style={[styles.segmentIndicator, { backgroundColor: '#ffffff' }, indicatorStyle]} />
+              <Pressable style={styles.segmentItem} onPress={() => onTabChange(0)} accessibilityRole="button" accessibilityState={tab === 0 ? { selected: true } : {}}>
+                <Feather name="edit-3" size={16} color={palette.text} />
+                <ThemedText style={styles.segmentText}>Write Entry</ThemedText>
+              </Pressable>
+              <Pressable style={styles.segmentItem} onPress={() => onTabChange(1)} accessibilityRole="button" accessibilityState={tab === 1 ? { selected: true } : {}}>
+                <Feather name="book-open" size={16} color={palette.text} />
+                <ThemedText style={styles.segmentText}>My Entries</ThemedText>
+              </Pressable>
+            </View>
+          </Animated.View>
 
+      <Animated.View style={makeFadeUp(entranceContent)}>
       {tab === 0 ? (
         Platform.OS === 'web' ? (
           <Animated.View style={{ opacity: contentOpacity, transform: [{ translateY: contentTranslateY }] }}>
@@ -789,51 +796,42 @@ export default function JournalListScreen() {
               styles.confirmCard,
               {
                 transform: [
-                  {
-                    scale: pendingDelete
-                      ? pendingDeleteScale.interpolate({ inputRange: [0, 1], outputRange: [0.95, 1] })
-                      : 1,
-                  },
-                  {
-                    translateY: pendingDelete
-                      ? pendingDeleteScale.interpolate({ inputRange: [0, 1], outputRange: [12, 0] })
-                      : 0,
-                  },
+                  { scale: pendingDelete ? pendingDeleteScale.interpolate({ inputRange: [0, 1], outputRange: [0.94, 1] }) : 1 },
+                  { translateY: pendingDelete ? pendingDeleteScale.interpolate({ inputRange: [0, 1], outputRange: [18, 0] }) : 0 },
                 ],
-                opacity: pendingDelete
-                  ? pendingDeleteScale.interpolate({ inputRange: [0, 1], outputRange: [0, 1] })
-                  : 0,
+                opacity: pendingDelete ? pendingDeleteScale : 0,
               },
             ])}
           >
-            <View style={{ alignItems: 'center', gap: 8 }}>
-              <View style={styles.confirmIconWrap}>
-                <Feather name="alert-triangle" size={22} color="#F97316" />
-              </View>
-              <ThemedText type="subtitle" style={{ textAlign: 'center' }}>Oh no, this is your journal!</ThemedText>
-              <ThemedText style={{ color: '#6B7280', textAlign: 'center' }}>
-                Are you sure you want to let this entry go? Once it leaves, the memories go with it.
-              </ThemedText>
-              {pendingDelete ? (
-                <View style={styles.confirmEntryPreview}>
-                  <ThemedText style={{ fontFamily: 'Inter_600SemiBold' }} numberOfLines={1}>
-                    {pendingDelete.title}
-                  </ThemedText>
-                  <ThemedText style={{ color: '#6B7280' }} numberOfLines={2}>
-                    {pendingDelete.body}
-                  </ThemedText>
-                  <ThemedText style={{ color: '#9CA3AF', fontSize: 12 }}>Saved on {pendingDelete.date || 'Unknown date'}</ThemedText>
-                </View>
-              ) : null}
-              {deleteError ? (
-                <View style={StyleSheet.flatten([styles.noticeBox, { borderColor: '#FCA5A5', backgroundColor: '#FEF2F2' }])}>
-                  <ThemedText style={{ color: '#B91C1C' }}>{deleteError}</ThemedText>
-                </View>
-              ) : null}
+            <View style={styles.confirmIconWrap}>
+              <Icon name="trash-2" size={28} color="#b91c1c" />
             </View>
-            <View style={{ flexDirection: 'row', gap: 10, alignSelf: 'stretch', marginTop: 16 }}>
-              <Button title="Keep it" variant="outline" onPress={handleCancelDelete} disabled={isDeleting} style={{ flex: 1 }} />
-              <Button title="Delete it" onPress={handleConfirmDelete} loading={isDeleting} style={{ flex: 1 }} />
+            <ThemedText style={styles.confirmTitle}>Let this story go?</ThemedText>
+            <ThemedText style={styles.confirmMessage}>
+              Oh no, this is your journal! Deleting it will permanently remove this entry from your history.
+            </ThemedText>
+            {deleteError ? (
+              <View style={[styles.noticeBox, { backgroundColor: '#FEF2F2', borderColor: '#FCA5A5' }]}>
+                <ThemedText style={{ color: '#B91C1C', fontSize: 13 }}>{deleteError}</ThemedText>
+              </View>
+            ) : null}
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
+              <Button
+                title="Keep it"
+                variant="ghost"
+                onPress={handleCancelDelete}
+                disabled={isDeleting}
+                style={{ flex: 1, paddingVertical: 12, backgroundColor: 'rgba(13,140,79,0.08)', borderWidth: 0 }}
+                textStyle={{ fontSize: 14 }}
+              />
+              <Button
+                title={isDeleting ? 'Deleting…' : 'Delete entry'}
+                variant="ghost"
+                onPress={handleConfirmDelete}
+                loading={isDeleting}
+                style={{ flex: 1, paddingVertical: 12, backgroundColor: 'rgba(239,68,68,0.08)', borderWidth: 0 }}
+                textStyle={{ fontSize: 14, color: '#b91c1c' }}
+              />
             </View>
           </Animated.View>
         </View>
@@ -1189,18 +1187,30 @@ const styles = StyleSheet.create({
   },
   confirmCard: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    paddingVertical: 24,
-    paddingHorizontal: 20,
-    alignItems: 'stretch',
-    gap: 18,
+    borderRadius: 28,
+    padding: 28,
+    gap: 20,
     width: '100%',
     maxWidth: 360,
     shadowColor: '#0f172a',
-    shadowOpacity: 0.16,
-    shadowRadius: 22,
+    shadowOpacity: 0.2,
+    shadowRadius: 24,
     shadowOffset: { width: 0, height: 12 },
     elevation: 14,
+  },
+  confirmTitle: {
+    fontSize: 21,
+    fontFamily: 'Inter_700Bold',
+    textAlign: 'center',
+    color: '#111827',
+    marginTop: 4,
+  },
+  confirmMessage: {
+    fontSize: 15,
+    textAlign: 'center',
+    color: '#6b7280',
+    marginHorizontal: 8,
+    marginTop: -2,
   },
   loadingOnly: { minHeight: 160, alignItems: 'center', justifyContent: 'center', alignSelf: 'stretch' },
   loadingBrain: { width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center', backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0' },
@@ -1269,14 +1279,13 @@ const styles = StyleSheet.create({
   },
   noticeBox: { borderWidth: 1, borderRadius: 12, padding: 12, gap: 4, marginTop: 6 },
   confirmIconWrap: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignSelf: 'center',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(249, 115, 22, 0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(249, 115, 22, 0.28)',
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
   },
   confirmEntryPreview: {
     alignSelf: 'stretch',

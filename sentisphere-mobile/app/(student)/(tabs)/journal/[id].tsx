@@ -10,6 +10,7 @@ import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Button } from '@/components/ui/button';
 import * as Haptics from 'expo-haptics';
+import { useFocusEffect } from '@react-navigation/native';
 
 export default function JournalDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -29,6 +30,30 @@ export default function JournalDetailScreen() {
   const confirmScale = useRef(new Animated.Value(0)).current;
   const cardScale = useRef(new Animated.Value(0.96)).current;
   const cardOpacity = useRef(new Animated.Value(0)).current;
+
+  // Entrance animations
+  const entranceHeader = useRef(new Animated.Value(0)).current;
+  const entranceContent = useRef(new Animated.Value(0)).current;
+  const entranceActions = useRef(new Animated.Value(0)).current;
+
+  const runEntrance = useCallback(() => {
+    entranceHeader.setValue(0);
+    entranceContent.setValue(0);
+    entranceActions.setValue(0);
+    Animated.stagger(70, [
+      Animated.timing(entranceHeader, { toValue: 1, duration: 280, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(entranceContent, { toValue: 1, duration: 280, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(entranceActions, { toValue: 1, duration: 280, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+    ]).start();
+  }, []);
+
+  const makeFadeUp = (v: Animated.Value) => ({
+    opacity: v,
+    transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }],
+  });
+
+  useEffect(() => { runEntrance(); }, []);
+  useFocusEffect(useCallback(() => { runEntrance(); return () => {}; }, []));
 
   const getAuthToken = async (): Promise<string | null> => {
     if (Platform.OS === 'web') {
@@ -182,11 +207,11 @@ export default function JournalDetailScreen() {
       />
 
       {/* Floating back button */}
-      <View style={styles.floatingHeader}>
+      <Animated.View style={[styles.floatingHeader, makeFadeUp(entranceHeader)]}>
         <Pressable onPress={() => router.replace('/(student)/(tabs)/journal')} accessibilityRole="button" style={styles.floatingBtn} accessibilityLabel="Go back to journal list">
           <Icon name="arrow-left" size={20} color="#047857" />
         </Pressable>
-      </View>
+      </Animated.View>
 
       {loading ? (
         <View style={styles.loadingWrap}>
@@ -205,7 +230,7 @@ export default function JournalDetailScreen() {
           <Button title="Go back" variant="outline" onPress={() => router.replace('/(student)/(tabs)/journal')} style={{ marginTop: 16 }} />
         </View>
       ) : (
-        <Animated.View style={[styles.cardWrap, { opacity: cardOpacity, transform: [{ scale: cardScale }] }]}>
+        <Animated.View style={[styles.cardWrap, { opacity: cardOpacity, transform: [{ scale: cardScale }] }, makeFadeUp(entranceContent)]}>
           <ScrollView
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.cardContent}
@@ -228,7 +253,7 @@ export default function JournalDetailScreen() {
           </ScrollView>
 
           {/* Delete action button at bottom */}
-          <View style={styles.cardFooter}>
+          <Animated.View style={[styles.cardFooter, makeFadeUp(entranceActions)]}>
             <Pressable
               onPress={handleDeletePress}
               accessibilityRole="button"
@@ -241,7 +266,7 @@ export default function JournalDetailScreen() {
               <Icon name="trash-2" size={18} color="#b91c1c" />
               <ThemedText style={styles.deleteBtnText}>Delete Entry</ThemedText>
             </Pressable>
-          </View>
+          </Animated.View>
         </Animated.View>
       )}
 
