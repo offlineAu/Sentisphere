@@ -102,15 +102,15 @@ export default function EnhancedDashboardScreen() {
       .then((d) => console.log('health:', d))
       .catch((e) => console.error('health error:', e))
   }, [])
-  // Responsive quick action tile sizing
-  const CARD_PADDING = 20 * 2; // CardContent padding on both sides
+  // Responsive quick action tile sizing - 2x2 grid
+  const CARD_PADDING = 16 * 2; // CardContent padding on both sides
   const SCROLL_PADDING = 16 * 2; // scrollContent padding on both sides
-  const TILE_GAP = 12;
+  const TILE_GAP = 10;
   const availableWidth = screenWidth - SCROLL_PADDING - CARD_PADDING;
   const tileWidth = Math.floor((availableWidth - TILE_GAP) / 2);
   const quickActionTileSize = {
     width: tileWidth,
-    minHeight: Math.max(120, Math.round(tileWidth * 0.65)),
+    height: Math.max(110, tileWidth * 0.78), // Maintain consistent aspect ratio
   }
 
   // Feature flags for layout
@@ -1285,14 +1285,14 @@ const styles = StyleSheet.create({
     opacity: 0.96,
   },
   quickActionsContent: {
-    padding: 20,
-    gap: 16,
+    padding: 16,
+    gap: 14,
   },
   quickActionsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 12,
-    justifyContent: 'center',
+    gap: 10,
+    justifyContent: 'space-between',
   },
   quickActionTile: {
     borderRadius: 16,

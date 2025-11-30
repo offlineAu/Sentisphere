@@ -1,4 +1,4 @@
-import { StyleSheet, View, FlatList, TextInput, KeyboardAvoidingView, Platform, Pressable, useWindowDimensions, Modal, ActivityIndicator } from 'react-native';
+import { StyleSheet, View, FlatList, TextInput, KeyboardAvoidingView, Platform, Pressable, useWindowDimensions, Modal, ActivityIndicator, Animated, Easing } from 'react-native';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
@@ -11,6 +11,7 @@ import * as Haptics from 'expo-haptics';
 import * as SecureStore from 'expo-secure-store';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 
 type Msg = { id: string; role: 'user' | 'ai'; text: string; time: string };
 
@@ -65,9 +66,31 @@ export default function ChatScreen() {
   const [cSearch, setCSearch] = useState('');
   const [searchFocused, setSearchFocused] = useState(false);
 
-  useEffect(() => {
-    // intentionally no health probe to avoid logging unrelated web DB status
+  // Entrance animations
+  const entrance = useRef({
+    header: new Animated.Value(0),
+    title: new Animated.Value(0),
+    content: new Animated.Value(0),
+  }).current;
+
+  const runEntrance = useCallback(() => {
+    entrance.header.setValue(0);
+    entrance.title.setValue(0);
+    entrance.content.setValue(0);
+    Animated.stagger(70, [
+      Animated.timing(entrance.header, { toValue: 1, duration: 280, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(entrance.title, { toValue: 1, duration: 280, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(entrance.content, { toValue: 1, duration: 280, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+    ]).start();
   }, []);
+
+  const makeFadeUp = (v: Animated.Value) => ({
+    opacity: v,
+    transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }],
+  });
+
+  useEffect(() => { runEntrance(); }, []);
+  useFocusEffect(useCallback(() => { runEntrance(); return () => {}; }, []));
 
   const getAuthToken = useCallback(async (): Promise<string | null> => {
     if (Platform.OS === 'web') {
@@ -188,7 +211,7 @@ export default function ChatScreen() {
         return;
       }
       
-      const subject = `Chat with ${c.nickname || c.name || c.email || 'Counselor'}`;
+      const subject = c.name || c.nickname || c.email || 'Counselor';
       const requestBody = { subject, counselor_id: counselorId };
       
       console.log('=== Creating Conversation ===');
@@ -213,7 +236,7 @@ export default function ChatScreen() {
       
       setPickerOpen(false);
       setConversations((prev) => [convo, ...prev]);
-      router.push({ pathname: '/(student)/(tabs)/chat/[id]', params: { id: String(convo.conversation_id), name: c.nickname || c.name || subject } });
+      router.push({ pathname: '/(student)/(tabs)/chat/[id]', params: { id: String(convo.conversation_id), name: subject } });
     } catch (e) {
       console.error('Error creating conversation:', e);
     }
@@ -303,7 +326,7 @@ export default function ChatScreen() {
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ThemedView style={[styles.container, { paddingTop: insets.top + 24, paddingHorizontal: 16 }]}> 
         {/* Header with back and add buttons */}
-        <View style={styles.headerRow}>
+        <Animated.View style={[styles.headerRow, makeFadeUp(entrance.header)]}>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Go back to dashboard"
@@ -323,16 +346,16 @@ export default function ChatScreen() {
           >
             <Icon name="plus" size={22} color="#0D8C4F" />
           </Pressable>
-        </View>
+        </Animated.View>
 
         {/* Title section */}
-        <View style={styles.titleSection}>
+        <Animated.View style={[styles.titleSection, makeFadeUp(entrance.title)]}>
           <Image source={require('@/assets/images/chatting.png')} style={styles.titleImage} contentFit="contain" />
           <ThemedText type="title" style={styles.pageTitle}>Chat</ThemedText>
           <ThemedText style={styles.pageSubtitle}>Connect with your counselor for support</ThemedText>
-        </View>
+        </Animated.View>
 
-        <View style={styles.main}>
+        <Animated.View style={[styles.main, makeFadeUp(entrance.content)]}>
           <Card>
             <CardContent style={{ gap: 12 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
@@ -369,14 +392,14 @@ export default function ChatScreen() {
                     accessibilityLabel={`Open chat ${name}`}
                   >
                     <View style={styles.convLeft}>
-                      <View style={[styles.avatar, { backgroundColor: palette.primary }]}><ThemedText style={{ color: '#FFFFFF', fontFamily: 'Inter_700Bold' }}>{(name[0] || 'C').toString().toUpperCase()}</ThemedText></View>
-                      <View style={{ gap: 2, maxWidth: '72%' }}>
-                        <ThemedText style={{ fontFamily: 'Inter_600SemiBold' }} numberOfLines={1}>{name}</ThemedText>
-                        <ThemedText style={{ color: palette.muted, fontSize: 12 }} numberOfLines={1}>{last?.content || 'No messages yet'}</ThemedText>
+                      <View style={[styles.avatar, { backgroundColor: '#111827' }]}><ThemedText style={{ color: '#FFFFFF', fontFamily: 'Inter_700Bold', fontSize: 15 }}>{(name[0] || 'C').toString().toUpperCase()}</ThemedText></View>
+                      <View style={styles.convTextWrap}>
+                        <ThemedText style={{ fontFamily: 'Inter_600SemiBold', fontSize: 15, color: '#111827' }} numberOfLines={1}>{name}</ThemedText>
+                        <ThemedText style={{ color: '#6B7280', fontSize: 13 }} numberOfLines={1}>{last?.content || 'No messages yet'}</ThemedText>
                       </View>
                     </View>
                     <View style={styles.rightMeta}>
-                      <ThemedText style={{ color: palette.muted, fontSize: 12 }}>{formatTime(last?.timestamp || c.last_activity_at)}</ThemedText>
+                      <ThemedText style={{ color: '#9CA3AF', fontSize: 12, fontFamily: 'Inter_500Medium' }}>{formatTime(last?.timestamp || c.last_activity_at)}</ThemedText>
                       {unreadCount > 0 && (
                         <View style={[styles.unreadBadge, { backgroundColor: palette.tint }]}>
                           <ThemedText style={{ color: '#FFFFFF', fontSize: 11, fontFamily: 'Inter_600SemiBold' }}>{unreadCount}</ThemedText>
@@ -388,7 +411,7 @@ export default function ChatScreen() {
               })}
             </CardContent>
           </Card>
-        </View>
+        </Animated.View>
         {/* Counselor picker modal */}
         <Modal visible={pickerOpen} transparent animationType="fade" onRequestClose={() => setPickerOpen(false)}>
           <Pressable style={styles.overlay} onPress={() => setPickerOpen(false)}>
@@ -610,22 +633,23 @@ const styles = StyleSheet.create({
   // Sidebar conversation item
   convItem: {
     borderWidth: 1,
-    borderRadius: 12,
-    padding: 12,
+    borderRadius: 14,
+    padding: 14,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: 12,
   },
-  convLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  convLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1, minWidth: 0 },
+  convTextWrap: { flex: 1, minWidth: 0, gap: 3 },
   avatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: '#111827',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  rightMeta: { alignItems: 'flex-end', gap: 6 },
+  rightMeta: { alignItems: 'flex-end', gap: 4, flexShrink: 0, marginLeft: 8 },
   unreadBadge: { minWidth: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 },
   iconPill: {
     width: 28,
