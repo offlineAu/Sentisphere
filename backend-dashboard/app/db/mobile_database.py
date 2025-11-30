@@ -35,13 +35,14 @@ def _ensure_database_exists(url):
 
 
 def _create_engine():
+    return create_engine(MOBILE_DATABASE_URL, pool_pre_ping=True)
+
+
+def initialize_mobile_database() -> None:
     url = make_url(MOBILE_DATABASE_URL)
     _ensure_database_exists(url)
-    eng = create_engine(MOBILE_DATABASE_URL, pool_pre_ping=True)
-    # sanity check
-    with eng.connect() as conn:
+    with mobile_engine.connect() as conn:  # type: ignore[name-defined]
         conn.execute(text("SELECT 1"))
-        # Ensure required tables exist for mobile features
         conn.execute(text(
             """
             CREATE TABLE IF NOT EXISTS `user` (
@@ -120,7 +121,6 @@ def _create_engine():
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """
         ))
-    return eng
 
 
 mobile_engine = _create_engine()

@@ -39,16 +39,7 @@ def _ensure_database_exists(url):
 
 
 def _create_engine():
-    url = make_url(DATABASE_URL)
-    # Make sure the target schema exists before binding
-    _ensure_database_exists(url)
-    try:
-        eng = create_engine(DATABASE_URL, pool_pre_ping=True)
-        with eng.connect() as conn:
-            conn.execute(text("SELECT 1"))
-        return eng
-    except (OperationalError, ProgrammingError) as exc:
-        raise
+    return create_engine(DATABASE_URL, pool_pre_ping=True)
 
 
 try:
@@ -69,3 +60,10 @@ def get_db() -> Generator:
         yield db
     finally:
         db.close()
+
+
+def initialize_main_database() -> None:
+    url = make_url(DATABASE_URL)
+    _ensure_database_exists(url)
+    with engine.connect() as conn:
+        conn.execute(text("SELECT 1"))

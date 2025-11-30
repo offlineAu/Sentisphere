@@ -8,7 +8,6 @@ Base = declarative_base()
 
 from app.models import *
 
-
 def get_db():
     db = SessionLocal()
     try:

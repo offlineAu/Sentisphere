@@ -82,6 +82,7 @@ from app.utils.date_utils import (
     generate_weekly_labels,
     format_range,
 )
+from app.utils.ws_manager import ConversationWSManager
 
 BASE_DIR = Path(__file__).resolve().parent
 EVENTS_FILE = BASE_DIR / "events.json"
@@ -208,6 +209,8 @@ class _ConnectionManager:
 
 
 _rt_manager = _ConnectionManager()
+
+ws_conv_manager = ConversationWSManager()
 
 
 def get_current_user(
@@ -653,6 +656,48 @@ async def journals_sse(request: Request, token: str) -> StreamingResponse:
         "X-Accel-Buffering": "no",
     }
     return StreamingResponse(event_stream(), headers=headers)
+
+@app.websocket("/ws/conversations")
+async def conversations_ws(websocket: WebSocket, token: Optional[str] = None) -> None:
+    raw_token = token
+    if not raw_token:
+        await websocket.close(code=4401)
+        return
+    try:
+        _ = _extract_user_id(raw_token)
+    except HTTPException:
+        await websocket.close(code=4401)
+        return
+    await ws_conv_manager.connect(websocket)
+    try:
+        while True:
+            msg = await websocket.receive_text()
+            try:
+                data = json.loads(msg)
+            except Exception:
+                continue
+            action = data.get("action")
+            if action == "subscribe":
+                try:
+                    cid = int(data.get("conversation_id") or 0)
+                    if cid:
+                        await ws_conv_manager.subscribe(websocket, cid)
+                except Exception:
+                    continue
+            elif action == "unsubscribe":
+                try:
+                    cid = int(data.get("conversation_id") or 0)
+                    if cid:
+                        await ws_conv_manager.unsubscribe(websocket, cid)
+                except Exception:
+                    continue
+            elif action == "ping":
+                await websocket.send_json({"type": "pong", "ts": datetime.utcnow().isoformat() + "Z"})
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await ws_conv_manager.disconnect(websocket)
+
 @app.get("/api/auth/me")
 def auth_me(token: str = Depends(oauth2_scheme)):
     """Return the current authenticated user id from JWT (subject)."""
@@ -889,7 +934,7 @@ def mobile_list_messages(
 
 
 @app.post("/api/mobile/conversations/{conversation_id}/messages", status_code=status.HTTP_201_CREATED)
-def mobile_send_message(
+async def mobile_send_message(
     conversation_id: int,
     message_in: MessageSend,
     token: str = Depends(oauth2_scheme),
@@ -923,7 +968,20 @@ def mobile_send_message(
         ),
         {"mid": mid},
     ).mappings().first()
-    return dict(row) if row else {"message_id": mid, "conversation_id": conversation_id, "sender_id": uid, "content": message_in.content, "is_read": bool(message_in.is_read)}
+    payload = dict(row) if row else {
+        "message_id": mid,
+        "conversation_id": conversation_id,
+        "sender_id": uid,
+        "content": message_in.content,
+        "is_read": bool(message_in.is_read),
+        "timestamp": datetime.utcnow(),
+    }
+    # Broadcast to web dashboard subscribers for this conversation
+    try:
+        await ws_conv_manager.broadcast_message_created(conversation_id, payload)
+    except Exception:
+        pass
+    return payload
 
 
 @app.post("/api/mobile/conversations/{conversation_id}/read")
@@ -2126,7 +2184,7 @@ def list_conversation_messages(
     response_model=MessageSchema,
     status_code=status.HTTP_201_CREATED,
 )
-def send_message(
+async def send_message(
     conversation_id: int,
     message_in: MessageSend,
     current_user: User = Depends(get_current_user),
@@ -2147,7 +2205,16 @@ def send_message(
         getattr(current_user, "role", None),
         conversation_id,
     )
-    return ConversationService.add_message(db, conversation, message_payload)
+    message = ConversationService.add_message(db, conversation, message_payload)
+    # Broadcast to subscribers for this conversation after DB commit
+    try:
+        await ws_conv_manager.broadcast_message_created(
+            conversation_id,
+            MessageSchema.model_validate(message).model_dump(),
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        logging.info("[realtime] conv broadcast failed: %s", exc.__class__.__name__)
+    return message
 
 
 @app.post("/api/conversations/{conversation_id}/read")
@@ -2274,7 +2341,7 @@ def intervention_success():
     }
 
 # --- Messages per conversation ---
-@app.get("/api/conversations/{conversation_id}/messages")
+@app.get("/api/_legacy/conversations/{conversation_id}/messages")
 def get_messages(conversation_id: int, current_user: str = Depends(get_current_user)):
     query = """
         SELECT 
@@ -2301,7 +2368,7 @@ class MessageIn(BaseModel):
     sender_id: int
     content: str
 
-@app.post("/api/conversations/{conversation_id}/messages")
+@app.post("/api/_legacy/conversations/{conversation_id}/messages")
 def send_message(conversation_id: int, message: MessageIn, current_user: str = Depends(get_current_user)):
     query = """
         INSERT INTO messages (conversation_id, sender_id, content, timestamp)
@@ -2981,7 +3048,10 @@ def weekly_insights(
     current_user: str = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    return _reports_weekly_insights(db, range, start, end)
+    # Delegate to CounselorReportService for privacy-aware weekly wellness insights.
+    # The current implementation ignores explicit range/start/end values and always
+    # computes relative to the current week window.
+    return CounselorReportService.weekly_insights(db)
 
 
 @app.get("/api/reports/behavior-insights")
@@ -2992,7 +3062,10 @@ def behavior_insights(
     current_user: str = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    return _reports_behavior_insights(db, range, start, end)
+    # Delegate to CounselorReportService for behavioral stress/journaling insights.
+    # As with weekly_insights, date-range query parameters are currently unused and
+    # the service computes insights for this week vs last week.
+    return CounselorReportService.behavior_insights(db)
 
 
 @app.get("/api/ai/sentiment-summary")
