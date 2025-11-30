@@ -2097,13 +2097,15 @@ def start_conversation(
     current_user: User = Depends(require_student),
     db: Session = Depends(get_db),
 ):
-    payload = ConversationCreate(
+    # Create or return existing conversation for this student and optional counselor
+    conv = ConversationService.get_or_create_by_pair(
+        db,
         initiator_user_id=current_user.user_id,
-        initiator_role=current_user.role.value,
+        counselor_id=getattr(conversation_in, "counselor_id", None),
         subject=conversation_in.subject,
         status=ConversationStatus.OPEN,
     )
-    return ConversationService.create_conversation(db, payload)
+    return conv
 
 
 @app.get("/api/conversations/{conversation_id}", response_model=ConversationSchema)

@@ -40,6 +40,7 @@ class MessageAck(BaseModel):
 class ConversationBase(BaseModel):
     subject: Optional[str] = None
     status: ConversationStatus = ConversationStatus.OPEN
+    counselor_id: Optional[int] = None
 
 
 class ConversationCreate(ConversationBase):
