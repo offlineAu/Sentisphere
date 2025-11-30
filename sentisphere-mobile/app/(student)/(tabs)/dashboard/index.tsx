@@ -563,8 +563,8 @@ export default function EnhancedDashboardScreen() {
                         <Icon name="chevron-right" size={16} color="#9CA3AF" />
                       </View>
                       <View style={styles.quickActionText}>
-                        <ThemedText style={styles.quickActionTitle}>Book Session</ThemedText>
-                        <ThemedText style={styles.quickActionSubtitle}>Schedule counseling</ThemedText>
+                        <ThemedText style={styles.quickActionTitle}>Appointment</ThemedText>
+                        <ThemedText style={styles.quickActionSubtitle}>Request counseling</ThemedText>
                       </View>
                     </View>
                   </Animated.View>
