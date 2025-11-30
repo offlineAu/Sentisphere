@@ -91,16 +91,20 @@ class ConversationService:
         *,
         commit: bool = True,
     ) -> Message:
-        timestamp = datetime.utcnow()
+        # Let the DB assign the timestamp via server_default=func.now() so it
+        # matches the database clock (and mobile), then propagate that value
+        # to the parent conversation's last_activity_at.
         message = Message(
             conversation_id=conversation.conversation_id,
             sender_id=message_in.sender_id,
             content=message_in.content,
             is_read=message_in.is_read or False,
-            timestamp=timestamp,
         )
         db.add(message)
-        conversation.last_activity_at = timestamp
+        # Flush so that server_defaults (e.g. timestamp) are populated on the ORM object
+        db.flush()
+        # Use the DB-assigned timestamp for conversation activity
+        conversation.last_activity_at = message.timestamp
         db.add(conversation)
         if commit:
             db.commit()
