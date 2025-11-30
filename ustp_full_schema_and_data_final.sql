@@ -51,9 +51,10 @@ CREATE TABLE journal_sentiment (
 CREATE TABLE emotional_checkin (
     checkin_id INT PRIMARY KEY AUTO_INCREMENT,
     user_id INT,
-    mood_level ENUM('Very Sad', 'Sad', 'Neutral', 'Good', 'Happy', 'Very Happy', 'Excellent'),
-    energy_level ENUM('Very Low', 'Low', 'Moderate', 'High', 'Very High'),
+    mood_level ENUM('Awesome', 'Great', 'Loved', 'Okay', 'Meh', 'Anxious', 'Bad', 'Terrible', 'Upset'),
+    energy_level ENUM('Low', 'Moderate', 'High'),
     stress_level ENUM('No Stress', 'Low Stress', 'Moderate', 'High Stress', 'Very High Stress'),
+    feel_better ENUM('Yes', 'No', 'Same'),
     comment TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES user(user_id)
