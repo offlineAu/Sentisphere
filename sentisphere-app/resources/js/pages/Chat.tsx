@@ -130,9 +130,10 @@ export default function Chat() {
     const fetchConversations = async () => {
       try {
         const res = await api.get<Conversation[]>(`/conversations`);
-        setConversations(res.data);
-        if (res.data.length > 0) {
-          setActiveConversation(res.data[0].conversation_id);
+        const unique = Array.from(new Map(res.data.map(c => [c.conversation_id, c])).values());
+        setConversations(unique);
+        if (unique.length > 0) {
+          setActiveConversation(unique[0].conversation_id);
         }
       } catch (err) {
         console.error("Error fetching conversations:", err);

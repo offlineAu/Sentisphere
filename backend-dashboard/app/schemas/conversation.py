@@ -40,6 +40,7 @@ class MessageAck(BaseModel):
 class ConversationBase(BaseModel):
     subject: Optional[str] = None
     status: ConversationStatus = ConversationStatus.OPEN
+    counselor_id: Optional[int] = None
 
 
 class ConversationCreate(ConversationBase):
@@ -55,6 +56,7 @@ class ConversationUpdate(BaseModel):
     subject: Optional[str] = None
     status: Optional[ConversationStatus] = None
     last_activity_at: Optional[datetime] = None
+    counselor_id: Optional[int] = None
 
 
 class Conversation(ConversationBase):
@@ -63,6 +65,7 @@ class Conversation(ConversationBase):
     conversation_id: int
     initiator_user_id: int
     initiator_role: str
+    counselor_id: Optional[int] = None
     created_at: datetime
     last_activity_at: Optional[datetime] = None
     messages: List[Message] = Field(default_factory=list)
