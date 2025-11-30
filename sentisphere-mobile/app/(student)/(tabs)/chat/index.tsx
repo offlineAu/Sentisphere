@@ -6,6 +6,7 @@ import { Icon } from '@/components/ui/icon';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors } from '@/constants/theme';
 import { Card, CardContent } from '@/components/ui/card';
+import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
 import * as SecureStore from 'expo-secure-store';
 import { router } from 'expo-router';
@@ -33,6 +34,9 @@ type ApiConversation = {
   initiator_user_id: number;
   initiator_role: string;
   subject?: string | null;
+  counselor_id?: number | null;
+  counselor_name?: string | null;
+  counselor_email?: string | null;
   status: 'open' | 'ended';
   created_at: string;
   last_activity_at?: string | null;
@@ -59,6 +63,7 @@ export default function ChatScreen() {
   const [counselors, setCounselors] = useState<Counselor[]>([]);
   const [cLoading, setCLoading] = useState(false);
   const [cSearch, setCSearch] = useState('');
+  const [searchFocused, setSearchFocused] = useState(false);
 
   useEffect(() => {
     // intentionally no health probe to avoid logging unrelated web DB status
@@ -152,33 +157,66 @@ export default function ChatScreen() {
     try {
       const tok = await getAuthToken();
       if (!tok) return;
-      const res = await fetch(`${API_BASE_URL}/api/counselors`, {
+      const res = await fetch(`${API_BASE_URL}/api/mobile/counselors`, {
         headers: { Authorization: `Bearer ${tok}` },
       });
       if (res.ok) {
         const data: Counselor[] = await res.json();
         setCounselors(data);
+        console.log('Loaded counselors:', data);
+      } else {
+        console.error('Failed to load counselors:', res.status);
       }
-    } catch {}
+    } catch (e) {
+      console.error('Error loading counselors:', e);
+    }
     finally { setCLoading(false); }
   };
 
   const createWithCounselor = async (c: Counselor) => {
     try {
       const tok = await getAuthToken();
-      if (!tok) return;
-      const subject = `Counselor: ${c.nickname || c.name || c.email || 'Chat'}`;
+      if (!tok) {
+        console.error('No auth token');
+        return;
+      }
+      
+      // Ensure counselor_id is a valid number
+      const counselorId = c.user_id;
+      if (!counselorId || typeof counselorId !== 'number') {
+        console.error('Invalid counselor_id:', counselorId, 'Full counselor object:', JSON.stringify(c));
+        return;
+      }
+      
+      const subject = `Chat with ${c.nickname || c.name || c.email || 'Counselor'}`;
+      const requestBody = { subject, counselor_id: counselorId };
+      
+      console.log('=== Creating Conversation ===');
+      console.log('Counselor selected:', JSON.stringify(c));
+      console.log('Request body:', JSON.stringify(requestBody));
+      
       const res = await fetch(`${API_BASE_URL}/api/mobile/conversations`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` },
-        body: JSON.stringify({ subject }),
+        body: JSON.stringify(requestBody),
       });
-      if (!res.ok) return;
+      
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error('Failed to create conversation:', res.status, errorText);
+        return;
+      }
+      
       const convo: ApiConversation = await res.json();
+      console.log('Created conversation response:', JSON.stringify(convo));
+      console.log('Counselor ID in response:', convo.counselor_id);
+      
       setPickerOpen(false);
       setConversations((prev) => [convo, ...prev]);
-      router.push({ pathname: '/(student)/(tabs)/chat/[id]', params: { id: String(convo.conversation_id), name: subject } });
-    } catch {}
+      router.push({ pathname: '/(student)/(tabs)/chat/[id]', params: { id: String(convo.conversation_id), name: c.nickname || c.name || subject } });
+    } catch (e) {
+      console.error('Error creating conversation:', e);
+    }
   };
 
   const StatusBadge = ({ open }: { open: boolean }) => (
@@ -264,59 +302,56 @@ export default function ChatScreen() {
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ThemedView style={[styles.container, { paddingTop: insets.top + 24, paddingHorizontal: 16 }]}> 
-        <View style={{ width: '100%', gap: 6, marginBottom: 12 }}>
-          <View style={styles.headerRow}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Go back to dashboard"
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              onPressIn={() => doHaptic('selection')}
-              onPress={() => router.replace('/(student)/(tabs)/dashboard')}
-              style={({ pressed }) => [
-                styles.backButton,
-                {
-                  backgroundColor: palette.background,
-                  borderColor: palette.border,
-                  opacity: pressed ? 0.7 : 1,
-                },
-              ]}
-            >
-              <Icon name="arrow-left" size={22} color={palette.text} />
-            </Pressable>
-            <View style={styles.headerCenter}>
-              <View style={[styles.headerIcon, { backgroundColor: palette.background, borderColor: palette.border }]}><Icon name="message-square" size={18} color={palette.tint} /></View>
-              <ThemedText type="subtitle" style={{ fontSize: 20 }}>Chat</ThemedText>
-            </View>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Create conversation"
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              onPressIn={() => doHaptic('selection')}
-              onPress={handleCreate}
-              style={({ pressed }) => [
-                styles.backButton,
-                {
-                  backgroundColor: palette.background,
-                  borderColor: palette.border,
-                  opacity: pressed ? 0.7 : 1,
-                },
-              ]}
-            >
-              <Icon name="plus" size={22} color={palette.text} />
-            </Pressable>
-          </View>
-          <ThemedText style={{ color: palette.muted, fontSize: 13, textAlign: 'center', alignSelf: 'center' }}>Manage and respond to student concerns</ThemedText>
+        {/* Header with back and add buttons */}
+        <View style={styles.headerRow}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Go back to dashboard"
+            onPressIn={() => doHaptic('selection')}
+            onPress={() => router.replace('/(student)/(tabs)/dashboard')}
+            style={styles.headerButton}
+          >
+            <Icon name="chevron-left" size={24} color="#111827" />
+          </Pressable>
+          <View style={{ width: 40 }} />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Create conversation"
+            onPressIn={() => doHaptic('selection')}
+            onPress={handleCreate}
+            style={styles.addButton}
+          >
+            <Icon name="plus" size={22} color="#0D8C4F" />
+          </Pressable>
+        </View>
+
+        {/* Title section */}
+        <View style={styles.titleSection}>
+          <Image source={require('@/assets/images/chatting.png')} style={styles.titleImage} contentFit="contain" />
+          <ThemedText type="title" style={styles.pageTitle}>Chat</ThemedText>
+          <ThemedText style={styles.pageSubtitle}>Connect with your counselor for support</ThemedText>
         </View>
 
         <View style={styles.main}>
           <Card>
-            <CardContent style={{ gap: 8 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <View style={[styles.iconPill, { backgroundColor: palette.background, borderColor: palette.border }]}><Icon name="message-square" size={16} color={palette.tint} /></View>
-                <ThemedText type="subtitle" style={{ fontSize: 16 }}>Conversations</ThemedText>
+            <CardContent style={{ gap: 12 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <View style={[styles.iconPill, { backgroundColor: '#ECFDF5', borderColor: '#D1FAE5' }]}><Icon name="message-square" size={16} color="#0D8C4F" /></View>
+                <ThemedText type="subtitle" style={{ fontSize: 16, fontFamily: 'Inter_600SemiBold' }}>Conversations</ThemedText>
               </View>
               {(!loading && conversations.length === 0) && (
-                <ThemedText style={{ color: palette.muted, fontSize: 14, textAlign: 'center', paddingVertical: 8 }}>there is no converstations</ThemedText>
+                <View style={styles.emptyState}>
+                  <Icon name="message-circle" size={32} color="#9CA3AF" />
+                  <ThemedText style={styles.emptyText}>No conversations yet</ThemedText>
+                  <Pressable
+                    onPressIn={() => doHaptic('selection')}
+                    onPress={handleCreate}
+                    style={styles.startChatButton}
+                  >
+                    <Icon name="plus" size={18} color="#FFFFFF" />
+                    <ThemedText style={styles.startChatButtonText}>Start a Conversation</ThemedText>
+                  </Pressable>
+                </View>
               )}
 
               {conversations.map((c) => {
@@ -359,16 +394,20 @@ export default function ChatScreen() {
           <Pressable style={styles.overlay} onPress={() => setPickerOpen(false)}>
             <Pressable style={[styles.sheet, { backgroundColor: palette.background, borderColor: palette.border }]} onPress={(e) => e.stopPropagation()}>
               <View style={styles.sheetHeader}>
-                <ThemedText type="subtitle" style={{ fontSize: 18 }}>Start a conversation</ThemedText>
-                <ThemedText style={{ color: palette.muted, marginTop: 2 }}>Choose a counselor</ThemedText>
-                <View style={[styles.searchBar, { borderColor: palette.border, backgroundColor: palette.background }]}>
-                  <Icon name="search" size={16} color={palette.muted} />
+                <ThemedText type="subtitle" style={{ fontSize: 20, fontFamily: 'Inter_700Bold', textAlign: 'center' }}>Start a Conversation</ThemedText>
+                <ThemedText style={{ color: palette.muted, marginTop: 6, textAlign: 'center', fontSize: 14 }}>Choose a counselor to connect with</ThemedText>
+                <View style={[styles.searchBar, { borderColor: searchFocused ? '#0D8C4F' : palette.border, borderWidth: searchFocused ? 1.5 : 1, backgroundColor: palette.background }]}>
+                  <Icon name="search" size={16} color={searchFocused ? '#0D8C4F' : palette.muted} />
                   <TextInput
                     placeholder="Search counselor by name or email"
                     placeholderTextColor={palette.muted}
                     value={cSearch}
                     onChangeText={setCSearch}
-                    style={{ flex: 1, padding: 6, color: palette.text }}
+                    // @ts-ignore - web outline
+                    style={{ flex: 1, padding: 6, color: palette.text, outlineStyle: 'none' }}
+                    selectionColor="#0D8C4F"
+                    onFocus={() => setSearchFocused(true)}
+                    onBlur={() => setSearchFocused(false)}
                     autoFocus
                   />
                   <Pressable accessibilityRole="button" onPress={loadCounselors} style={({ pressed }) => ({ padding: 6, borderRadius: 8, opacity: pressed ? 0.6 : 1 })}>
@@ -413,9 +452,9 @@ export default function ChatScreen() {
                   }}
                 />
               )}
-              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8, paddingTop: 8 }}>
-                <Pressable onPress={() => setPickerOpen(false)} style={({ pressed }) => [styles.cancelBtn, { borderColor: palette.border, backgroundColor: palette.background, opacity: pressed ? 0.8 : 1 }]}>
-                  <ThemedText>Cancel</ThemedText>
+              <View style={{ paddingTop: 12 }}>
+                <Pressable onPress={() => setPickerOpen(false)} style={styles.cancelButton}>
+                  <ThemedText style={styles.cancelButtonText}>Cancel</ThemedText>
                 </Pressable>
               </View>
             </Pressable>
@@ -430,7 +469,103 @@ const styles = StyleSheet.create({
   // Layout
   container: { flex: 1 },
   main: { flex: 1, paddingHorizontal: 0, paddingBottom: 16 },
-  headerRow: { flexDirection: 'row', alignItems: 'center', gap: 8, justifyContent: 'space-between' },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 0,
+    paddingVertical: 12,
+  },
+  headerButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F3F4F6',
+  },
+  addButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F3F4F6',
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 24,
+    gap: 8,
+  },
+  emptyText: {
+    fontSize: 16,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#374151',
+    marginTop: 4,
+  },
+  emptySubtext: {
+    fontSize: 13,
+    color: '#9CA3AF',
+    textAlign: 'center',
+  },
+  startChatButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#0D8C4F',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 50,
+    marginTop: 12,
+  },
+  startChatButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  cancelButton: {
+    backgroundColor: '#F3F4F6',
+    paddingVertical: 12,
+    borderRadius: 50,
+    alignItems: 'center',
+  },
+  cancelButtonText: {
+    color: '#374151',
+    fontSize: 14,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  titleSection: {
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+    marginBottom: 20,
+  },
+  titleIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#ECFDF5',
+    borderWidth: 1,
+    borderColor: '#D1FAE5',
+  },
+  titleImage: {
+    width: 56,
+    height: 56,
+  },
+  pageTitle: {
+    fontSize: 28,
+    fontFamily: 'Inter_700Bold',
+    color: '#111827',
+    textAlign: 'center',
+  },
+  pageSubtitle: {
+    fontSize: 14,
+    color: '#6B7280',
+    textAlign: 'center',
+    maxWidth: 280,
+  },
   headerIcon: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
   backButton: {
     borderWidth: 1,
@@ -504,8 +639,8 @@ const styles = StyleSheet.create({
   // Picker modal
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center', padding: 16 },
   sheet: { width: '100%', maxWidth: 520, borderRadius: 16, borderWidth: 1, padding: 14, maxHeight: '80%' },
-  sheetHeader: { paddingHorizontal: 6, paddingBottom: 8 },
-  searchBar: { marginTop: 10, borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  sheetHeader: { paddingHorizontal: 8, paddingTop: 8, paddingBottom: 16, alignItems: 'center' },
+  searchBar: { marginTop: 12, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: 8, width: '100%' },
   userRow: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 10 },
   cancelBtn: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
 

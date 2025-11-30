@@ -17,10 +17,6 @@ import * as SecureStore from "expo-secure-store"
 import { useFocusEffect } from '@react-navigation/native'
 
 const { width } = Dimensions.get("window")
-const GRID_PADDING = 16 // matches scrollContent padding
-const CARD_CONTENT_PADDING = 20 // matches styles.cardContent padding
-const QUICK_GAP = 10
-const HALF_GAP = QUICK_GAP / 2
 
 interface MoodData {
   date: string
@@ -50,7 +46,7 @@ export default function EnhancedDashboardScreen() {
   const [journalCount] = useState(12)
   const [weeklyMoodAverage] = useState(7.2)
   const [currentStreak] = useState(5)
-  const [gridW, setGridW] = useState(0)
+  const { width: screenWidth } = useWindowDimensions()
   const API = process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8010'
   const [displayName, setDisplayName] = useState<string>("")
   const getAuthToken = useCallback(async (): Promise<string | null> => {
@@ -106,16 +102,16 @@ export default function EnhancedDashboardScreen() {
       .then((d) => console.log('health:', d))
       .catch((e) => console.error('health error:', e))
   }, [])
-  const measuredTileW = gridW > 0 ? (gridW - QUICK_GAP) / 2 : 0
-  const quickActionTileSize: any = measuredTileW
-    ? {
-      width: measuredTileW,
-      flexBasis: measuredTileW,
-      maxWidth: measuredTileW,
-      minWidth: measuredTileW,
-      minHeight: Math.max(132, Math.round(measuredTileW * 0.7)),
-    }
-    : { width: '50%', flexBasis: '50%', minHeight: 136 }
+  // Responsive quick action tile sizing
+  const CARD_PADDING = 20 * 2; // CardContent padding on both sides
+  const SCROLL_PADDING = 16 * 2; // scrollContent padding on both sides
+  const TILE_GAP = 12;
+  const availableWidth = screenWidth - SCROLL_PADDING - CARD_PADDING;
+  const tileWidth = Math.floor((availableWidth - TILE_GAP) / 2);
+  const quickActionTileSize = {
+    width: tileWidth,
+    minHeight: Math.max(120, Math.round(tileWidth * 0.65)),
+  }
 
   // Feature flags for layout
   const showLegacySections = false
@@ -445,11 +441,11 @@ export default function EnhancedDashboardScreen() {
                 <View style={styles.inspirationHeader}>
                   <ThemedText style={styles.inspirationTitle}>Quotes for the day</ThemedText>
                   <View style={styles.inspirationActions}>
-                    <Pressable accessibilityLabel="Refresh quote" onPress={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} } refreshQuote() }} style={({ pressed }) => [styles.inspirationActionBtn, pressed && { opacity: 0.85 }]} hitSlop={8}>
-                      <Icon name="refresh-ccw" size={16} color="#6B7280" />
+                    <Pressable accessibilityLabel="Refresh quote" onPress={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} } refreshQuote() }} style={({ pressed }) => [styles.inspirationActionBtn, pressed && { opacity: 0.7 }]} hitSlop={8}>
+                      <Icon name="refresh-ccw" size={18} color="rgba(255,255,255,0.95)" />
                     </Pressable>
-                    <Pressable accessibilityLabel="Share quote" onPress={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} } shareQuote() }} style={({ pressed }) => [styles.inspirationActionBtn, pressed && { opacity: 0.85 }]} hitSlop={8}>
-                      <Icon name="share-2" size={16} color="#6B7280" />
+                    <Pressable accessibilityLabel="Share quote" onPress={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} } shareQuote() }} style={({ pressed }) => [styles.inspirationActionBtn, pressed && { opacity: 0.7 }]} hitSlop={8}>
+                      <Icon name="share-2" size={18} color="rgba(255,255,255,0.95)" />
                     </Pressable>
                   </View>
                 </View>
@@ -475,7 +471,7 @@ export default function EnhancedDashboardScreen() {
               </View>
               <ThemedText type="subtitle" style={styles.sectionTitle}>Quick Actions</ThemedText>
             </View>
-            <View style={styles.quickActionsGrid} onLayout={(e) => setGridW(e.nativeEvent.layout.width)}>
+            <View style={styles.quickActionsGrid}>
               <Link href="/(student)/(tabs)/mood" asChild>
                 <Pressable
                   onHoverIn={qa1.onHoverIn}
@@ -485,7 +481,7 @@ export default function EnhancedDashboardScreen() {
                   style={({ hovered, pressed }) =>
                     StyleSheet.flatten([
                       styles.quickActionTile,
-                      styles.cardShadow,
+                      { borderColor: '#E9D5FF' },
                       hovered && styles.hoverLift,
                       pressed && styles.pressScale,
                       quickActionTileSize,
@@ -493,11 +489,12 @@ export default function EnhancedDashboardScreen() {
                   }
                 >
                   <Animated.View style={[{ flex: 1 }, qa1.animStyle]}>
-                    <LinearGradient colors={["#8B5CF6", "#6D28D9"]} style={styles.quickActionGradient} pointerEvents="none" />
                     <View style={styles.quickActionContent} pointerEvents="none">
                       <View style={styles.quickActionHeader}>
-                        <Icon name="brain" size={20} color="#FFFFFF" />
-                        <Icon name="arrow-right" size={14} color="rgba(255,255,255,0.85)" />
+                        <View style={[styles.quickActionIconWrap, { backgroundColor: '#F3E8FF' }]}>
+                          <Icon name="brain" size={18} color="#7C3AED" />
+                        </View>
+                        <Icon name="chevron-right" size={16} color="#9CA3AF" />
                       </View>
                       <View style={styles.quickActionText}>
                         <ThemedText style={styles.quickActionTitle}>Check Mood</ThemedText>
@@ -517,7 +514,7 @@ export default function EnhancedDashboardScreen() {
                   style={({ hovered, pressed }) =>
                     StyleSheet.flatten([
                       styles.quickActionTile,
-                      styles.cardShadow,
+                      { borderColor: '#A7F3D0' },
                       hovered && styles.hoverLift,
                       pressed && styles.pressScale,
                       quickActionTileSize,
@@ -525,11 +522,12 @@ export default function EnhancedDashboardScreen() {
                   }
                 >
                   <Animated.View style={[{ flex: 1 }, qa2.animStyle]}>
-                    <LinearGradient colors={["#34D399", "#0d8c4f"]} style={styles.quickActionGradient} pointerEvents="none" />
                     <View style={styles.quickActionContent} pointerEvents="none">
                       <View style={styles.quickActionHeader}>
-                        <Icon name="book-open" size={20} color="#FFFFFF" />
-                        <Icon name="arrow-right" size={14} color="rgba(255,255,255,0.85)" />
+                        <View style={[styles.quickActionIconWrap, { backgroundColor: '#ECFDF5' }]}>
+                          <Icon name="book-open" size={18} color="#0D8C4F" />
+                        </View>
+                        <Icon name="chevron-right" size={16} color="#9CA3AF" />
                       </View>
                       <View style={styles.quickActionText}>
                         <ThemedText style={styles.quickActionTitle}>Write Journal</ThemedText>
@@ -549,7 +547,7 @@ export default function EnhancedDashboardScreen() {
                   style={({ hovered, pressed }) =>
                     StyleSheet.flatten([
                       styles.quickActionTile,
-                      styles.cardShadow,
+                      { borderColor: '#BFDBFE' },
                       hovered && styles.hoverLift,
                       pressed && styles.pressScale,
                       quickActionTileSize,
@@ -557,11 +555,12 @@ export default function EnhancedDashboardScreen() {
                   }
                 >
                   <Animated.View style={[{ flex: 1 }, qa3.animStyle]}>
-                    <LinearGradient colors={["#60A5FA", "#2563EB"]} style={styles.quickActionGradient} pointerEvents="none" />
                     <View style={styles.quickActionContent} pointerEvents="none">
                       <View style={styles.quickActionHeader}>
-                        <Icon name="calendar" size={20} color="#FFFFFF" />
-                        <Icon name="arrow-right" size={14} color="rgba(255,255,255,0.85)" />
+                        <View style={[styles.quickActionIconWrap, { backgroundColor: '#EFF6FF' }]}>
+                          <Icon name="calendar" size={18} color="#2563EB" />
+                        </View>
+                        <Icon name="chevron-right" size={16} color="#9CA3AF" />
                       </View>
                       <View style={styles.quickActionText}>
                         <ThemedText style={styles.quickActionTitle}>Book Session</ThemedText>
@@ -581,7 +580,7 @@ export default function EnhancedDashboardScreen() {
                   style={({ hovered, pressed }) =>
                     StyleSheet.flatten([
                       styles.quickActionTile,
-                      styles.cardShadow,
+                      { borderColor: '#A7F3D0' },
                       hovered && styles.hoverLift,
                       pressed && styles.pressScale,
                       quickActionTileSize,
@@ -589,11 +588,12 @@ export default function EnhancedDashboardScreen() {
                   }
                 >
                   <Animated.View style={[{ flex: 1 }, qa4.animStyle]}>
-                    <LinearGradient colors={["#5EEAD4", "#0D9488"]} style={styles.quickActionGradient} pointerEvents="none" />
                     <View style={styles.quickActionContent} pointerEvents="none">
                       <View style={styles.quickActionHeader}>
-                        <Icon name="message-square" size={20} color="#FFFFFF" />
-                        <Icon name="arrow-right" size={14} color="rgba(255,255,255,0.85)" />
+                        <View style={[styles.quickActionIconWrap, { backgroundColor: '#F0FDF4' }]}>
+                          <Icon name="message-square" size={18} color="#059669" />
+                        </View>
+                        <Icon name="chevron-right" size={16} color="#9CA3AF" />
                       </View>
                       <View style={styles.quickActionText}>
                         <ThemedText style={styles.quickActionTitle}>Chat</ThemedText>
@@ -945,17 +945,13 @@ const styles = StyleSheet.create({
   },
   inspirationActions: {
     flexDirection: "row",
-    gap: 8,
+    gap: 2,
   },
   inspirationActionBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 28,
+    height: 28,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.8)",
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
   },
   inspirationIcon: {
     marginBottom: 16,
@@ -1295,31 +1291,31 @@ const styles = StyleSheet.create({
   quickActionsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    rowGap: 10,
-    justifyContent: 'space-between',
-    width: '100%',
+    gap: 12,
+    justifyContent: 'center',
   },
   quickActionTile: {
-    borderRadius: 20,
+    borderRadius: 16,
     overflow: 'hidden',
     position: 'relative',
     flexShrink: 0,
     flexGrow: 0,
     marginBottom: 0,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
   },
-  quickActionGradient: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    borderRadius: 20,
-    opacity: Platform.select({ web: 1, default: 0.95 }) as number,
+  quickActionIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   quickActionContent: {
     flex: 1,
-    paddingVertical: 18,
-    paddingHorizontal: 18,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
     justifyContent: 'space-between',
     alignItems: 'flex-start',
   },
@@ -1328,20 +1324,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 10,
+    marginBottom: 8,
   },
   quickActionText: {
     alignItems: 'flex-start',
-    gap: 2,
+    gap: 3,
+    flex: 1,
   },
   quickActionTitle: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontFamily: 'Inter_600SemiBold',
-    fontSize: 14,
+    fontSize: 15,
   },
   quickActionSubtitle: {
-    color: 'rgba(255,255,255,0.92)',
-    fontSize: 10,
+    color: '#9CA3AF',
+    fontSize: 11,
   },
   qaTileLeft: { marginRight: 16 },
   tileOrb: {

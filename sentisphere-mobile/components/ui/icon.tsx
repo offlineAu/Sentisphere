@@ -22,6 +22,7 @@ import {
   User,
   Clock,
   CheckCircle,
+  Check,
   Star,
   Brain,
   Bookmark,
@@ -37,6 +38,7 @@ import {
   LogOut,
   Search,
   ChevronRight,
+  ChevronLeft,
   Trash2,
   Feather as FeatherIcon,
 } from 'lucide-react-native';
@@ -64,6 +66,7 @@ type IconProps = {
     | 'user'
     | 'clock'
     | 'check-circle'
+    | 'check'
     | 'star'
     | 'brain'
     | 'bookmark'
@@ -80,6 +83,7 @@ type IconProps = {
     | 'log-out'
     | 'search'
     | 'chevron-right'
+    | 'chevron-left'
     | 'trash-2'
     | 'feather';
   size?: number;
@@ -110,6 +114,7 @@ const icons: Record<string, any> = {
   'user': User,
   'clock': Clock,
   'check-circle': CheckCircle,
+  'check': Check,
   'star': Star,
   'brain': Brain,
   'bookmark': Bookmark,
@@ -125,6 +130,7 @@ const icons: Record<string, any> = {
   'log-out': LogOut,
   'search': Search,
   'chevron-right': ChevronRight,
+  'chevron-left': ChevronLeft,
   'trash-2': Trash2,
   'feather': FeatherIcon,
 };
@@ -155,6 +161,7 @@ export function Icon({ name, size = 20, color, fill }: IconProps) {
     user: 'user',
     clock: 'clock',
     'check-circle': 'check-circle',
+    'check': 'check',
     star: 'star',
     brain: 'cpu',
     bookmark: 'bookmark',
@@ -170,6 +177,7 @@ export function Icon({ name, size = 20, color, fill }: IconProps) {
     'log-out': 'log-out',
     search: 'search',
     'chevron-right': 'chevron-right',
+    'chevron-left': 'chevron-left',
     'trash-2': 'trash-2',
     feather: 'feather',
   };
