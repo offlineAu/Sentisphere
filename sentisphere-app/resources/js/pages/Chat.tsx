@@ -26,7 +26,9 @@ interface Conversation {
 }
 
 interface ChatMessage {
-  id: number;
+  id?: number;
+  message_id?: number;
+  client_msg_id?: string | null;
   conversation_id: number;
   sender_id: number;
   content: string;
@@ -51,6 +53,55 @@ export default function Chat() {
   const [searchQuery, setSearchQuery] = useState("");
   const [filter, setFilter] = useState<"all" | "unread" | "read">("all");
   const [loading, setLoading] = useState(true);
+  const wsRef = useRef<WebSocket | null>(null);
+  const prevSubRef = useRef<number | null>(null);
+
+  const normalizeMessage = (m: any): ChatMessage => ({
+    ...m,
+    message_id: m?.message_id ?? m?.id,
+    timestamp: typeof m?.timestamp === "string" ? m.timestamp : new Date(m?.timestamp).toISOString(),
+  });
+
+  const upsertMessage = (
+    conversationId: number,
+    incomingRaw: any,
+  ) => {
+    const incoming = normalizeMessage(incomingRaw);
+    setMessagesByConversation((prev) => {
+      const list = prev[conversationId] || [];
+      const exists = list.some(
+        (x) => x.message_id === incoming.message_id || (
+          incoming.client_msg_id && x.client_msg_id === incoming.client_msg_id
+        )
+      );
+      if (exists) return prev;
+      const next = [...list, incoming].sort(
+        (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+      );
+      return { ...prev, [conversationId]: next };
+    });
+    if (conversationId === activeConversation) {
+      setMessages((prev) => {
+        const exists = prev.some(
+          (x) => x.message_id === incoming.message_id || (
+            incoming.client_msg_id && x.client_msg_id === incoming.client_msg_id
+          )
+        );
+        if (exists) return prev;
+        const next = [...prev, incoming].sort(
+          (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+        );
+        return next;
+      });
+    }
+    // Update unread badge if message belongs to a different conversation and is from other user
+    if (conversationId !== activeConversation && incoming.sender_id !== userId) {
+      setUnreadCounts((prev) => ({
+        ...prev,
+        [conversationId]: (prev[conversationId] || 0) + 1,
+      }));
+    }
+  };
 
   // Check session authentication and redirect if needed
   useEffect(() => {
@@ -79,9 +130,10 @@ export default function Chat() {
     const fetchConversations = async () => {
       try {
         const res = await api.get<Conversation[]>(`/conversations`);
-        setConversations(res.data);
-        if (res.data.length > 0) {
-          setActiveConversation(res.data[0].conversation_id);
+        const unique = Array.from(new Map(res.data.map(c => [c.conversation_id, c])).values());
+        setConversations(unique);
+        if (unique.length > 0) {
+          setActiveConversation(unique[0].conversation_id);
         }
       } catch (err) {
         console.error("Error fetching conversations:", err);
@@ -99,8 +151,9 @@ export default function Chat() {
     api
       .get<ChatMessage[]>(`/conversations/${activeConversation}/messages`)
       .then((res) => {
-        setMessages(res.data);
-        setMessagesByConversation((prev) => ({ ...prev, [activeConversation]: res.data }));
+        const data = (res.data || []).map(normalizeMessage);
+        setMessages(data);
+        setMessagesByConversation((prev) => ({ ...prev, [activeConversation]: data }));
         const unread = res.data.filter((m) => !Boolean((m as any).is_read) && m.sender_id !== userId).length;
         setUnreadCounts((prev) => ({ ...prev, [activeConversation]: unread }));
       })
@@ -131,7 +184,11 @@ export default function Chat() {
       for (const id of ids) {
         try {
           const { data } = await api.get<ChatMessage[]>(`/conversations/${id}/messages`);
-          setMessagesByConversation((prev) => ({ ...prev, [id]: data }));
+          const norm = (data || []).map(normalizeMessage);
+          setMessagesByConversation((prev) => ({ ...prev, [id]: norm }));
+          if (id === activeConversation) {
+            setMessages(norm);
+          }
           const unread = data.filter((m) => !Boolean((m as any).is_read) && m.sender_id !== userId).length;
           setUnreadCounts((prev) => ({ ...prev, [id]: unread }));
         } catch (e) {
@@ -169,17 +226,61 @@ export default function Chat() {
         content: newMessage,
       })
       .then((res) => {
-        setMessages((prev) => [...prev, res.data]);
+        const nm = normalizeMessage(res.data);
+        setMessages((prev) => {
+          const exists = prev.some((x) => x.message_id === nm.message_id);
+          if (exists) return prev;
+          const next = [...prev, nm].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+          return next;
+        });
         setNewMessage("");
         setMessagesByConversation((prev) => {
           const list = prev[activeConversation] || [];
-          return { ...prev, [activeConversation]: [...list, res.data] };
+          const exists = list.some((x) => x.message_id === nm.message_id);
+          const next = exists ? list : [...list, nm].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+          return { ...prev, [activeConversation]: next };
         });
-        // sending a message shouldn't increase unread for self
         setUnreadCounts((prev) => ({ ...prev, [activeConversation]: prev[activeConversation] || 0 }));
       })
       .catch((err) => console.error("Error sending message:", err));
   };
+
+  useEffect(() => {
+    if (!authenticated) return;
+    const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
+    if (!token) return;
+    let apiBase = (import.meta as any)?.env?.VITE_API_URL || "";
+    // Strip trailing /api if present
+    if (apiBase.endsWith('/api')) apiBase = apiBase.slice(0, -4);
+    const base = apiBase || window.location.origin;
+    const wsBase = base.replace(/^http/i, "ws");
+    const url = `${wsBase}/ws/conversations?token=${encodeURIComponent(token)}`;
+    const ws = new WebSocket(url);
+    wsRef.current = ws;
+    ws.onmessage = (ev) => {
+      let evt: any;
+      try { evt = JSON.parse(ev.data); } catch { return; }
+      if (evt?.type === "message.created" && evt?.conversation_id && evt?.message) {
+        upsertMessage(Number(evt.conversation_id), evt.message);
+      }
+    };
+    return () => {
+      try { ws.close(); } catch {}
+      wsRef.current = null;
+    };
+  }, [authenticated]);
+
+  useEffect(() => {
+    const ws = wsRef.current;
+    if (!ws) return;
+    if (prevSubRef.current && prevSubRef.current !== activeConversation) {
+      ws.send(JSON.stringify({ action: "unsubscribe", conversation_id: prevSubRef.current }));
+    }
+    if (activeConversation) {
+      ws.send(JSON.stringify({ action: "subscribe", conversation_id: activeConversation }));
+    }
+    prevSubRef.current = activeConversation ?? null;
+  }, [activeConversation]);
 
   // Show loading spinner while data is being fetched
   if (loading) {
@@ -358,7 +459,7 @@ export default function Chat() {
                     <div ref={messagesScrollRef} className="flex-1 min-h-0 min-w-0 w-full max-w-full p-4 overflow-y-scroll space-y-3" style={{ scrollbarGutter: 'stable both-edges', scrollBehavior: 'smooth' }}>
                       {messages.map((m) => (
                         <div
-                          key={m.id}
+                          key={String(m.message_id ?? m.id ?? `c:${m.client_msg_id ?? Math.random()}`)}
                           className={`w-fit max-w-[600px] sm:max-w-[68%] px-4 py-2 rounded-2xl shadow-sm whitespace-pre-wrap break-words leading-relaxed overflow-hidden ${
                             m.sender_id === userId
                               ? "bg-[#2563eb] text-white ml-auto rounded-br-md"

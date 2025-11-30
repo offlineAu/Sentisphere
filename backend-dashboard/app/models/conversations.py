@@ -25,6 +25,7 @@ class Conversation(Base):
     )
     initiator_role: Mapped[str] = mapped_column(String(20), nullable=False)
     subject: Mapped[Optional[str]] = mapped_column(String(100))
+    counselor_id: Mapped[Optional[int]] = mapped_column(ForeignKey("user.user_id", ondelete="SET NULL"))
     status: Mapped[ConversationStatus] = mapped_column(
         Enum(
             ConversationStatus,
@@ -41,6 +42,9 @@ class Conversation(Base):
 
     initiator: Mapped["User"] = relationship(
         "User", back_populates="conversations", foreign_keys=[initiator_user_id]
+    )
+    counselor: Mapped[Optional["User"]] = relationship(
+        "User", foreign_keys=[counselor_id]
     )
     messages: Mapped[List["Message"]] = relationship(
         "Message", back_populates="conversation", cascade="all, delete-orphan"

@@ -14,28 +14,13 @@ from sqlalchemy.orm import Session
 from app.db.database import engine
 from app.utils.text_cleaning import clean_text
 
-try:
-    from sentence_transformers import SentenceTransformer  # type: ignore
-    _HAS_ST = True
-except Exception:  # pragma: no cover
-    _HAS_ST = False
-    SentenceTransformer = None  # type: ignore
-
-try:
-    import numpy as _np  # type: ignore
-    from sklearn.cluster import KMeans  # type: ignore
-    _HAS_SK = True
-except Exception:  # pragma: no cover
-    _HAS_SK = False
-
 from functools import lru_cache
 
 
 @lru_cache(maxsize=1)
 def _get_embed_model():
-    if not _HAS_ST:
-        return None
     try:
+        from sentence_transformers import SentenceTransformer  # type: ignore
         return SentenceTransformer("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
     except Exception:
         return None
@@ -135,7 +120,14 @@ class InsightGenerationService:
             return [{"label": k, "count": 1, "examples": []} for k in keys]
 
         model = _get_embed_model()
-        if not model or not _HAS_SK:
+        if not model:
+            keys = InsightGenerationService._match_keywords(snippets)
+            return [{"label": k, "count": 1, "examples": []} for k in keys]
+
+        try:
+            import numpy as _np  # type: ignore
+            from sklearn.cluster import KMeans  # type: ignore
+        except Exception:
             keys = InsightGenerationService._match_keywords(snippets)
             return [{"label": k, "count": 1, "examples": []} for k in keys]
 

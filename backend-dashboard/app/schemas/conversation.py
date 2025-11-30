@@ -11,6 +11,7 @@ from app.models.conversations import ConversationStatus
 class MessageBase(BaseModel):
     content: str
     is_read: Optional[bool] = False
+    client_msg_id: Optional[str] = None
 
 
 class Message(MessageBase):
@@ -30,9 +31,16 @@ class MessageSend(MessageBase):
     pass
 
 
+class MessageAck(BaseModel):
+    message_id: int
+    client_msg_id: Optional[str] = None
+    server_timestamp: str
+
+
 class ConversationBase(BaseModel):
     subject: Optional[str] = None
     status: ConversationStatus = ConversationStatus.OPEN
+    counselor_id: Optional[int] = None
 
 
 class ConversationCreate(ConversationBase):
