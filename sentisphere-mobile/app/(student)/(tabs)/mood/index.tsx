@@ -1,34 +1,184 @@
-import { StyleSheet, View, ScrollView, Pressable, Animated, Easing, Platform, Image } from 'react-native';
-import { useState, useEffect } from 'react';
+import { StyleSheet, View, ScrollView, Pressable, Animated, Easing, Platform, Image, KeyboardAvoidingView, useWindowDimensions } from 'react-native';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
 import { Textarea } from '@/components/ui/textarea';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import { Icon } from '@/components/ui/icon';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors } from '@/constants/theme';
-import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import * as SecureStore from 'expo-secure-store';
 import { router } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-type MoodOption = { key: string; emoji: string; label: string };
+const TOTAL_STEPS = 5;
+
+type MoodOption = { key: string; emoji: string; label: string; color: string };
+type EnergyOption = { key: string; emoji: string; label: string; color: string };
+type StressOption = { key: string; emoji: string; label: string; color: string };
 
 export default function MoodScreen() {
+  const [step, setStep] = useState(0);
   const [selectedMood, setSelectedMood] = useState<string | null>(null);
   const [selectedEnergy, setSelectedEnergy] = useState<string | null>(null);
   const [selectedStress, setSelectedStress] = useState<string | null>(null);
+  const [selectedFeelBetter, setSelectedFeelBetter] = useState<string | null>(null);
   const [note, setNote] = useState('');
+  const [displayName, setDisplayName] = useState<string>('');
   const [submitted, setSubmitted] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scheme = useColorScheme() ?? 'light';
   const palette = Colors[scheme] as any;
+  const insets = useSafeAreaInsets();
+  const { width: screenWidth } = useWindowDimensions();
   const API = process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8010';
-  const successAnim = (useState(() => new Animated.Value(0))[0]);
-  const successOpacity = successAnim;
-  const successScale = successAnim.interpolate({ inputRange: [0, 1], outputRange: [0.92, 1] });
+
+  // Responsive calculations
+  const GRID_PADDING = 24 * 2; // paddingHorizontal on both sides
+  const GRID_GAP = 12;
+  const emojiButtonWidth = Math.floor((screenWidth - GRID_PADDING - GRID_GAP * 2) / 3);
+  
+  const fadeAnim = useRef(new Animated.Value(1)).current;
+  const slideAnim = useRef(new Animated.Value(0)).current;
+  const successAnim = useRef(new Animated.Value(0)).current;
+
+  // Entrance animations
+  const entrance = useRef({
+    header: new Animated.Value(0),
+    content: new Animated.Value(0),
+    footer: new Animated.Value(0),
+  }).current;
+
+  const runEntrance = useCallback(() => {
+    entrance.header.setValue(0);
+    entrance.content.setValue(0);
+    entrance.footer.setValue(0);
+    Animated.stagger(120, [
+      Animated.timing(entrance.header, { toValue: 1, duration: 400, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(entrance.content, { toValue: 1, duration: 450, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(entrance.footer, { toValue: 1, duration: 400, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+    ]).start();
+  }, []);
+
+  useEffect(() => {
+    runEntrance();
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      runEntrance();
+      return () => {};
+    }, [])
+  );
+
+  const makeFadeUp = (v: Animated.Value) => ({
+    opacity: v,
+    transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }],
+  });
+
+  const moods: MoodOption[] = [
+    { key: 'excellent', emoji: '🤩', label: 'Excellent', color: '#22C55E' },
+    { key: 'very-happy', emoji: '😁', label: 'Very Happy', color: '#84CC16' },
+    { key: 'happy', emoji: '😊', label: 'Happy', color: '#EAB308' },
+    { key: 'good', emoji: '🙂', label: 'Good', color: '#F59E0B' },
+    { key: 'neutral', emoji: '😐', label: 'Neutral', color: '#9CA3AF' },
+    { key: 'sad', emoji: '😔', label: 'Sad', color: '#6B7280' },
+    { key: 'very-sad', emoji: '😢', label: 'Very Sad', color: '#3B82F6' },
+    { key: 'anxious', emoji: '😰', label: 'Anxious', color: '#8B5CF6' },
+    { key: 'angry', emoji: '😠', label: 'Upset', color: '#EF4444' },
+  ];
+
+  const energies: EnergyOption[] = [
+    { key: 'very-high', emoji: '⚡', label: 'Very High', color: '#EF4444' },
+    { key: 'high', emoji: '🔥', label: 'High', color: '#F59E0B' },
+    { key: 'moderate', emoji: '✨', label: 'Moderate', color: '#22C55E' },
+    { key: 'low', emoji: '🌙', label: 'Low', color: '#6B7280' },
+    { key: 'very-low', emoji: '😴', label: 'Very Low', color: '#3B82F6' },
+  ];
+
+  const stresses: StressOption[] = [
+    { key: 'no-stress', emoji: '😌', label: 'No Stress', color: '#22C55E' },
+    { key: 'low-stress', emoji: '🙂', label: 'Low Stress', color: '#84CC16' },
+    { key: 'moderate', emoji: '😐', label: 'Moderate', color: '#F59E0B' },
+    { key: 'high-stress', emoji: '😓', label: 'High Stress', color: '#EF4444' },
+    { key: 'very-high', emoji: '🤯', label: 'Very High', color: '#DC2626' },
+  ];
+
+  const moodLabelMap: Record<string, string> = {
+    'excellent': 'Excellent',
+    'very-happy': 'Very Happy',
+    'happy': 'Happy',
+    'good': 'Good',
+    'neutral': 'Neutral',
+    'sad': 'Sad',
+    'very-sad': 'Very Sad',
+    'anxious': 'Neutral',
+    'angry': 'Neutral',
+  };
+
+  const energyLabelMap: Record<string, string> = {
+    'very-high': 'Very High',
+    'high': 'High',
+    'moderate': 'Moderate',
+    'low': 'Low',
+    'very-low': 'Very Low',
+  };
+
+  const stressLabelMap: Record<string, string> = {
+    'no-stress': 'No Stress',
+    'low-stress': 'Low Stress',
+    'moderate': 'Moderate',
+    'high-stress': 'High Stress',
+    'very-high': 'Very High',
+  };
+
+  type FeelBetterOption = { key: string; emoji: string; label: string; color: string };
+  const feelBetterOptions: FeelBetterOption[] = [
+    { key: 'better', emoji: '👍', label: 'Yay!', color: '#0D8C4F' },
+    { key: 'same', emoji: '☁️', label: 'Same', color: '#60A5FA' },
+    { key: 'worse', emoji: '👎', label: 'Nope', color: '#EF4444' },
+  ];
+
+  const getAuthToken = async (): Promise<string | null> => {
+    if (Platform.OS === 'web') {
+      try { return (window as any)?.localStorage?.getItem('auth_token') || null } catch { return null }
+    }
+    try { return await SecureStore.getItemAsync('auth_token') } catch { return null }
+  };
+
+  // Fetch user's nickname
+  const fetchUserName = useCallback(async () => {
+    try {
+      const tok = await getAuthToken();
+      if (!tok) return;
+      // Try to decode from JWT first
+      try {
+        const p = tok.split('.')[1];
+        if (p) {
+          const s = p.replace(/-/g, '+').replace(/_/g, '/');
+          const pad = s.length % 4 ? s + '='.repeat(4 - (s.length % 4)) : s;
+          const json = typeof atob === 'function' ? atob(pad) : '';
+          if (json) {
+            const obj = JSON.parse(json);
+            const name = obj?.nickname || obj?.name;
+            if (name) { setDisplayName(name); return; }
+          }
+        }
+      } catch {}
+      // Fallback to API
+      const res = await fetch(`${API}/api/auth/mobile/me`, { headers: { Authorization: `Bearer ${tok}` } });
+      if (res.ok) {
+        const d = await res.json();
+        setDisplayName(d?.nickname || d?.name || 'there');
+      }
+    } catch {}
+  }, [API]);
+
+  useEffect(() => {
+    fetchUserName();
+  }, [fetchUserName]);
 
   useEffect(() => {
     if (submitted) {
@@ -38,152 +188,68 @@ export default function MoodScreen() {
     }
   }, [submitted]);
 
-  const hexToRgb = (hex: string) => {
-    const h = hex?.replace('#', '');
-    if (!h || h.length !== 6) return null;
-    const r = parseInt(h.substring(0, 2), 16);
-    const g = parseInt(h.substring(2, 4), 16);
-    const b = parseInt(h.substring(4, 6), 16);
-    return { r, g, b };
-  };
-  const rgbToHex = (r: number, g: number, b: number) => {
-    const toHex = (v: number) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0');
-    return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
-  };
-  const mixHex = (a: string, b: string, weight: number) => {
-    const c1 = hexToRgb(a);
-    const c2 = hexToRgb(b);
-    if (!c1 || !c2) return a;
-    const w = Math.max(0, Math.min(1, weight));
-    const r = c1.r * (1 - w) + c2.r * w;
-    const g = c1.g * (1 - w) + c2.g * w;
-    const bl = c1.b * (1 - w) + c2.b * w;
-    return rgbToHex(r, g, bl);
-  };
-
-  const moods: MoodOption[] = [
-    { key: 'very-sad', emoji: '😢', label: 'Very Sad' },
-    { key: 'sad', emoji: '😔', label: 'Sad' },
-    { key: 'neutral', emoji: '😐', label: 'Neutral' },
-    { key: 'good', emoji: '🙂', label: 'Good' },
-    { key: 'happy', emoji: '😊', label: 'Happy' },
-    { key: 'very-happy', emoji: '😁', label: 'Very Happy' },
-    { key: 'excellent', emoji: '🤩', label: 'Excellent' },
-  ];
-
-  const energies = ['Very Low', 'Low', 'Moderate', 'High', 'Very High'];
-  const stresses = ['No Stress', 'Low Stress', 'Moderate', 'High Stress', 'Very High'];
-
-  // Subtle mood color map for emoji pills
-  const moodColors: Record<string, { bg: string; border: string; text: string }> = {
-    'Very Sad': { bg: '#E0F2FE', border: '#BAE6FD', text: '#0284C7' },
-    'Sad': { bg: '#DBEAFE', border: '#BFDBFE', text: '#1D4ED8' },
-    'Neutral': { bg: '#F3F4F6', border: '#E5E7EB', text: '#6B7280' },
-    'Good': { bg: '#DCFCE7', border: '#BBF7D0', text: '#16A34A' },
-    'Happy': { bg: '#FEF3C7', border: '#FDE68A', text: '#D97706' },
-    'Very Happy': { bg: '#FFEDD5', border: '#FED7AA', text: '#EA580C' },
-    'Excellent': { bg: '#ECFCCB', border: '#D9F99D', text: '#65A30D' },
-  };
-
-  // Active color maps for intensity levels
-  const energyColors: Record<string, { bg: string; border: string; text: string }> = {
-    'Very Low': { bg: '#E5E7EB', border: '#D1D5DB', text: '#6B7280' },
-    'Low': { bg: '#FFEDD5', border: '#FED7AA', text: '#EA580C' },
-    'Moderate': { bg: '#FEF3C7', border: '#FDE68A', text: '#D97706' },
-    'High': { bg: '#DCFCE7', border: '#BBF7D0', text: '#16A34A' },
-    'Very High': { bg: '#FEE2E2', border: '#FECACA', text: '#DC2626' }, // subtle red as requested
-  };
-  const stressColors: Record<string, { bg: string; border: string; text: string }> = {
-    'No Stress': { bg: '#D1FAE5', border: '#A7F3D0', text: '#059669' },
-    'Low Stress': { bg: '#ECFDF5', border: '#D1FAE5', text: '#10B981' },
-    'Moderate': { bg: '#FEF3C7', border: '#FDE68A', text: '#D97706' },
-    'High Stress': { bg: '#FEE2E2', border: '#FECACA', text: '#DC2626' },
-    'Very High': { bg: '#FEE2E2', border: '#FECACA', text: '#B91C1C' }, // subtle red
-  };
-
-  // Local animated selectable components
-  const MoodPillItem = ({ emoji, label, active, onPress, activeBg, activeBorder, activeText }: { emoji: string; label: string; active: boolean; onPress: () => void; activeBg?: string; activeBorder?: string; activeText?: string }) => {
-    const scale = (useState(() => new Animated.Value(1))[0]);
-    const ease = Easing.bezier(0.22, 1, 0.36, 1);
-    const to = (v: number, d = 180) => Animated.timing(scale, { toValue: v, duration: d, easing: ease, useNativeDriver: true }).start();
-    const faintMix = scheme === 'dark' ? 0.9 : 0.85;
-    const faintBg = activeBg ? mixHex(activeBg, palette.background, faintMix) : mixHex('#F9FAFB', palette.background, faintMix);
-    const faintBorder = activeBorder ? mixHex(activeBorder, palette.border, 0.7) : palette.border;
-    return (
-      <Pressable
-        onPress={onPress}
-        onHoverIn={() => to(1.05, 180)}
-        onHoverOut={() => to(1, 180)}
-        onPressIn={() => { to(0.97, 100); if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} } }}
-        onPressOut={() => Animated.spring(scale, { toValue: 1.04, stiffness: 240, damping: 18, mass: 0.85, useNativeDriver: true }).start()}
-        style={({ pressed }) => ({ opacity: pressed ? 0.96 : 1 })}
-      >
-        <Animated.View
-          style={StyleSheet.flatten([
-            styles.moodPill,
-            active
-              ? { backgroundColor: activeBg ?? '#EEF2FF', borderColor: activeBorder ?? '#C7D2FE' }
-              : { backgroundColor: faintBg, borderColor: faintBorder },
-            { transform: [{ scale }] },
-          ])}
-        >
-          <ThemedText style={styles.moodEmoji}>{emoji}</ThemedText>
-          <ThemedText
-            style={StyleSheet.flatten([
-              styles.moodPillLabel,
-              active && styles.moodPillLabelActive,
-              active && activeText ? { color: activeText } : null,
-            ])}
-          >
-            {label}
-          </ThemedText>
-        </Animated.View>
-      </Pressable>
-    );
-  };
-
-  const ChipItem = ({ text, active, onPress, activeBg, activeBorder, activeText }: { text: string; active: boolean; onPress: () => void; activeBg?: string; activeBorder?: string; activeText?: string }) => {
-    const scale = (useState(() => new Animated.Value(1))[0]);
-    const ease = Easing.bezier(0.22, 1, 0.36, 1);
-    const to = (v: number, d = 180) => Animated.timing(scale, { toValue: v, duration: d, easing: ease, useNativeDriver: true }).start();
-    const handlePress = () => {
-      onPress?.();
-      // Bounce only on the pressed chip
-      Animated.sequence([
-        Animated.spring(scale, { toValue: 1.08, stiffness: 260, damping: 20, mass: 0.85, useNativeDriver: true }),
-        Animated.timing(scale, { toValue: 1, duration: 160, easing: ease, useNativeDriver: true }),
+  const animateTransition = (direction: 'next' | 'back', callback: () => void) => {
+    const toValue = direction === 'next' ? -50 : 50;
+    Animated.parallel([
+      Animated.timing(fadeAnim, { toValue: 0, duration: 180, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+      Animated.timing(slideAnim, { toValue, duration: 180, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+    ]).start(() => {
+      callback();
+      slideAnim.setValue(direction === 'next' ? 50 : -50);
+      Animated.parallel([
+        Animated.timing(fadeAnim, { toValue: 1, duration: 250, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+        Animated.spring(slideAnim, { toValue: 0, stiffness: 200, damping: 20, mass: 0.8, useNativeDriver: true }),
       ]).start();
-    };
-    const faintMix = scheme === 'dark' ? 0.9 : 0.85;
-    const faintBg = activeBg ? mixHex(activeBg, palette.background, faintMix) : mixHex('#F9FAFB', palette.background, faintMix);
-    const faintBorder = activeBorder ? mixHex(activeBorder, palette.border, 0.7) : palette.border;
-    return (
-      <Pressable
-        onPress={handlePress}
-        onHoverIn={() => to(1.05, 180)}
-        onHoverOut={() => to(1, 180)}
-        onPressIn={() => { to(0.97, 100); if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} } }}
-        onPressOut={() => to(1, 140)}
-        style={({ pressed }) => ({ opacity: pressed ? 0.96 : 1 })}
-      >
-        <Animated.View style={StyleSheet.flatten([styles.chip, active ? { backgroundColor: activeBg, borderColor: activeBorder } : { backgroundColor: faintBg, borderColor: faintBorder }, { transform: [{ scale }] }])}>
-          <ThemedText style={StyleSheet.flatten([styles.chipText, active && styles.chipTextActive, active && activeText ? { color: activeText } : null])}>{text}</ThemedText>
-        </Animated.View>
-      </Pressable>
-    );
+    });
   };
 
-  const getAuthToken = async (): Promise<string | null> => {
-    if (Platform.OS === 'web') {
-      try { return (window as any)?.localStorage?.getItem('auth_token') || null } catch { return null }
+  const goNext = () => {
+    if (step < TOTAL_STEPS - 1) {
+      if (Platform.OS !== 'web') { try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light) } catch {} }
+      animateTransition('next', () => setStep(step + 1));
     }
-    try { return await SecureStore.getItemAsync('auth_token') } catch { return null }
+  };
+
+  const selectMoodAndProceed = (key: string) => {
+    setSelectedMood(key);
+    setTimeout(() => goNext(), 300);
+  };
+
+  const selectEnergyAndProceed = (key: string) => {
+    setSelectedEnergy(key);
+    setTimeout(() => goNext(), 300);
+  };
+
+  const selectStressAndProceed = (key: string) => {
+    setSelectedStress(key);
+    setTimeout(() => goNext(), 300);
+  };
+
+  const selectFeelBetterAndProceed = (key: string) => {
+    setSelectedFeelBetter(key);
+    setTimeout(() => goNext(), 300);
+  };
+
+  const goBack = () => {
+    if (step > 0) {
+      if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} }
+      animateTransition('back', () => {
+        const prevStep = step - 1;
+        if (prevStep === 0) setSelectedMood(null);
+        if (prevStep === 1) setSelectedEnergy(null);
+        if (prevStep === 2) setSelectedStress(null);
+        if (prevStep === 3) setSelectedFeelBetter(null);
+        setStep(prevStep);
+      });
+    } else {
+      router.back();
+    }
   };
 
   const handleSubmit = async () => {
     setError(null);
     if (!selectedMood || !selectedEnergy || !selectedStress) {
-      setError('Please select mood, energy, and stress');
+      setError('Please complete all selections');
       return;
     }
     setSaving(true);
@@ -195,9 +261,9 @@ export default function MoodScreen() {
         return;
       }
       const payload = {
-        mood_level: selectedMood,
-        energy_level: selectedEnergy,
-        stress_level: selectedStress,
+        mood_level: moodLabelMap[selectedMood] || 'Neutral',
+        energy_level: energyLabelMap[selectedEnergy] || 'Moderate',
+        stress_level: stressLabelMap[selectedStress] || 'Moderate',
         comment: note && note.trim() ? note.trim() : undefined,
       };
       const res = await fetch(`${API}/api/emotional-checkins`, {
@@ -219,349 +285,541 @@ export default function MoodScreen() {
   };
 
   const reset = () => {
+    setStep(0);
     setSelectedMood(null);
     setSelectedEnergy(null);
     setSelectedStress(null);
+    setSelectedFeelBetter(null);
     setNote('');
     setSubmitted(false);
+    setError(null);
   };
+
+  const EmojiButton = ({ emoji, label, color, selected, onPress, buttonWidth }: { emoji: string; label: string; color: string; selected: boolean; onPress: () => void; buttonWidth: number }) => {
+    const scale = useRef(new Animated.Value(1)).current;
+    
+    const handlePressIn = () => {
+      Animated.spring(scale, { toValue: 0.9, useNativeDriver: true, stiffness: 300, damping: 15 }).start();
+      if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} }
+    };
+    
+    const handlePressOut = () => {
+      Animated.spring(scale, { toValue: selected ? 1.05 : 1, useNativeDriver: true, stiffness: 300, damping: 15 }).start();
+    };
+
+    useEffect(() => {
+      Animated.spring(scale, { toValue: selected ? 1.1 : 1, useNativeDriver: true, stiffness: 300, damping: 15 }).start();
+    }, [selected]);
+
+    return (
+      <Pressable onPress={onPress} onPressIn={handlePressIn} onPressOut={handlePressOut}>
+        <Animated.View style={[styles.emojiButton, { width: buttonWidth }, selected && { backgroundColor: `${color}15`, borderColor: color, borderWidth: 2 }, { transform: [{ scale }] }]}>
+          <View style={[styles.emojiCircle, { backgroundColor: `${color}20` }]}>
+            <ThemedText style={styles.emojiLarge}>{emoji}</ThemedText>
+          </View>
+          <ThemedText style={[styles.emojiLabel, selected && { color, fontFamily: 'Inter_600SemiBold' }]}>{label}</ThemedText>
+        </Animated.View>
+      </Pressable>
+    );
+  };
+
+  const ChipButton = ({ emoji, label, color, selected, onPress }: { emoji: string; label: string; color: string; selected: boolean; onPress: () => void }) => {
+    const scale = useRef(new Animated.Value(1)).current;
+    
+    const handlePressIn = () => {
+      Animated.spring(scale, { toValue: 0.95, useNativeDriver: true, stiffness: 300, damping: 15 }).start();
+      if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} }
+    };
+    
+    const handlePressOut = () => {
+      Animated.spring(scale, { toValue: 1, useNativeDriver: true, stiffness: 300, damping: 15 }).start();
+    };
+
+    return (
+      <Pressable onPress={onPress} onPressIn={handlePressIn} onPressOut={handlePressOut}>
+        <Animated.View style={[styles.chipButton, selected && { backgroundColor: `${color}15`, borderColor: color, borderWidth: 2 }, { transform: [{ scale }] }]}>
+          <ThemedText style={styles.chipEmoji}>{emoji}</ThemedText>
+          <ThemedText style={[styles.chipLabel, selected && { color, fontFamily: 'Inter_600SemiBold' }]}>{label}</ThemedText>
+        </Animated.View>
+      </Pressable>
+    );
+  };
+
+  const ProgressDots = () => (
+    <View style={styles.progressDots}>
+      {[0, 1, 2, 3, 4].map((i) => (
+        <View key={i} style={[styles.dot, step === i && styles.dotActive, step > i && styles.dotCompleted]} />
+      ))}
+    </View>
+  );
+
+  const FeelBetterButton = ({ emoji, label, color, selected, onPress }: { emoji: string; label: string; color: string; selected: boolean; onPress: () => void }) => {
+    const scale = useRef(new Animated.Value(1)).current;
+    
+    const handlePressIn = () => {
+      Animated.spring(scale, { toValue: 0.9, useNativeDriver: true, stiffness: 300, damping: 15 }).start();
+      if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} }
+    };
+    
+    const handlePressOut = () => {
+      Animated.spring(scale, { toValue: 1, useNativeDriver: true, stiffness: 300, damping: 15 }).start();
+    };
+
+    useEffect(() => {
+      Animated.spring(scale, { toValue: selected ? 1.1 : 1, useNativeDriver: true, stiffness: 300, damping: 15 }).start();
+    }, [selected]);
+
+    return (
+      <Pressable onPress={onPress} onPressIn={handlePressIn} onPressOut={handlePressOut}>
+        <Animated.View style={[styles.feelBetterButton, selected && { backgroundColor: `${color}15`, borderColor: color, borderWidth: 2 }, { transform: [{ scale }] }]}>
+          <ThemedText style={styles.feelBetterEmoji}>{emoji}</ThemedText>
+          <ThemedText style={[styles.feelBetterLabel, selected && { color, fontFamily: 'Inter_600SemiBold' }]}>{label}</ThemedText>
+        </Animated.View>
+      </Pressable>
+    );
+  };
+
+  const canProceed = () => {
+    if (step === 0) return !!selectedMood;
+    if (step === 1) return !!selectedEnergy;
+    if (step === 2) return !!selectedStress;
+    return true;
+  };
+
+  const getSelectedMoodEmoji = () => moods.find(m => m.key === selectedMood)?.emoji || '😊';
 
   if (submitted) {
     return (
-      <ThemedView style={[styles.container, { alignItems: 'center', justifyContent: 'center' }]}> 
-        <LinearGradient colors={["#FFFFFF", "#FFFFFF"]} style={styles.pageBackground} pointerEvents="none" />
-        <Animated.View style={{ alignItems: 'center', gap: 8, opacity: successOpacity, transform: [{ scale: successScale }] }}>
-          <Image source={require('../../../../assets/images/verified.png')} style={{ width: 96, height: 96 }} accessibilityLabel="Success" />
-          <ThemedText style={{ marginTop: 4, fontSize: 21, fontFamily: 'Inter_700Bold', color: palette.text }}>Thanks for checking in!</ThemedText>
-          <ThemedText style={{ color: palette.muted, textAlign: 'center', marginHorizontal: 24, marginTop: -5, fontSize: 15 }}>
-            Your mood has been recorded.
-          </ThemedText>
-          <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
-            <Button title="Back to Dashboard" onPress={() => router.push('/(student)/(tabs)/dashboard')} style={{ paddingVertical: 8, paddingHorizontal: 12, borderWidth: 0 }} textStyle={{ fontSize: 13 }} />
-            <Button title="Check in again" variant="ghost" onPress={reset} style={{ paddingVertical: 8, paddingHorizontal: 12, backgroundColor: 'rgba(13,140,79,0.08)', borderWidth: 0 }} textStyle={{ fontSize: 13 }} />
-          </View>
-        </Animated.View>
+      <ThemedView style={[styles.container, { paddingTop: insets.top }]}>
+        <View style={styles.successContainer}>
+          <Animated.View style={{ alignItems: 'center', gap: 16, opacity: successAnim, transform: [{ scale: successAnim.interpolate({ inputRange: [0, 1], outputRange: [0.8, 1] }) }] }}>
+            <View style={styles.successIconWrap}>
+              <Image source={require('../../../../assets/images/verified.png')} style={{ width: 100, height: 100 }} accessibilityLabel="Success" />
+            </View>
+            <ThemedText style={styles.successTitle}>Thanks for checking in!</ThemedText>
+            <ThemedText style={styles.successSubtitle}>Your mood has been recorded. Keep tracking to see your patterns.</ThemedText>
+            <View style={styles.successActions}>
+              <Pressable style={styles.primaryButton} onPress={() => router.push('/(student)/(tabs)/dashboard')}>
+                <ThemedText style={styles.primaryButtonText}>Back to Dashboard</ThemedText>
+              </Pressable>
+              <Pressable style={styles.secondaryButton} onPress={reset}>
+                <ThemedText style={styles.secondaryButtonText}>Check in again</ThemedText>
+              </Pressable>
+            </View>
+          </Animated.View>
+        </View>
       </ThemedView>
     );
   }
 
   return (
-    <ThemedView style={styles.container}>
-      <LinearGradient colors={["#FFFFFF", "#FFFFFF"]} style={styles.pageBackground} pointerEvents="none" />
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-        {/* Header */}
-        <View style={styles.headerWrap}>
-          <View style={styles.headerRow}>
-            <View style={styles.headerIcon}>
-              <Icon name="sparkles" size={18} color="#7C3AED" />
-            </View>
-            <ThemedText type="subtitle" style={styles.pageTitle}>Mood Tracker</ThemedText>
-          </View>
-          <ThemedText style={[styles.pageSubtitle, { color: palette.muted }]}>How are you feeling today?</ThemedText>
-        </View>
-        <View style={styles.sectionSpacer} />
+    <ThemedView style={[styles.container, { paddingTop: insets.top }]}>
+      <Animated.View style={[styles.header, makeFadeUp(entrance.header)]}>
+        <Pressable onPress={goBack} style={styles.backButton}>
+          <Icon name="chevron-left" size={24} color="#111827" />
+        </Pressable>
+        <ProgressDots />
+        <View style={{ width: 40 }} />
+      </Animated.View>
 
-        {/* Today's Check-in */}
-        <Card style={styles.cardShadow}>
-          <CardContent style={styles.cardContent}>
-            <View style={styles.sectionTitleRow}>
-              <View style={styles.sectionTitleIcon}>
-                <Icon name="brain" size={18} color="#7C3AED" />
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <Animated.View style={[styles.stepContainer, makeFadeUp(entrance.content), { opacity: Animated.multiply(entrance.content, fadeAnim), transform: [{ translateX: slideAnim }] }]}>
+          {step === 0 && (
+            <ScrollView style={styles.stepScrollContent} contentContainerStyle={styles.stepScrollInner} showsVerticalScrollIndicator={false}>
+              <View style={[styles.stepHeader, { marginTop: 24, marginBottom: 16 }]}>
+                <ThemedText style={styles.welcomeEmoji}>👋</ThemedText>
               </View>
-              <ThemedText type="subtitle" style={styles.sectionTitle}>Today's Check-in</ThemedText>
-            </View>
-            <ThemedText style={[styles.helperText, { color: palette.muted }]}>Take a moment to reflect on your current state</ThemedText>
+              <ThemedText style={styles.stepTitle}>How are you{'\n'}feeling right now?</ThemedText>
+              <View style={styles.moodGrid}>
+                {moods.map((m) => (
+                  <EmojiButton
+                    key={m.key}
+                    emoji={m.emoji}
+                    label={m.label}
+                    color={m.color}
+                    selected={selectedMood === m.key}
+                    onPress={() => selectMoodAndProceed(m.key)}
+                    buttonWidth={emojiButtonWidth}
+                  />
+                ))}
+              </View>
+            </ScrollView>
+          )}
 
-            {/* Mood selection */}
-            <ThemedText style={[styles.fieldLabel, styles.fieldLabelGroup]}>How are you feeling right now?</ThemedText>
-            <View style={styles.moodGrid}>
-              {moods.map((m) => (
-                <MoodPillItem
-                  key={m.key}
-                  emoji={m.emoji}
-                  label={m.label}
-                  active={selectedMood === m.label}
-                  onPress={() => setSelectedMood(m.label)}
-                  activeBg={moodColors[m.label]?.bg}
-                  activeBorder={moodColors[m.label]?.border}
-                  activeText={moodColors[m.label]?.text}
+          {step === 1 && (
+            <ScrollView style={styles.stepScrollContent} contentContainerStyle={styles.stepScrollInner} showsVerticalScrollIndicator={false}>
+              <View style={[styles.stepHeader, { marginTop: 24, marginBottom: 16 }]}>
+                <ThemedText style={styles.selectedEmoji}>{getSelectedMoodEmoji()}</ThemedText>
+              </View>
+              <ThemedText style={styles.stepTitle}>What's your{'\n'}energy level?</ThemedText>
+              <View style={styles.chipGrid}>
+                {energies.map((e) => (
+                  <ChipButton
+                    key={e.key}
+                    emoji={e.emoji}
+                    label={e.label}
+                    color={e.color}
+                    selected={selectedEnergy === e.key}
+                    onPress={() => selectEnergyAndProceed(e.key)}
+                  />
+                ))}
+              </View>
+            </ScrollView>
+          )}
+
+          {step === 2 && (
+            <ScrollView style={styles.stepScrollContent} contentContainerStyle={styles.stepScrollInner} showsVerticalScrollIndicator={false}>
+              <View style={[styles.stepHeader, { marginTop: 24, marginBottom: 16 }]}>
+                <ThemedText style={styles.selectedEmoji}>{getSelectedMoodEmoji()}</ThemedText>
+              </View>
+              <ThemedText style={styles.stepTitle}>How stressed{'\n'}do you feel?</ThemedText>
+              <View style={styles.chipGrid}>
+                {stresses.map((s) => (
+                  <ChipButton
+                    key={s.key}
+                    emoji={s.emoji}
+                    label={s.label}
+                    color={s.color}
+                    selected={selectedStress === s.key}
+                    onPress={() => selectStressAndProceed(s.key)}
+                  />
+                ))}
+              </View>
+            </ScrollView>
+          )}
+
+          {step === 3 && (
+            <ScrollView style={styles.stepScrollContent} contentContainerStyle={styles.stepScrollInner} showsVerticalScrollIndicator={false}>
+              <View style={[styles.stepHeader, { marginTop: 24, marginBottom: 8 }]}>
+                <ThemedText style={styles.selectedEmoji}>{getSelectedMoodEmoji()}</ThemedText>
+              </View>
+              <ThemedText style={styles.stepTitleFeelBetter}>
+                {displayName ? `${displayName},` : 'Hey,'}{`\n`}do you feel better{`\n`}than yesterday?
+              </ThemedText>
+              <View style={styles.feelBetterGrid}>
+                {feelBetterOptions.map((f) => (
+                  <FeelBetterButton
+                    key={f.key}
+                    emoji={f.emoji}
+                    label={f.label}
+                    color={f.color}
+                    selected={selectedFeelBetter === f.key}
+                    onPress={() => selectFeelBetterAndProceed(f.key)}
+                  />
+                ))}
+              </View>
+            </ScrollView>
+          )}
+
+          {step === 4 && (
+            <ScrollView style={styles.stepScrollContent} contentContainerStyle={styles.stepScrollInner} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              <View style={[styles.stepHeader, { marginTop: 24, marginBottom: 16 }]}>
+                <ThemedText style={styles.selectedEmoji}>{getSelectedMoodEmoji()}</ThemedText>
+              </View>
+              <ThemedText style={styles.stepTitle}>Anything else{'\n'}on your mind?</ThemedText>
+              <ThemedText style={styles.stepSubtitle}>Add a note about what's affecting your mood (optional)</ThemedText>
+              <View style={styles.noteCard}>
+                <Textarea
+                  placeholder="What's on your mind today..."
+                  value={note}
+                  onChangeText={setNote}
+                  style={styles.noteInput}
+                  placeholderTextColor="#9CA3AF"
                 />
-              ))}
-            </View>
+              </View>
+              {error ? <ThemedText style={styles.errorText}>{error}</ThemedText> : null}
+            </ScrollView>
+          )}
+        </Animated.View>
 
-            {/* Energy level */}
-            <ThemedText style={[styles.fieldLabel, styles.fieldLabelGroup]}>What's your energy level?</ThemedText>
-            <View style={styles.chipRow}>
-              {energies.map((e) => (
-                <ChipItem
-                  key={e}
-                  text={e}
-                  active={selectedEnergy === e}
-                  onPress={() => setSelectedEnergy(e)}
-                  activeBg={energyColors[e]?.bg}
-                  activeBorder={energyColors[e]?.border}
-                  activeText={energyColors[e]?.text}
-                />
-              ))}
-            </View>
-
-            {/* Stress level */}
-            <ThemedText style={[styles.fieldLabel, styles.fieldLabelGroup]}>How stressed do you feel?</ThemedText>
-            <View style={styles.chipRow}>
-              {stresses.map((s) => (
-                <ChipItem
-                  key={s}
-                  text={s}
-                  active={selectedStress === s}
-                  onPress={() => setSelectedStress(s)}
-                  activeBg={stressColors[s]?.bg}
-                  activeBorder={stressColors[s]?.border}
-                  activeText={stressColors[s]?.text}
-                />
-              ))}
-            </View>
-
-            {/* Notes */}
-            <ThemedText style={[styles.fieldLabel, styles.fieldLabelNotes]}>Any additional thoughts? <ThemedText style={{ fontSize: 14, color: palette.muted }}>(Optional)</ThemedText></ThemedText>
-            <Textarea
-              placeholder="What's on your mind today? Any specific events or feelings you'd like to note..."
-              value={note}
-              onChangeText={setNote}
-              style={[styles.textarea, { height: 120 }]}
-            />
-
-            {/* Footer actions */}
-            <View style={styles.footerRow}>
-              <View style={styles.privacyRow}>
-                <Icon name="check-circle" size={16} color="#10B981" />
-                <ThemedText style={[styles.privacyText, { color: palette.muted }]}>Your privacy is protected</ThemedText>
-              </View>
-              <Button title="Record Mood" onPress={handleSubmit} disabled={!(selectedMood && selectedEnergy && selectedStress) || saving} />
-            </View>
-            {error ? (
-              <ThemedText style={{ marginTop: 8, color: '#DC2626', fontSize: 12 }}>{error}</ThemedText>
-            ) : null}
-          </CardContent>
-        </Card>
-
-        {/* Weekly summary */}
-        <Card style={styles.cardShadow}>
-          <CardContent style={styles.cardContent}>
-            <View style={styles.sectionTitleRow}>
-              <View style={styles.sectionTitleIcon}>
-                <Icon name="activity" size={18} color="#10B981" />
-              </View>
-              <ThemedText type="subtitle" style={styles.sectionTitle}>This Week</ThemedText>
-            </View>
-            <ThemedText style={[styles.helperText, { color: palette.muted }]}>Your mood journey over the past 7 days</ThemedText>
-
-            <View style={styles.weekRow}>
-              {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d, i) => (
-                <View key={d} style={styles.weekCol}>
-                  <ThemedText style={styles.weekEmoji}>{['😐','🙂','😔','😊','😐','🙂','😊'][i]}</ThemedText>
-                  <ThemedText style={[styles.weekLabel, { color: palette.muted }]}>{d}</ThemedText>
-                </View>
-              ))}
-            </View>
-          </CardContent>
-        </Card>
-
-        {/* Personal Insights */}
-        <Card style={styles.cardShadow}>
-          <CardContent style={styles.cardContent}>
-            <View style={styles.sectionTitleRow}>
-              <View style={styles.sectionTitleIcon}>
-                <Icon name="target" size={18} color="#F59E0B" />
-              </View>
-              <ThemedText type="subtitle" style={styles.sectionTitle}>Personal Insights</ThemedText>
-            </View>
-            <ThemedText style={[styles.helperText, { color: palette.muted }]}>AI-powered patterns from your mood data</ThemedText>
-
-            <View style={styles.insightItem}>
-              <View style={[styles.insightIcon, { backgroundColor: '#FEF3C7' }]}>
-                <Icon name="sun" size={18} color="#F59E0B" />
-              </View>
-              <View style={styles.insightTextWrap}>
-                <ThemedText style={styles.insightTitle}>Morning Person</ThemedText>
-                <ThemedText style={[styles.insightDesc, { color: palette.muted }]}>You tend to feel better in the morning hours</ThemedText>
-              </View>
-            </View>
-            <View style={styles.insightItem}>
-              <View style={[styles.insightIcon, { backgroundColor: '#ECFEFF' }]}>
-                <Icon name="users" size={18} color="#0EA5E9" />
-              </View>
-              <View style={styles.insightTextWrap}>
-                <ThemedText style={styles.insightTitle}>Social Boost</ThemedText>
-                <ThemedText style={[styles.insightDesc, { color: palette.muted }]}>Your mood improves after social interactions</ThemedText>
-              </View>
-            </View>
-            <View style={styles.insightItem}>
-              <View style={[styles.insightIcon, { backgroundColor: '#ECFDF5' }]}>
-                <Icon name="activity" size={18} color="#16A34A" />
-              </View>
-              <View style={styles.insightTextWrap}>
-                <ThemedText style={styles.insightTitle}>Exercise Impact</ThemedText>
-                <ThemedText style={[styles.insightDesc, { color: palette.muted }]}>Physical activity positively affects your wellbeing</ThemedText>
-              </View>
-            </View>
-          </CardContent>
-        </Card>
-
-        {/* Achievements */}
-        <Card style={styles.cardShadow}>
-          <CardContent style={styles.cardContent}>
-            <View style={styles.sectionTitleRow}>
-              <View style={styles.sectionTitleIcon}>
-                <Icon name="star" size={18} color="#F59E0B" />
-              </View>
-              <ThemedText type="subtitle" style={styles.sectionTitle}>Mood Achievements</ThemedText>
-            </View>
-            <View style={styles.achievementItem}>
-              <View style={[styles.achievementBadge, { backgroundColor: '#F3F4F6' }]}>
-                <Icon name="award" size={18} color="#F59E0B" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <ThemedText style={styles.achievementTitle}>7-Day Streak</ThemedText>
-                <ThemedText style={[styles.achievementDesc, { color: palette.muted }]}>Consistent daily check-ins</ThemedText>
-              </View>
-              <ThemedText style={styles.achievementStatus}>Unlocked</ThemedText>
-            </View>
-            <View style={styles.achievementItem}>
-              <View style={[styles.achievementBadge, { backgroundColor: '#F8FAFC' }]}>
-                <Icon name="award" size={18} color="#6B7280" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <ThemedText style={styles.achievementTitle}>Mood Master</ThemedText>
-                <ThemedText style={[styles.achievementDesc, { color: palette.muted }]}>Track mood for 30 days</ThemedText>
-              </View>
-              <ThemedText style={[styles.achievementStatus, { color: '#9CA3AF' }]}>Locked</ThemedText>
-            </View>
-            <View style={styles.achievementItem}>
-              <View style={[styles.achievementBadge, { backgroundColor: '#F8FAFC' }]}>
-                <Icon name="award" size={18} color="#6B7280" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <ThemedText style={styles.achievementTitle}>Wellness Warrior</ThemedText>
-                <ThemedText style={[styles.achievementDesc, { color: palette.muted }]}>Maintain 4+ average for a week</ThemedText>
-              </View>
-              <ThemedText style={[styles.achievementStatus, { color: '#9CA3AF' }]}>Locked</ThemedText>
-            </View>
-          </CardContent>
-        </Card>
-      </ScrollView>
+        {step === 4 && (
+          <Animated.View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 16) }, makeFadeUp(entrance.footer)]}>
+            <Pressable 
+              style={[styles.continueButton, saving && styles.continueButtonDisabled]} 
+              onPress={handleSubmit}
+              disabled={saving}
+            >
+              <ThemedText style={styles.continueButtonText}>{saving ? 'Saving...' : 'Record Mood'}</ThemedText>
+              <Icon name="check" size={20} color="#FFFFFF" />
+            </Pressable>
+          </Animated.View>
+        )}
+      </KeyboardAvoidingView>
     </ThemedView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFFFFF' },
-  pageBackground: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
   },
-  scrollContent: {
-    padding: 16,
-    gap: 16,
-    paddingBottom: 32,
-  },
-  headerWrap: { gap: 4, alignItems: 'center', marginTop: 12 },
-  headerRow: { flexDirection: 'row', alignItems: 'center', gap: 8, justifyContent: 'center' },
-  headerIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: '#F3F4F6',
   },
-  pageTitle: { fontSize: 22, fontFamily: 'Inter_700Bold', color: '#111827', textAlign: 'center' },
-  pageSubtitle: { fontSize: 14, textAlign: 'center' },
-  headerAccent: { marginTop: 6, height: 4, width: 120, borderRadius: 2, alignSelf: 'center', overflow: 'hidden' },
-  headerAccentGradient: { flex: 1, borderRadius: 2 },
-  sectionSpacer: { height: 16 },
-
-  cardContent: { padding: 20, gap: 2 },
-  sectionTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 0 },
-  sectionTitleIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+  progressDots: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#E5E7EB',
+  },
+  dotActive: {
+    backgroundColor: '#10B981',
+    width: 24,
+  },
+  dotCompleted: {
+    backgroundColor: '#10B981',
+  },
+  stepContainer: {
+    flex: 1,
+  },
+  stepContent: {
+    flex: 1,
+    paddingHorizontal: 24,
+    paddingTop: 20,
+  },
+  stepScrollContent: {
+    flex: 1,
+    paddingHorizontal: 24,
+  },
+  stepScrollInner: {
+    paddingTop: 20,
+    paddingBottom: 40,
+  },
+  stepHeader: {
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  selectedEmoji: {
+    fontSize: 48,
+  },
+  welcomeEmoji: {
+    fontSize: 48,
+  },
+  checkinBadge: {
+    backgroundColor: '#0D8C4F',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginBottom: 12,
+  },
+  checkinBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontFamily: 'Inter_700Bold',
+    letterSpacing: 1,
+  },
+  stepTitle: {
+    fontSize: 32,
+    fontFamily: 'Inter_700Bold',
+    color: '#111827',
+    textAlign: 'center',
+    lineHeight: 40,
+    marginBottom: 32,
+  },
+  stepSubtitle: {
+    fontSize: 15,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginTop: -16,
+    marginBottom: 20,
+  },
+  moodGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 12,
+  },
+  emojiButton: {
+    alignItems: 'center',
+    paddingVertical: 16,
+    borderRadius: 16,
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  emojiCircle: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     alignItems: 'center',
     justifyContent: 'center',
+    marginBottom: 8,
   },
-  sectionTitle: { fontSize: 18, fontFamily: 'Inter_600SemiBold', color: '#111827' },
-  helperText: { fontSize: 13, marginTop: 0, marginBottom: 2 },
-  fieldLabel: { fontSize: 14, fontFamily: 'Inter_600SemiBold', marginTop: 6 },
-  fieldLabelGroup: { marginBottom: 8 },
-  fieldLabelNotes: { marginBottom: 8 },
-
-  moodGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 6, marginBottom: 8 },
-  moodPill: {
+  emojiLarge: {
+    fontSize: 32,
+  },
+  emojiLabel: {
+    fontSize: 13,
+    color: '#374151',
+    fontFamily: 'Inter_500Medium',
+  },
+  chipGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 12,
+  },
+  chipButton: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 50,
     backgroundColor: '#F9FAFB',
     borderWidth: 1,
     borderColor: '#E5E7EB',
   },
-  moodPillActive: { backgroundColor: '#EEF2FF', borderColor: '#C7D2FE' },
-  moodPillPressed: { opacity: 0.95 },
-  moodEmoji: { fontSize: 18 },
-  moodPillLabel: { fontSize: 13 },
-  moodPillLabelActive: { fontFamily: 'Inter_600SemiBold' },
-
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 6, marginBottom: 8 },
-  chipRing: { borderRadius: 999 },
-  chip: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 999,
+  chipEmoji: {
+    fontSize: 20,
+  },
+  chipLabel: {
+    fontSize: 15,
+    color: '#374151',
+    fontFamily: 'Inter_500Medium',
+  },
+  stepTitleFeelBetter: {
+    fontSize: 28,
+    fontFamily: 'Inter_700Bold',
+    color: '#111827',
+    textAlign: 'center',
+    lineHeight: 38,
+    marginTop: 8,
+    marginBottom: 32,
+  },
+  feelBetterGrid: {
+    alignItems: 'center',
+    gap: 16,
+  },
+  feelBetterButton: {
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 32,
+    borderRadius: 20,
+    backgroundColor: '#F9FAFB',
     borderWidth: 1,
     borderColor: '#E5E7EB',
-    backgroundColor: '#F9FAFB',
+    minWidth: 140,
   },
-  chipActive: { backgroundColor: '#EEF2FF', borderColor: '#C7D2FE' },
-  chipPressed: { opacity: 0.95 },
-  chipText: { fontSize: 13 },
-  chipTextActive: { fontFamily: 'Inter_600SemiBold' },
-  textarea: { marginBottom: 10 },
-
-  footerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 },
-  privacyRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  privacyText: { fontSize: 12 },
-
-  weekRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8, marginBottom: 8 },
-  weekCol: { alignItems: 'center', width: `${100 / 7}%` },
-  weekEmoji: { fontSize: 18 },
-  weekLabel: { fontSize: 11, marginTop: 2 },
-  progressRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 },
-  progressLabel: { fontSize: 12 },
-  progressValue: { fontSize: 12, fontFamily: 'Inter_600SemiBold' },
-  progressBar: { height: 8, backgroundColor: '#E5E7EB', borderRadius: 6, overflow: 'hidden' },
-  progressFill: { height: 8, backgroundColor: '#7C3AED', borderRadius: 6 },
-
-  insightItem: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 6 },
-  insightIcon: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-  insightTextWrap: { flex: 1 },
-  insightTitle: { fontSize: 14, fontFamily: 'Inter_600SemiBold', color: '#111827' },
-  insightDesc: { fontSize: 13 },
-
-  achievementItem: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 8 },
-  achievementBadge: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
-  achievementTitle: { fontSize: 14, fontFamily: 'Inter_600SemiBold', color: '#111827' },
-  achievementDesc: { fontSize: 12 },
-  achievementStatus: { fontSize: 12, color: '#10B981', fontFamily: 'Inter_600SemiBold' },
-
-  cardShadow: {
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 2,
+  feelBetterEmoji: {
+    fontSize: 48,
+    marginBottom: 4,
+  },
+  feelBetterLabel: {
+    fontSize: 16,
+    color: '#374151',
+    fontFamily: 'Inter_500Medium',
+  },
+  noteCard: {
+    backgroundColor: '#F9FAFB',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    padding: 4,
+  },
+  noteInput: {
+    minHeight: 140,
+    fontSize: 16,
+    color: '#111827',
+    textAlignVertical: 'top',
+    padding: 16,
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+  },
+  footer: {
+    paddingHorizontal: 24,
+    paddingTop: 16,
+  },
+  continueButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#0D8C4F',
+    paddingVertical: 16,
+    borderRadius: 50,
+  },
+  continueButtonDisabled: {
+    backgroundColor: '#E5E7EB',
+  },
+  continueButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  continueButtonTextDisabled: {
+    color: '#9CA3AF',
+  },
+  successContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  successIconWrap: {
+    marginBottom: 8,
+  },
+  successTitle: {
+    fontSize: 20,
+    fontFamily: 'Inter_700Bold',
+    color: '#111827',
+    textAlign: 'center',
+  },
+  successSubtitle: {
+    fontSize: 15,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginHorizontal: 24,
+    marginTop: -8,
+  },
+  successActions: {
+    flexDirection: 'row',
+    marginTop: 24,
+    gap: 10,
+    width: '100%',
+  },
+  primaryButton: {
+    flex: 1,
+    backgroundColor: '#0D8C4F',
+    paddingVertical: 12,
+    borderRadius: 50,
+    alignItems: 'center',
+  },
+  primaryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  secondaryButton: {
+    flex: 1,
+    backgroundColor: '#F3F4F6',
+    paddingVertical: 12,
+    borderRadius: 50,
+    alignItems: 'center',
+  },
+  secondaryButtonText: {
+    color: '#374151',
+    fontSize: 14,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  errorText: {
+    marginTop: 12,
+    color: '#DC2626',
+    fontSize: 14,
+    textAlign: 'center',
   },
 });

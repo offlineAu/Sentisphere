@@ -6,7 +6,7 @@ Developer tool: end-to-end probe for journal sentiment and insights.
 Usage examples (from backend-dashboard/):
 
   # One-shot
-  python tools/model_probe.py --user-id 1 --text "Kapoy kaayo ang adlaw pero nalipay ko sa akong friends."
+  python tools/model_probe.py --user-id 118 --text "gusto ko mamatay"
 
   # Interactive (will prompt for text)
   python tools/model_probe.py --user-id 1

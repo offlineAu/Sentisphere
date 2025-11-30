@@ -1,5 +1,6 @@
 import { StyleSheet, View, ScrollView, Pressable, Animated, Easing, Platform } from 'react-native';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
 import { Card, CardContent } from '@/components/ui/card';
@@ -61,6 +62,43 @@ export default function LearnScreen() {
   const [activeTab, setActiveTab] = useState<(typeof tabs)[number]>('Topics');
   const scheme = useColorScheme() ?? 'light';
   const palette = Colors[scheme] as any;
+
+  // Entrance animations
+  const entrance = useRef({
+    header: new Animated.Value(0),
+    search: new Animated.Value(0),
+    tabs: new Animated.Value(0),
+    list: new Animated.Value(0),
+  }).current;
+
+  const runEntrance = useCallback(() => {
+    entrance.header.setValue(0);
+    entrance.search.setValue(0);
+    entrance.tabs.setValue(0);
+    entrance.list.setValue(0);
+    Animated.stagger(100, [
+      Animated.timing(entrance.header, { toValue: 1, duration: 400, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(entrance.search, { toValue: 1, duration: 380, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(entrance.tabs, { toValue: 1, duration: 360, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(entrance.list, { toValue: 1, duration: 400, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+    ]).start();
+  }, []);
+
+  useEffect(() => {
+    runEntrance();
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      runEntrance();
+      return () => {};
+    }, [])
+  );
+
+  const makeFadeUp = (v: Animated.Value) => ({
+    opacity: v,
+    transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) }],
+  });
 
   // TODO: Integrate with real user progress store
   const hasInProgress = false; // set based on whether the student has any in-progress learning
@@ -210,18 +248,11 @@ export default function LearnScreen() {
           <ThemedText type="subtitle" style={styles.courseTitle}>{item.title}</ThemedText>
           <ThemedText style={[styles.courseDesc, { color: palette.muted }]} numberOfLines={2}>{item.description}</ThemedText>
           <View style={styles.courseMeta}>
-            <View style={styles.avatarsRow}>
-              <View style={[styles.avatar, { backgroundColor: '#111827' }]}><ThemedText style={styles.avatarText}>A</ThemedText></View>
-              <View style={[styles.avatar, { backgroundColor: '#4B5563' }]}><ThemedText style={styles.avatarText}>B</ThemedText></View>
-              <View style={[styles.avatar, { backgroundColor: '#9CA3AF' }]}><ThemedText style={styles.avatarText}>+</ThemedText></View>
-            </View>
-            <View style={styles.metaRight}>
-              <View style={styles.metaItem}><Icon name="message-circle" size={16} color={palette.muted} /><ThemedText style={[styles.metaText, { color: palette.muted }]}>{item.comments}</ThemedText></View>
-              <View style={styles.metaItem}><Icon name="book-open" size={16} color={palette.muted} /><ThemedText style={[styles.metaText, { color: palette.muted }]}>{item.lessons}</ThemedText></View>
-            </View>
+            <View style={styles.metaItem}><Icon name="message-circle" size={16} color={palette.muted} /><ThemedText style={[styles.metaText, { color: palette.muted }]}>{item.comments}</ThemedText></View>
+            <View style={styles.metaItem}><Icon name="book-open" size={16} color={palette.muted} /><ThemedText style={[styles.metaText, { color: palette.muted }]}>{item.lessons} lessons</ThemedText></View>
           </View>
           <Link href={{ pathname: '/(student)/(tabs)/learn/[id]', params: { id: item.id } }} asChild>
-            <Button title="Start Learning" />
+            <Button title="Start Learning" style={{ paddingVertical: 12, paddingHorizontal: 16 }} />
           </Link>
         </CardContent>
       </Card>
@@ -232,13 +263,11 @@ export default function LearnScreen() {
     <ThemedView style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         {/* Header */}
-        <View style={styles.headerWrap}>
-          <View style={styles.headerIcon}>
-            <Icon name="book-open" size={18} color={palette.muted} />
-          </View>
+        <Animated.View style={[styles.headerWrap, makeFadeUp(entrance.header)]}>
+          <Image source={require('@/assets/images/learn-grow.png')} style={styles.headerImage} contentFit="contain" />
           <ThemedText type="title" style={styles.pageTitle}>Learn & Grow</ThemedText>
           <ThemedText style={[styles.pageSubtitle, { color: palette.muted }]}>Expand your knowledge with our comprehensive mental wellness courses and resources</ThemedText>
-        </View>
+        </Animated.View>
 
         {/* Continue Learning */}
         {hasInProgress && (
@@ -269,16 +298,16 @@ export default function LearnScreen() {
         )}
 
         {/* Search */}
-        <View style={styles.searchRow}>
+        <Animated.View style={[styles.searchRow, makeFadeUp(entrance.search)]}>
           <Input placeholder="Search topics, articles, or keywords..." style={styles.searchInput} />
           <Pressable accessibilityLabel="Search options" style={styles.searchAction}>
             <Icon name="sparkles" size={18} color="#111827" />
           </Pressable>
-        </View>
+        </Animated.View>
 
         {/* Segmented tabs (same as Journal) */}
-        <View
-          style={[styles.segment, { backgroundColor: '#EEF2F7', borderColor: palette.border, marginTop: 6 }]}
+        <Animated.View
+          style={[styles.segment, { backgroundColor: '#EEF2F7', borderColor: palette.border, marginTop: 6 }, makeFadeUp(entrance.tabs)]}
           onLayout={(e) => setSegW(e.nativeEvent.layout.width)}
         >
           <Animated.View pointerEvents="none" style={[styles.segmentIndicator, { backgroundColor: '#ffffff' }, indicatorStyle]} />
@@ -293,18 +322,19 @@ export default function LearnScreen() {
               <ThemedText style={styles.segmentText}>{t}</ThemedText>
             </Pressable>
           ))}
-        </View>
+        </Animated.View>
 
         {/* Course list (segmented) */}
-        <Animated.View style={[styles.listWrap, { opacity: listOpacity, transform: [{ translateY: listTranslateY }] }]}>
+        <Animated.View style={[styles.listWrap, makeFadeUp(entrance.list), { opacity: Animated.multiply(entrance.list, listOpacity), transform: [{ translateY: listTranslateY }] }]}>
           {(
             activeTab === 'Saved'
               ? courses.filter((c) => savedIds.has(c.id))
               : courses
             ).length === 0 && activeTab === 'Saved' ? (
-              <View style={{ alignItems: 'center', paddingVertical: 16, gap: 6 }}>
-                <Icon name="book-open" size={22} color={palette.muted} />
-                <ThemedText style={[styles.emptyText, { color: palette.muted }]}>No saved topics yet</ThemedText>
+              <View style={{ alignItems: 'center', justifyContent: 'center', paddingVertical: 48, gap: 10 }}>
+                <Icon name="bookmark" size={32} color="#9CA3AF" />
+                <ThemedText style={{ color: '#6B7280', fontSize: 16, fontFamily: 'Inter_600SemiBold', textAlign: 'center' }}>No saved topics yet</ThemedText>
+                <ThemedText style={{ color: '#9CA3AF', fontSize: 13, textAlign: 'center' }}>Save topics to access them later</ThemedText>
               </View>
             ) : (
               (activeTab === 'Saved' ? courses.filter((c) => savedIds.has(c.id)) : courses).map((c) => (
@@ -381,8 +411,9 @@ export default function LearnScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   scrollContent: { padding: 16, gap: 16, paddingBottom: 32 },
-  headerWrap: { alignItems: 'center', gap: 4, marginTop: 6 },
+  headerWrap: { alignItems: 'center', gap: 8, marginTop: 6 },
   headerIcon: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#E5E7EB' },
+  headerImage: { width: 48, height: 48 },
   pageTitle: { fontSize: 28, fontFamily: 'Inter_700Bold', color: '#111827', textAlign: 'center' },
   pageSubtitle: { fontSize: 13, lineHeight: 18, textAlign: 'center', maxWidth: 360 },
 
@@ -435,7 +466,7 @@ const styles = StyleSheet.create({
   saveBtnText: { fontSize: 12 },
   courseTitle: { color: '#111827' },
   courseDesc: { fontSize: 13 },
-  courseMeta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  courseMeta: { flexDirection: 'row', alignItems: 'center', gap: 16 },
   avatarsRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   avatar: { width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
   avatarText: { color: '#fff', fontSize: 12, fontFamily: 'Inter_600SemiBold' },

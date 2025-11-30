@@ -704,6 +704,30 @@ def list_counselors(
 
 # --- Mobile-only Conversations API (uses mobile DB, no main DB lookup) ---
 
+@app.get("/api/mobile/counselors")
+def mobile_list_counselors(
+    token: str = Depends(oauth2_scheme),
+    mdb: Session = Depends(get_mobile_db),
+):
+    """List all active counselors from mobile DB for student to select when starting a conversation."""
+    _extract_user_id(token)  # Validate token
+    rows = list(
+        mdb.execute(
+            text(
+                """
+                SELECT user_id, name, nickname, email
+                FROM user
+                WHERE role = 'counselor' AND is_active = 1
+                ORDER BY name ASC
+                """
+            )
+        ).mappings()
+    )
+    result = [dict(row) for row in rows]
+    print(f"[mobile_list_counselors] Found {len(result)} counselors: {result}")
+    return result
+
+
 @app.get("/api/mobile/conversations")
 def mobile_list_conversations(
     include_messages: bool = Query(False),
@@ -715,11 +739,13 @@ def mobile_list_conversations(
         mdb.execute(
             text(
                 """
-                SELECT conversation_id, initiator_user_id, initiator_role,
-                       subject, status, created_at, last_activity_at
-                FROM conversations
-                WHERE initiator_user_id = :uid
-                ORDER BY COALESCE(last_activity_at, created_at) DESC
+                SELECT c.conversation_id, c.initiator_user_id, c.initiator_role,
+                       c.subject, c.counselor_id, c.status, c.created_at, c.last_activity_at,
+                       u.name AS counselor_name, u.email AS counselor_email
+                FROM conversations c
+                LEFT JOIN user u ON c.counselor_id = u.user_id
+                WHERE c.initiator_user_id = :uid
+                ORDER BY COALESCE(c.last_activity_at, c.created_at) DESC
                 """
             ),
             {"uid": uid},
@@ -746,34 +772,53 @@ def mobile_list_conversations(
 
 
 @app.post("/api/mobile/conversations", status_code=status.HTTP_201_CREATED)
-def mobile_start_conversation(
-    conversation_in: ConversationStart,
+async def mobile_start_conversation(
+    request: Request,
     token: str = Depends(oauth2_scheme),
     mdb: Session = Depends(get_mobile_db),
 ):
     uid = _extract_user_id(token)
-    subject = conversation_in.subject if conversation_in and conversation_in.subject else None
+    
+    # Parse raw JSON body to ensure counselor_id is captured
+    body = await request.json()
+    print(f"[mobile_start_conversation] Raw JSON body: {body}")
+    
+    subject = body.get("subject")
+    counselor_id = body.get("counselor_id")
+    
+    print(f"[mobile_start_conversation] Parsed values: subject={subject}, counselor_id={counselor_id}, type={type(counselor_id)}")
+    print(f"[mobile_start_conversation] Creating conversation: uid={uid}, subject={subject}, counselor_id={counselor_id}")
+    
     res = mdb.execute(
         text(
             """
-            INSERT INTO conversations (initiator_user_id, initiator_role, subject, status, created_at, last_activity_at)
-            VALUES (:uid, 'student', :subject, 'open', NOW(), NOW())
+            INSERT INTO conversations (initiator_user_id, initiator_role, subject, counselor_id, status, created_at, last_activity_at)
+            VALUES (:uid, 'student', :subject, :counselor_id, 'open', NOW(), NOW())
             """
         ),
-        {"uid": uid, "subject": subject},
+        {"uid": uid, "subject": subject, "counselor_id": counselor_id},
     )
     mdb.commit()
     cid = res.lastrowid
+    print(f"[mobile_start_conversation] Inserted conversation_id={cid}")
+    
     convo = mdb.execute(
         text(
             """
-            SELECT conversation_id, initiator_user_id, initiator_role, subject, status, created_at, last_activity_at
-            FROM conversations WHERE conversation_id = :cid LIMIT 1
+            SELECT c.conversation_id, c.initiator_user_id, c.initiator_role, c.subject, c.counselor_id,
+                   c.status, c.created_at, c.last_activity_at,
+                   u.name AS counselor_name, u.email AS counselor_email
+            FROM conversations c
+            LEFT JOIN user u ON c.counselor_id = u.user_id
+            WHERE c.conversation_id = :cid LIMIT 1
             """
         ),
         {"cid": cid},
     ).mappings().first()
-    return dict(convo) if convo else {"conversation_id": cid, "initiator_user_id": uid, "initiator_role": "student", "subject": subject, "status": "open"}
+    
+    result = dict(convo) if convo else {"conversation_id": cid, "initiator_user_id": uid, "initiator_role": "student", "subject": subject, "counselor_id": counselor_id, "status": "open"}
+    print(f"[mobile_start_conversation] Returning: {result}")
+    return result
 
 
 @app.get("/api/mobile/conversations/{conversation_id}")
@@ -787,8 +832,12 @@ def mobile_get_conversation(
     convo = mdb.execute(
         text(
             """
-            SELECT conversation_id, initiator_user_id, initiator_role, subject, status, created_at, last_activity_at
-            FROM conversations WHERE conversation_id = :cid LIMIT 1
+            SELECT c.conversation_id, c.initiator_user_id, c.initiator_role, c.subject, c.counselor_id,
+                   c.status, c.created_at, c.last_activity_at,
+                   u.name AS counselor_name, u.email AS counselor_email
+            FROM conversations c
+            LEFT JOIN user u ON c.counselor_id = u.user_id
+            WHERE c.conversation_id = :cid LIMIT 1
             """
         ),
         {"cid": conversation_id},
@@ -922,10 +971,217 @@ def mobile_update_conversation(
         mdb.execute(text(f"UPDATE conversations SET {set_clause} WHERE conversation_id = :cid"), {**updates, "cid": conversation_id})
         mdb.commit()
     convo = mdb.execute(
-        text("SELECT conversation_id, initiator_user_id, initiator_role, subject, status, created_at, last_activity_at FROM conversations WHERE conversation_id = :cid"),
+        text("SELECT conversation_id, initiator_user_id, initiator_role, subject, counselor_id, status, created_at, last_activity_at FROM conversations WHERE conversation_id = :cid"),
         {"cid": conversation_id},
     ).mappings().first()
     return dict(convo) if convo else {"conversation_id": conversation_id, **updates}
+
+
+# --- Counselor Conversation Endpoints (for web dashboard, uses mobile DB) ---
+
+@app.get("/api/counselor/conversations")
+def counselor_list_conversations(
+    include_messages: bool = Query(False),
+    current_user: User = Depends(require_counselor),
+    mdb: Session = Depends(get_mobile_db),
+):
+    """List all conversations assigned to the current counselor."""
+    counselor_id = current_user.user_id
+    conv_rows = list(
+        mdb.execute(
+            text(
+                """
+                SELECT c.conversation_id, c.initiator_user_id, c.initiator_role,
+                       c.subject, c.counselor_id, c.status, c.created_at, c.last_activity_at,
+                       u.name AS student_name, u.email AS student_email, u.nickname AS student_nickname
+                FROM conversations c
+                LEFT JOIN user u ON c.initiator_user_id = u.user_id
+                WHERE c.counselor_id = :counselor_id
+                ORDER BY COALESCE(c.last_activity_at, c.created_at) DESC
+                """
+            ),
+            {"counselor_id": counselor_id},
+        ).mappings()
+    )
+    conversations = [dict(row) for row in conv_rows]
+    if include_messages and conversations:
+        for c in conversations:
+            msgs = list(
+                mdb.execute(
+                    text(
+                        """
+                        SELECT message_id, conversation_id, sender_id, content, is_read, timestamp
+                        FROM messages
+                        WHERE conversation_id = :cid
+                        ORDER BY timestamp ASC
+                        """
+                    ),
+                    {"cid": c["conversation_id"]},
+                ).mappings()
+            )
+            c["messages"] = [dict(m) for m in msgs]
+    return conversations
+
+
+@app.get("/api/counselor/conversations/{conversation_id}")
+def counselor_get_conversation(
+    conversation_id: int,
+    include_messages: bool = Query(True),
+    current_user: User = Depends(require_counselor),
+    mdb: Session = Depends(get_mobile_db),
+):
+    """Get a specific conversation assigned to the current counselor."""
+    counselor_id = current_user.user_id
+    convo = mdb.execute(
+        text(
+            """
+            SELECT c.conversation_id, c.initiator_user_id, c.initiator_role, c.subject, c.counselor_id,
+                   c.status, c.created_at, c.last_activity_at,
+                   u.name AS student_name, u.email AS student_email, u.nickname AS student_nickname
+            FROM conversations c
+            LEFT JOIN user u ON c.initiator_user_id = u.user_id
+            WHERE c.conversation_id = :cid AND c.counselor_id = :counselor_id
+            LIMIT 1
+            """
+        ),
+        {"cid": conversation_id, "counselor_id": counselor_id},
+    ).mappings().first()
+    if not convo:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found or not assigned to you")
+    data = dict(convo)
+    if include_messages:
+        msgs = list(
+            mdb.execute(
+                text(
+                    """
+                    SELECT message_id, conversation_id, sender_id, content, is_read, timestamp
+                    FROM messages WHERE conversation_id = :cid ORDER BY timestamp ASC
+                    """
+                ),
+                {"cid": conversation_id},
+            ).mappings()
+        )
+        data["messages"] = [dict(m) for m in msgs]
+    return data
+
+
+@app.get("/api/counselor/conversations/{conversation_id}/messages")
+def counselor_list_messages(
+    conversation_id: int,
+    current_user: User = Depends(require_counselor),
+    mdb: Session = Depends(get_mobile_db),
+):
+    """List messages for a conversation assigned to the current counselor."""
+    counselor_id = current_user.user_id
+    owner = mdb.execute(
+        text("SELECT counselor_id FROM conversations WHERE conversation_id = :cid"),
+        {"cid": conversation_id},
+    ).mappings().first()
+    if not owner or owner["counselor_id"] != counselor_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found or not assigned to you")
+    msgs = list(
+        mdb.execute(
+            text(
+                """
+                SELECT message_id, conversation_id, sender_id, content, is_read, timestamp
+                FROM messages WHERE conversation_id = :cid ORDER BY timestamp ASC
+                """
+            ),
+            {"cid": conversation_id},
+        ).mappings()
+    )
+    return [dict(m) for m in msgs]
+
+
+@app.post("/api/counselor/conversations/{conversation_id}/messages", status_code=status.HTTP_201_CREATED)
+def counselor_send_message(
+    conversation_id: int,
+    message_in: MessageSend,
+    current_user: User = Depends(require_counselor),
+    mdb: Session = Depends(get_mobile_db),
+):
+    """Send a message as a counselor to a conversation assigned to them."""
+    counselor_id = current_user.user_id
+    owner = mdb.execute(
+        text("SELECT counselor_id FROM conversations WHERE conversation_id = :cid"),
+        {"cid": conversation_id},
+    ).mappings().first()
+    if not owner or owner["counselor_id"] != counselor_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found or not assigned to you")
+    res = mdb.execute(
+        text(
+            """
+            INSERT INTO messages (conversation_id, sender_id, content, is_read, timestamp)
+            VALUES (:cid, :sid, :content, :is_read, NOW())
+            """
+        ),
+        {"cid": conversation_id, "sid": counselor_id, "content": message_in.content, "is_read": False},
+    )
+    mdb.execute(text("UPDATE conversations SET last_activity_at = NOW() WHERE conversation_id = :cid"), {"cid": conversation_id})
+    mdb.commit()
+    mid = res.lastrowid
+    row = mdb.execute(
+        text(
+            """
+            SELECT message_id, conversation_id, sender_id, content, is_read, timestamp
+            FROM messages WHERE message_id = :mid
+            """
+        ),
+        {"mid": mid},
+    ).mappings().first()
+    return dict(row) if row else {"message_id": mid, "conversation_id": conversation_id, "sender_id": counselor_id, "content": message_in.content, "is_read": False}
+
+
+@app.post("/api/counselor/conversations/{conversation_id}/read")
+def counselor_mark_read(
+    conversation_id: int,
+    current_user: User = Depends(require_counselor),
+    mdb: Session = Depends(get_mobile_db),
+):
+    """Mark all messages from student as read for a counselor."""
+    counselor_id = current_user.user_id
+    owner = mdb.execute(
+        text("SELECT counselor_id FROM conversations WHERE conversation_id = :cid"),
+        {"cid": conversation_id},
+    ).mappings().first()
+    if not owner or owner["counselor_id"] != counselor_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found or not assigned to you")
+    res = mdb.execute(
+        text("UPDATE messages SET is_read = 1 WHERE conversation_id = :cid AND sender_id <> :counselor_id"),
+        {"cid": conversation_id, "counselor_id": counselor_id},
+    )
+    mdb.commit()
+    return {"updated": res.rowcount or 0}
+
+
+@app.patch("/api/counselor/conversations/{conversation_id}")
+def counselor_update_conversation(
+    conversation_id: int,
+    conversation_in: ConversationUpdate,
+    current_user: User = Depends(require_counselor),
+    mdb: Session = Depends(get_mobile_db),
+):
+    """Update a conversation (e.g., close it) as a counselor."""
+    counselor_id = current_user.user_id
+    owner = mdb.execute(
+        text("SELECT counselor_id FROM conversations WHERE conversation_id = :cid"),
+        {"cid": conversation_id},
+    ).mappings().first()
+    if not owner or owner["counselor_id"] != counselor_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found or not assigned to you")
+    updates = {}
+    if conversation_in.status is not None:
+        updates["status"] = conversation_in.status.value if hasattr(conversation_in.status, "value") else conversation_in.status
+    if updates:
+        set_clause = ", ".join(f"{k} = :{k}" for k in updates.keys())
+        mdb.execute(text(f"UPDATE conversations SET {set_clause} WHERE conversation_id = :cid"), {**updates, "cid": conversation_id})
+        mdb.commit()
+    convo = mdb.execute(
+        text("SELECT conversation_id, initiator_user_id, initiator_role, subject, counselor_id, status, created_at, last_activity_at FROM conversations WHERE conversation_id = :cid"),
+        {"cid": conversation_id},
+    ).mappings().first()
+    return dict(convo) if convo else {"conversation_id": conversation_id, **updates}
+
 
 @app.get("/api/mood-trend")
 def mood_trend(
@@ -1324,6 +1580,54 @@ def create_emotional_checkin(
     return {"ok": True, "checkin_id": int(ins.lastrowid)}
 
 
+@app.get("/api/emotional-checkins")
+def list_emotional_checkins(
+    days: int = Query(7, ge=1, le=31),
+    limit: int = Query(200, ge=1, le=1000),
+    token: str = Depends(oauth2_scheme),
+):
+    """List recent emotional check-ins for the authenticated mobile user.
+
+    Returns raw rows from the mobile DB within the last `days` days, ordered by
+    newest first. Timestamps are formatted as ISO strings.
+    """
+    try:
+        data = decode_token(token)
+        uid = int(data.get("sub"))
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    # Include today by subtracting (days-1); e.g., 7 -> last 7 calendar days
+    start_dt = datetime.utcnow() - timedelta(days=days - 1)
+
+    q = text(
+        """
+        SELECT checkin_id, user_id, mood_level, energy_level, stress_level, comment, created_at
+        FROM emotional_checkin
+        WHERE user_id = :uid AND created_at >= :start
+        ORDER BY created_at DESC
+        LIMIT :lim
+        """
+    )
+    with mobile_engine.connect() as conn:
+        rows = list(conn.execute(q, {"uid": uid, "start": start_dt, "lim": limit}).mappings())
+        out = []
+        for r in rows:
+            created = r.get("created_at")
+            out.append(
+                {
+                    "checkin_id": r.get("checkin_id"),
+                    "user_id": r.get("user_id"),
+                    "mood_level": r.get("mood_level"),
+                    "energy_level": r.get("energy_level"),
+                    "stress_level": r.get("stress_level"),
+                    "comment": r.get("comment"),
+                    "created_at": created.strftime("%Y-%m-%dT%H:%M:%S") if created else None,
+                }
+            )
+        return out
+
+
 class JournalIn(BaseModel):
     content: str
 
@@ -1422,7 +1726,11 @@ def get_journal(journal_id: int, token: str = Depends(oauth2_scheme)):
 
 
 @app.delete("/api/journals/{journal_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_journal_mobile(journal_id: int, token: str = Depends(oauth2_scheme)):
+def delete_journal_mobile(
+    journal_id: int,
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+):
     """Delete a journal entry (soft delete) for mobile app."""
     try:
         data = decode_token(token)
@@ -1434,7 +1742,7 @@ def delete_journal_mobile(journal_id: int, token: str = Depends(oauth2_scheme)):
     check_q = text(
         """
         SELECT journal_id FROM journal
-        WHERE journal_id = :jid AND user_id = :uid AND (deleted_at IS NULL)
+        WHERE journal_id = :jid AND user_id = :uid
         LIMIT 1
         """
     )
@@ -1443,16 +1751,33 @@ def delete_journal_mobile(journal_id: int, token: str = Depends(oauth2_scheme)):
         if not row:
             raise HTTPException(status_code=404, detail="Journal not found")
 
-    # Soft delete by setting deleted_at
+    # Hard delete the journal row
     delete_q = text(
         """
-        UPDATE journal SET deleted_at = NOW()
+        DELETE FROM journal
         WHERE journal_id = :jid AND user_id = :uid
         """
     )
-    with mobile_engine.connect() as conn:
-        conn.execute(delete_q, {"jid": journal_id, "uid": uid})
-        conn.commit()
+    with mobile_engine.begin() as conn:
+        res = conn.execute(delete_q, {"jid": journal_id, "uid": uid})
+        if (res.rowcount or 0) == 0:
+            # Fallback to soft delete in case of restrictive constraints/environment
+            soft_q = text(
+                """
+                UPDATE journal SET deleted_at = NOW()
+                WHERE journal_id = :jid AND user_id = :uid AND (deleted_at IS NULL)
+                """
+            )
+            soft = conn.execute(soft_q, {"jid": journal_id, "uid": uid})
+            if (soft.rowcount or 0) == 0:
+                raise HTTPException(status_code=404, detail="Journal not found")
+
+    # Remove any stored sentiments associated with this journal entry
+    try:
+        SentimentService.remove_existing_journal_sentiments(db, journal_id)
+        db.commit()
+    except Exception:
+        db.rollback()
 
     return None
 

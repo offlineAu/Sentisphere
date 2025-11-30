@@ -40,7 +40,8 @@ export function Button({ title, onPress, variant = 'primary', style, textStyle, 
     },
     text: {
       color: variant === 'primary' ? '#fff' : palette.text,
-      fontWeight: '600',
+      fontFamily: 'Inter_600SemiBold',
+      fontSize: 15,
     },
   });
 

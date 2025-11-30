@@ -32,6 +32,7 @@ export default function JournalListScreen() {
   const animTab = useRef(new Animated.Value(0)).current;
   // Track currently open swipe row so only one stays open
   const openSwipeRef = useRef<Swipeable | null>(null);
+  const fetchEntriesRef = useRef<(() => void) | null>(null);
   const onTabChange = (next: 0 | 1) => {
     setTab(next);
     if (Platform.OS !== 'web') {
@@ -150,11 +151,14 @@ export default function JournalListScreen() {
       // on focus - run entrance animation
       openSwipeRef.current?.close();
       runScreenEntrance();
+      if (tab === 1) {
+        fetchEntriesRef.current?.();
+      }
       return () => {
         // on blur
         openSwipeRef.current?.close();
       };
-    }, [])
+    }, [tab])
   );
 
   // Editor state
@@ -326,6 +330,10 @@ export default function JournalListScreen() {
     }
   }, [API]);
 
+  useEffect(() => {
+    fetchEntriesRef.current = fetchEntries;
+  }, [fetchEntries]);
+
   useEffect(() => { fetchEntries(); }, []);
   useEffect(() => { if (tab === 1) fetchEntries(); }, [tab, fetchEntries]);
 
@@ -353,7 +361,8 @@ export default function JournalListScreen() {
   }, [tab]);
 
   // Active border color per-field
-  const focusBlue = '#3B82F6';
+  const focusGreen = '#0D8C4F';
+  const focusGreenSubtle = '#0D8C4F15'; // subtle background
 
   // Save handler (POST to backend)
   const handleSave = async () => {
@@ -457,12 +466,19 @@ export default function JournalListScreen() {
                   placeholderTextColor="#9BA1A6"
                   value={title}
                   onChangeText={setTitle}
-                  style={StyleSheet.flatten([styles.titleInput, { borderColor: titleFocused ? focusBlue : palette.border }])}
+                  selectionColor={focusGreen}
                   onFocus={() => setTitleFocused(true)}
                   onBlur={() => setTitleFocused(false)}
+                  // @ts-ignore - web outline
+                  style={[
+                    styles.titleInput,
+                    { borderColor: titleFocused ? focusGreen : palette.border },
+                    { borderWidth: titleFocused ? 1.5 : 1 },
+                    { outlineStyle: 'none' } as any,
+                  ]}
                 />
 
-                <View style={StyleSheet.flatten([styles.editorWrap, { borderColor: bodyFocused ? focusBlue : palette.border, backgroundColor: '#FFFFFF' }])}> 
+                <View style={StyleSheet.flatten([styles.editorWrap, { borderColor: bodyFocused ? focusGreen : palette.border, borderWidth: bodyFocused ? 1.5 : 1 }])}> 
                   <TextInput
                     placeholder="What's on your mind today? Write about your thoughts, feelings, or experiences..."
                     placeholderTextColor="#9BA1A6"
@@ -470,9 +486,11 @@ export default function JournalListScreen() {
                     scrollEnabled
                     value={body}
                     onChangeText={setBody}
+                    selectionColor={focusGreen}
                     onFocus={() => setBodyFocused(true)}
                     onBlur={() => setBodyFocused(false)}
-                    style={styles.textarea}
+                    // @ts-ignore - web outline
+                    style={[styles.textarea, { outlineStyle: 'none' }]}
                   />
                 </View>
 
@@ -504,12 +522,19 @@ export default function JournalListScreen() {
                     placeholderTextColor="#9BA1A6"
                     value={title}
                     onChangeText={setTitle}
-                    style={StyleSheet.flatten([styles.titleInput, { borderColor: titleFocused ? focusBlue : palette.border }])}
+                    selectionColor={focusGreen}
                     onFocus={() => setTitleFocused(true)}
                     onBlur={() => setTitleFocused(false)}
+                    // @ts-ignore - web outline
+                    style={[
+                      styles.titleInput,
+                      { borderColor: titleFocused ? focusGreen : palette.border },
+                      { borderWidth: titleFocused ? 1.5 : 1 },
+                      { outlineStyle: 'none' } as any,
+                    ]}
                   />
 
-                  <View style={StyleSheet.flatten([styles.editorWrap, { borderColor: bodyFocused ? focusBlue : palette.border, backgroundColor: '#FFFFFF' }])}> 
+                  <View style={StyleSheet.flatten([styles.editorWrap, { borderColor: bodyFocused ? focusGreen : palette.border, borderWidth: bodyFocused ? 1.5 : 1 }])}> 
                     <TextInput
                       placeholder="What's on your mind today? Write about your thoughts, feelings, or experiences..."
                       placeholderTextColor="#9BA1A6"
@@ -517,9 +542,11 @@ export default function JournalListScreen() {
                       scrollEnabled
                       value={body}
                       onChangeText={setBody}
+                      selectionColor={focusGreen}
                       onFocus={() => setBodyFocused(true)}
                       onBlur={() => setBodyFocused(false)}
-                      style={styles.textarea}
+                      // @ts-ignore - web outline
+                      style={[styles.textarea, { outlineStyle: 'none' }]}
                     />
                   </View>
 
