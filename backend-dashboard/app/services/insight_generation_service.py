@@ -37,16 +37,28 @@ class InsightComputationResult:
 
 class InsightGenerationService:
     MOOD_SCORE_MAP: Dict[str, int] = {
-        "Very Sad": 10,
-        "Sad": 25,
+        "Terrible": 11,
+        "Bad": 22,
+        "Upset": 33,
+        "Anxious": 44,
+        "Meh": 55,
+        "Okay": 66,
+        "Great": 77,
+        "Loved": 88,
+        "Awesome": 100,
+        # Backwards compatibility/aliases
+        "Very Sad": 11,
+        "Sad": 22,
         "Neutral": 50,
         "Good": 75,
-        "Happy": 90,
-        "Very Happy": 95,
+        "Happy": 80,
+        "Very Happy": 90,
         "Excellent": 100,
     }
 
     HIGH_STRESS_LABELS = {"High Stress", "Very High Stress"}
+    NEGATIVE_MOODS = {"Very Sad", "Terrible", "Sad", "Bad", "Upset", "Anxious"}
+    DISTRESS_KEYWORDS_EN = {"suicide", "kill myself", "want to die", "end it all", "no point", "hopeless", "worthless"}
 
     @staticmethod
     def _ensure_table() -> None:
@@ -90,20 +102,105 @@ class InsightGenerationService:
         return s
 
     @staticmethod
-    def _match_keywords(texts: List[str]) -> List[str]:
+    def _match_keywords(texts: List[str]) -> Tuple[List[str], List[str]]:
+        """Match keywords and return (concepts, distress_keywords)."""
         mapping = InsightGenerationService._load_bisaya_mapping()
-        if not mapping:
-            return []
         found: set[str] = set()
-        low = {k.lower(): v for k, v in mapping.items()}
+        distress_found: set[str] = set()
+        low = {k.lower(): v for k, v in mapping.items()} if mapping else {}
+        
         for t in texts:
             if not t:
                 continue
             lt = t.lower()
+            # Check Bisaya keywords
             for phrase, concept in low.items():
                 if phrase in lt:
                     found.add(concept)
-        return sorted(found)
+            # Check English distress keywords
+            for kw in InsightGenerationService.DISTRESS_KEYWORDS_EN:
+                if kw in lt:
+                    distress_found.add(kw)
+        return sorted(found), sorted(distress_found)
+
+    @staticmethod
+    def _detect_streaks(daily_flags: Dict[str, bool], min_length: int = 3) -> List[Dict[str, Any]]:
+        """Detect consecutive day streaks where flag is True."""
+        streaks: List[Dict[str, Any]] = []
+        sorted_days = sorted(daily_flags.keys())
+        current_streak_start: Optional[str] = None
+        current_length = 0
+
+        for i, day in enumerate(sorted_days):
+            if daily_flags[day]:
+                if current_streak_start is None:
+                    current_streak_start = day
+                current_length += 1
+            else:
+                if current_length >= min_length:
+                    streaks.append({
+                        "start": current_streak_start,
+                        "end": sorted_days[i - 1],
+                        "length": current_length
+                    })
+                current_streak_start = None
+                current_length = 0
+
+        # Handle streak at end
+        if current_length >= min_length and current_streak_start:
+            streaks.append({
+                "start": current_streak_start,
+                "end": sorted_days[-1],
+                "length": current_length
+            })
+
+        return streaks
+
+    @staticmethod
+    def _longest_streak_length(daily_flags: Dict[str, bool]) -> int:
+        """Get the longest streak of consecutive True days."""
+        streaks = InsightGenerationService._detect_streaks(daily_flags, min_length=1)
+        return max((s["length"] for s in streaks), default=0)
+
+    @staticmethod
+    def _detect_sudden_drops(daily: List[Dict[str, Any]], threshold: int = 20) -> List[Dict[str, Any]]:
+        """Detect sudden mood drops between consecutive days."""
+        drops: List[Dict[str, Any]] = []
+        for i in range(1, len(daily)):
+            prev = daily[i - 1]["avg_mood_score"]
+            cur = daily[i]["avg_mood_score"]
+            drop = prev - cur
+            if drop >= threshold:
+                drops.append({
+                    "date": daily[i]["date"],
+                    "from": prev,
+                    "to": cur,
+                    "drop": drop
+                })
+        return drops
+
+    @staticmethod
+    def _compute_feel_better_streak(checkins: List[Dict[str, Any]]) -> int:
+        """Count consecutive 'No' responses for feel_better."""
+        by_day: Dict[str, List[str]] = defaultdict(list)
+        for c in checkins:
+            dt = c.get("created_at")
+            fb = c.get("feel_better")
+            if not fb:
+                continue
+            try:
+                d = (datetime.fromisoformat(dt) if isinstance(dt, str) else dt).date().isoformat()
+            except Exception:
+                continue
+            by_day[d].append(fb)
+        
+        # Check majority per day
+        daily_no: Dict[str, bool] = {}
+        for day, vals in by_day.items():
+            no_count = sum(1 for v in vals if v == "No")
+            daily_no[day] = no_count > len(vals) // 2
+        
+        return InsightGenerationService._longest_streak_length(daily_no)
 
     @staticmethod
     def _cluster_journal_themes(texts: List[str], max_k: int = 4) -> List[dict]:
@@ -116,19 +213,19 @@ class InsightGenerationService:
         snippets = [s for s in snippets if len(s) >= 10]
         if len(snippets) < 3:
             # too few items; just map keywords
-            keys = InsightGenerationService._match_keywords(snippets)
+            keys, _ = InsightGenerationService._match_keywords(snippets)
             return [{"label": k, "count": 1, "examples": []} for k in keys]
 
         model = _get_embed_model()
         if not model:
-            keys = InsightGenerationService._match_keywords(snippets)
+            keys, _ = InsightGenerationService._match_keywords(snippets)
             return [{"label": k, "count": 1, "examples": []} for k in keys]
 
         try:
             import numpy as _np  # type: ignore
             from sklearn.cluster import KMeans  # type: ignore
         except Exception:
-            keys = InsightGenerationService._match_keywords(snippets)
+            keys, _ = InsightGenerationService._match_keywords(snippets)
             return [{"label": k, "count": 1, "examples": []} for k in keys]
 
         vecs = model.encode(snippets, normalize_embeddings=False)
@@ -236,33 +333,100 @@ class InsightGenerationService:
         *,
         sentiment_by_day: Dict[str, Counter],
         stress_by_day: Dict[str, int],
-        high_alert_present: bool,
+        alerts: List[Dict[str, Any]],
         late_night_count: int,
+        high_stress_streak: int = 0,
+        negative_mood_streak: int = 0,
+        feel_better_no_streak: int = 0,
+        sudden_drops: List[Dict[str, Any]] = None,
+        distress_keywords: List[str] = None,
     ) -> Tuple[int, str, str]:
+        """Enhanced risk scoring with weighted factors."""
         points = 0
         reasons: List[str] = []
+        sudden_drops = sudden_drops or []
+        distress_keywords = distress_keywords or []
+
+        # 1. Negative sentiment days
         neg_days = sum(1 for _d, cnt in sentiment_by_day.items() if cnt.get("negative", 0) >= max(cnt.get("positive", 0), 1))
-        if neg_days >= 3:
-            points += 2
-            reasons.append(f"negative_days>={neg_days}")
-        high_stress_days = sum(1 for _d, count in stress_by_day.items() if count >= 1)
-        if high_stress_days >= 3:
-            points += 3
-            reasons.append(f"high_stress_days={high_stress_days}")
-        if high_alert_present:
+        if neg_days >= 5:
             points += 4
-            reasons.append("high_or_critical_alert_present")
-        if late_night_count >= 3:
+            reasons.append(f"extended_negative_period={neg_days}")
+        elif neg_days >= 3:
             points += 2
+            reasons.append(f"negative_days={neg_days}")
+
+        # 2. High-stress streak detection
+        if high_stress_streak >= 5:
+            points += 5
+            reasons.append(f"high_stress_streak={high_stress_streak}")
+        elif high_stress_streak >= 3:
+            points += 3
+            reasons.append(f"high_stress_days={high_stress_streak}")
+
+        # 3. Alert severity weighting
+        critical_alerts = sum(1 for a in alerts if str(a.get("severity")).lower() == "critical")
+        high_alerts = sum(1 for a in alerts if str(a.get("severity")).lower() == "high")
+        if critical_alerts > 0:
+            points += 5 + min(critical_alerts - 1, 3)  # Cap at +8
+            reasons.append(f"critical_alerts={critical_alerts}")
+        if high_alerts > 0:
+            points += 3 + min(high_alerts - 1, 2)  # Cap at +5
+            reasons.append(f"high_alerts={high_alerts}")
+
+        # 4. Late-night journaling pattern
+        if late_night_count >= 5:
+            points += 3
             reasons.append(f"late_night_journaling={late_night_count}")
-        if points <= 2:
+        elif late_night_count >= 3:
+            points += 2
+            reasons.append(f"late_night_journals={late_night_count}")
+
+        # 5. Sudden mood drop detection
+        if sudden_drops:
+            max_drop = max(d["drop"] for d in sudden_drops)
+            if max_drop >= 30:
+                points += 4
+                reasons.append(f"severe_mood_drop={max_drop}")
+            elif max_drop >= 20:
+                points += 2
+                reasons.append(f"sudden_mood_drop={max_drop}")
+
+        # 6. "Feel Better = No" streak
+        if feel_better_no_streak >= 5:
+            points += 3
+            reasons.append(f"no_improvement_streak={feel_better_no_streak}")
+        elif feel_better_no_streak >= 3:
+            points += 2
+            reasons.append(f"feel_better_no_streak={feel_better_no_streak}")
+
+        # 7. Negative mood streak
+        if negative_mood_streak >= 5:
+            points += 4
+            reasons.append(f"negative_mood_streak={negative_mood_streak}")
+        elif negative_mood_streak >= 3:
+            points += 2
+            reasons.append(f"neg_mood_days={negative_mood_streak}")
+
+        # 8. Distress keywords (Bisaya/English)
+        keyword_count = len(distress_keywords)
+        if keyword_count >= 3:
+            points += 3
+            reasons.append(f"distress_keywords={keyword_count}")
+        elif keyword_count >= 1:
+            points += 2
+            reasons.append(f"keyword_flag={distress_keywords[0]}")
+
+        # Determine level
+        if points <= 3:
             level = "low"
-        elif points <= 5:
+        elif points <= 7:
             level = "medium"
-        elif points <= 8:
+        elif points <= 11:
             level = "high"
         else:
             level = "critical"
+
         return points, ";".join(reasons), level
 
     @staticmethod
@@ -299,9 +463,9 @@ class InsightGenerationService:
             "energy": dict(energy_dist),
         }
 
-        # Keyword concepts
+        # Keyword concepts and distress detection
         redacted_texts = [j.get("redacted_excerpt") or "" for j in journals]
-        keyword_concepts = InsightGenerationService._match_keywords(redacted_texts)
+        keyword_concepts, distress_keywords = InsightGenerationService._match_keywords(redacted_texts)
         journal_themes = InsightGenerationService._cluster_journal_themes(redacted_texts)
 
         # Risk factors (for metadata and recommendation)
@@ -315,7 +479,11 @@ class InsightGenerationService:
             sent = (s.get("sentiment") or "").lower()
             if sent:
                 sentiment_by_day[d][sent] += 1
+        
         stress_by_day: Dict[str, int] = defaultdict(int)
+        daily_high_stress: Dict[str, bool] = {}
+        daily_negative_mood: Dict[str, bool] = {}
+        
         for c in checkins:
             dt = c.get("created_at")
             try:
@@ -324,7 +492,23 @@ class InsightGenerationService:
                 continue
             if (c.get("stress_level") or "") in InsightGenerationService.HIGH_STRESS_LABELS:
                 stress_by_day[d] += 1
-        high_alert_present = any((str(a.get("severity")).lower() in ("high", "critical")) for a in alerts)
+                daily_high_stress[d] = True
+            else:
+                daily_high_stress.setdefault(d, False)
+            if (c.get("mood_level") or "") in InsightGenerationService.NEGATIVE_MOODS:
+                daily_negative_mood[d] = True
+            else:
+                daily_negative_mood.setdefault(d, False)
+        
+        # Calculate streaks
+        high_stress_streak = InsightGenerationService._longest_streak_length(daily_high_stress)
+        negative_mood_streak = InsightGenerationService._longest_streak_length(daily_negative_mood)
+        feel_better_no_streak = InsightGenerationService._compute_feel_better_streak(checkins)
+        
+        # Detect sudden mood drops
+        sudden_drops = InsightGenerationService._detect_sudden_drops(daily)
+        
+        # Late night journaling
         late_night_count = 0
         for j in journals:
             dt = j.get("created_at")
@@ -334,43 +518,106 @@ class InsightGenerationService:
                 continue
             if 0 <= t.hour <= 4:
                 late_night_count += 1
+        
+        # Enhanced risk scoring
         score, reason, level = InsightGenerationService._risk_score(
             sentiment_by_day=sentiment_by_day,
             stress_by_day=stress_by_day,
-            high_alert_present=high_alert_present,
+            alerts=alerts,
             late_night_count=late_night_count,
+            high_stress_streak=high_stress_streak,
+            negative_mood_streak=negative_mood_streak,
+            feel_better_no_streak=feel_better_no_streak,
+            sudden_drops=sudden_drops,
+            distress_keywords=distress_keywords,
         )
 
-        # Week average
+        # Week average and change calculation
         all_vals = [d["avg_mood_score"] for d in daily]
         week_avg = round(sum(all_vals) / len(all_vals), 2) if all_vals else 0
+        
+        # Calculate week-over-week change (if we have enough data)
+        prev_week_avg = None
+        change_percent = None
+        if len(daily) >= 4:
+            mid = len(daily) // 2
+            first_half = [d["avg_mood_score"] for d in daily[:mid]]
+            second_half = [d["avg_mood_score"] for d in daily[mid:]]
+            if first_half and second_half:
+                prev_week_avg = round(sum(first_half) / len(first_half), 2)
+                curr_half_avg = round(sum(second_half) / len(second_half), 2)
+                if prev_week_avg > 0:
+                    change_percent = round((curr_half_avg - prev_week_avg) / prev_week_avg * 100, 1)
+
+        # Streaks data for output
+        streaks_data = {
+            "high_stress_consecutive_days": high_stress_streak,
+            "negative_mood_consecutive_days": negative_mood_streak,
+            "feel_better_no_streak": feel_better_no_streak,
+        }
+
+        # What improved / What declined analysis
+        what_improved: List[str] = []
+        what_declined: List[str] = []
+        
+        if trend == "improving":
+            what_improved.append("overall_mood")
+        elif trend == "worsening":
+            what_declined.append("overall_mood")
+        
+        if high_stress_streak == 0 and sum(stress_by_day.values()) < 2:
+            what_improved.append("stress_management")
+        elif high_stress_streak >= 3:
+            what_declined.append("stress_levels")
+        
+        # Check energy trend
+        high_energy = energy_dist.get("High", 0) + energy_dist.get("Very High", 0)
+        low_energy = energy_dist.get("Low", 0) + energy_dist.get("Very Low", 0)
+        if high_energy > low_energy:
+            what_improved.append("energy_levels")
+        elif low_energy > high_energy:
+            what_declined.append("energy_levels")
 
         # Summary + recommendation (rule-based; no LLM dependency)
         if trend == "improving":
             title = "Wellness Surge"
-            summary = "Mood improved over the period."
+            summary = f"Mood improved over the period with a {abs(change_percent or 0):.0f}% positive change." if change_percent else "Mood improved over the period."
             recommendation = "Continue supportive routines and acknowledge positive changes."
         elif trend == "worsening":
             title = "Wellness Dip"
-            summary = "Mood declined over the period."
+            summary = f"Mood declined {abs(change_percent or 0):.0f}% over the period with elevated stress levels." if change_percent else "Mood declined over the period."
             recommendation = "Consider proactive outreach and targeted check-ins for struggling students."
         else:
             title = "Stable Wellness"
-            summary = "Mood trend was stable."
+            summary = "Mood trend was stable with consistent patterns observed."
             recommendation = "Maintain consistent engagement and monitor for emerging concerns."
 
-        if level in ("high", "critical"):
+        if level == "critical":
+            recommendation = "URGENT: Immediate outreach required. Review critical alerts and high-risk patterns."
+        elif level == "high":
             recommendation = "Prioritize outreach to flagged students and review recent alerts and high-stress patterns."
 
         data: Dict[str, Any] = {
             "title": title,
             "summary": summary,
             "dominant_emotions": dominant_emotions,
-            "mood_trends": {"daily": daily, "trend": trend},
+            "mood_trends": {
+                "daily": daily,
+                "trend": trend,
+                "week_avg": week_avg,
+                "prev_week_avg": prev_week_avg,
+                "change_percent": change_percent,
+            },
+            "sentiment_breakdown": sentiment_breakdown,
             "stress_energy_patterns": stress_energy_patterns,
+            "streaks": streaks_data,
+            "sudden_drops": sudden_drops,
             "top_concerns": keyword_concepts,
+            "triggers_detected": distress_keywords,
             "journal_themes": journal_themes,
-            "recommendation": recommendation,
+            "what_improved": what_improved,
+            "what_declined": what_declined,
+            "recommendations": [recommendation],
             "metadata": {
                 "risk_level": level,
                 "risk_score": score,
@@ -379,6 +626,7 @@ class InsightGenerationService:
                 "journal_count": len(journals),
                 "checkin_count": len(checkins),
                 "alerts_count": len(alerts),
+                "generated_at": datetime.utcnow().isoformat() + "Z",
             },
         }
         return InsightComputationResult(data=data, risk_level=level, metadata=data["metadata"]) 
@@ -440,10 +688,59 @@ class InsightGenerationService:
             )
         )
 
+        # Calculate streaks for behavioral analysis
+        daily_high_stress: Dict[str, bool] = {}
+        daily_negative_mood: Dict[str, bool] = {}
+        stress_by_day: Dict[str, int] = defaultdict(int)
+        sentiment_by_day: Dict[str, Counter] = defaultdict(Counter)
+        
+        for c in checkins:
+            dt = c.get("created_at")
+            try:
+                d = (datetime.fromisoformat(dt) if isinstance(dt, str) else dt).date().isoformat()
+            except Exception:
+                continue
+            if str(c.get("stress_level")) in InsightGenerationService.HIGH_STRESS_LABELS:
+                daily_high_stress[d] = True
+                stress_by_day[d] += 1
+            else:
+                daily_high_stress.setdefault(d, False)
+            if str(c.get("mood_level")) in InsightGenerationService.NEGATIVE_MOODS:
+                daily_negative_mood[d] = True
+            else:
+                daily_negative_mood.setdefault(d, False)
+            sent = str(c.get("sentiment") or "").lower()
+            if sent:
+                sentiment_by_day[d][sent] += 1
+        
+        for j in journals:
+            dt = j.get("created_at")
+            try:
+                d = (datetime.fromisoformat(dt) if isinstance(dt, str) else dt).date().isoformat()
+            except Exception:
+                continue
+            sent = str(j.get("sentiment") or "").lower()
+            if sent:
+                sentiment_by_day[d][sent] += 1
+        
+        high_stress_streak = InsightGenerationService._longest_streak_length(daily_high_stress)
+        negative_mood_streak = InsightGenerationService._longest_streak_length(daily_negative_mood)
+        feel_better_no_streak = InsightGenerationService._compute_feel_better_streak(checkins)
+        sudden_drops = InsightGenerationService._detect_sudden_drops(daily)
+        
+        # Distress keyword detection
+        redacted_texts = [j.get("redacted_excerpt") or "" for j in journals]
+        _, distress_keywords = InsightGenerationService._match_keywords(redacted_texts)
+        
         risk_flags = {
             "negative_sentiment_ratio_percent": negative_ratio,
             "high_stress_days": high_stress_days,
+            "high_stress_streak": high_stress_streak,
+            "negative_mood_streak": negative_mood_streak,
+            "feel_better_no_streak": feel_better_no_streak,
             "late_night_journals": late_night_journals,
+            "sudden_mood_drops": len(sudden_drops),
+            "distress_keywords_found": len(distress_keywords),
         }
 
         # Simple clusters: time-of-day and day-of-week distributions
@@ -469,39 +766,39 @@ class InsightGenerationService:
             dow_cnt[t.weekday()] += 1  # 0=Mon
         behavioral_clusters = {
             "time_of_day": dict(tod_cnt),
-            "day_of_week": dict(dow_cnt),
+            "day_of_week": {str(k): v for k, v in dow_cnt.items()},
         }
 
-        # Recommendation & metadata
-        recommendation = "Encourage consistent routines; address high-stress periods and watch negative sentiment trends."
-        if negative_ratio >= 40 or high_stress_days >= 3:
-            recommendation = "Prioritize outreach and coping strategies; monitor high-stress days and negative sentiment spikes."
+        # Enhanced risk scoring
+        score, reason, level = InsightGenerationService._risk_score(
+            sentiment_by_day=sentiment_by_day,
+            stress_by_day=stress_by_day,
+            alerts=alerts,
+            late_night_count=late_night_journals,
+            high_stress_streak=high_stress_streak,
+            negative_mood_streak=negative_mood_streak,
+            feel_better_no_streak=feel_better_no_streak,
+            sudden_drops=sudden_drops,
+            distress_keywords=distress_keywords,
+        )
 
-        # Risk level heuristic
-        level = "low"
-        score = 0
-        if negative_ratio >= 40:
-            score += 3
-        if high_stress_days >= 3:
-            score += 3
-        if late_night_journals >= 3:
-            score += 2
-        if score <= 2:
-            level = "low"
-        elif score <= 5:
-            level = "medium"
-        elif score <= 7:
-            level = "high"
+        # Recommendation based on risk level
+        if level == "critical":
+            recommendation = "URGENT: Immediate behavioral intervention required. Critical patterns detected."
+        elif level == "high":
+            recommendation = "Prioritize outreach and coping strategies; monitor high-stress days and negative sentiment spikes."
+        elif level == "medium":
+            recommendation = "Monitor behavioral patterns closely; consider preventive check-ins."
         else:
-            level = "critical"
+            recommendation = "Encourage consistent routines; continue positive engagement."
 
         # Themes via embeddings (if available)
-        redacted_texts = [j.get("redacted_excerpt") or "" for j in journals]
         themes = InsightGenerationService._cluster_journal_themes(redacted_texts)
 
         data: Dict[str, Any] = {
             "recurring_emotional_patterns": recurring_emotional_patterns,
             "irregular_changes": irregular_changes,
+            "sudden_drops": sudden_drops,
             "risk_flags": risk_flags,
             "behavioral_clusters": behavioral_clusters,
             "themes": themes,
@@ -509,9 +806,11 @@ class InsightGenerationService:
             "metadata": {
                 "risk_level": level,
                 "risk_score": score,
+                "risk_reasoning": reason,
                 "journal_count": len(journals),
                 "checkin_count": len(checkins),
                 "alerts_count": len(alerts),
+                "generated_at": datetime.utcnow().isoformat() + "Z",
             },
         }
         return InsightComputationResult(data=data, risk_level=level, metadata=data["metadata"]) 
