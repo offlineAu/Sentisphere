@@ -261,6 +261,8 @@ export default function CounselorDashboard() {
   const [sentimentBreakdown, setSentimentBreakdown] = useState<any[]>([]);
   const [checkinBreakdown, setCheckinBreakdown] = useState<{ mood: any[]; energy: any[]; stress: any[] } | null>(null);
   const [appointmentLogs, setAppointmentLogs] = useState<any[]>([]);
+  const [appointmentPage, setAppointmentPage] = useState(0);
+  const APPOINTMENTS_PER_PAGE = 5;
   const [recentAlerts, setRecentAlerts] = useState<any[]>([]);
   const [allAlerts, setAllAlerts] = useState<any[]>([]);
   const [showAllAlerts, setShowAllAlerts] = useState(false);
@@ -344,13 +346,15 @@ export default function CounselorDashboard() {
   );
 
   const moodScale = [
-    { value: 1, label: 'Very Sad' },
-    { value: 2, label: 'Sad' },
-    { value: 3, label: 'Neutral' },
-    { value: 4, label: 'Good' },
-    { value: 5, label: 'Happy' },
-    { value: 6, label: 'Very Happy' },
-    { value: 7, label: 'Excellent' },
+    { value: 1, label: 'Terrible' },
+    { value: 2, label: 'Bad' },
+    { value: 3, label: 'Upset' },
+    { value: 4, label: 'Anxious' },
+    { value: 5, label: 'Meh' },
+    { value: 6, label: 'Okay' },
+    { value: 7, label: 'Great' },
+    { value: 8, label: 'Loved' },
+    { value: 9, label: 'Awesome' },
   ];
 
   const labelForScore = (v: number) => {
@@ -1032,13 +1036,15 @@ export default function CounselorDashboard() {
                 </button>
               </div>
               <div className="text-sm text-gray-700 space-y-1">
-                <div><span className="font-medium">1</span> = Very Sad</div>
-                <div><span className="font-medium">2</span> = Sad</div>
-                <div><span className="font-medium">3</span> = Neutral</div>
-                <div><span className="font-medium">4</span> = Good</div>
-                <div><span className="font-medium">5</span> = Happy</div>
-                <div><span className="font-medium">6</span> = Very Happy</div>
-                <div><span className="font-medium">7</span> = Excellent</div>
+                <div><span className="font-medium">1</span> = Upset</div>
+                <div><span className="font-medium">2</span> = Terrible</div>
+                <div><span className="font-medium">3</span> = Bad</div>
+                <div><span className="font-medium">4</span> = Anxious</div>
+                <div><span className="font-medium">5</span> = Meh</div>
+                <div><span className="font-medium">6</span> = Okay</div>
+                <div><span className="font-medium">7</span> = Loved</div>
+                <div><span className="font-medium">8</span> = Great</div>
+                <div><span className="font-medium">9</span> = Awesome</div>
               </div>
             </div>
           </div>
@@ -1150,7 +1156,7 @@ export default function CounselorDashboard() {
                           );
                         }}
                       />
-                      <YAxis domain={[1, 7]} ticks={[1,2,3,4,5,6,7]} tickFormatter={(v) => labelForScore(Number(v))} stroke="var(--primary)" />
+                      <YAxis domain={[1, 9]} ticks={[1,2,3,4,5,6,7,8,9]} tickFormatter={(v) => labelForScore(Number(v))} stroke="var(--primary)" />
                       <RTooltip content={({ active, payload }) => {
                         if (active && payload && payload.length) {
                           const val = payload[0].value as number;
@@ -1422,13 +1428,13 @@ export default function CounselorDashboard() {
                         title: 'Mood',
                         key: 'mood' as const,
                         color: '#10b981',
-                        levels: ['Very Sad', 'Sad', 'Neutral', 'Good', 'Happy', 'Very Happy', 'Excellent'],
+                        levels: ['Awesome', 'Great', 'Loved', 'Okay', 'Meh', 'Anxious', 'Bad', 'Terrible', 'Upset'],
                       },
                       {
                         title: 'Energy',
                         key: 'energy' as const,
                         color: '#3b82f6',
-                        levels: ['Very Low', 'Low', 'Moderate', 'High', 'Very High'],
+                        levels: ['Low', 'Moderate', 'High'],
                       },
                       {
                         title: 'Stress',
@@ -1616,16 +1622,29 @@ export default function CounselorDashboard() {
           </div>
           {/* Right rail: Appointment Logs */}
           <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow p-5 hover:shadow-md transition-all duration-300 border border-gray-100 flex flex-col self-start">
-            <h2 className="text-lg font-semibold mb-4 text-primary">Appointment Logs</h2>
-            <div className="space-y-3 pr-1 overflow-y-auto max-h-[28rem]">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-primary">Appointment Logs</h2>
+              {appointmentLogs.length > APPOINTMENTS_PER_PAGE && (
+                <span className="text-xs text-gray-500">
+                  {appointmentPage * APPOINTMENTS_PER_PAGE + 1}-{Math.min((appointmentPage + 1) * APPOINTMENTS_PER_PAGE, appointmentLogs.length)} of {appointmentLogs.length}
+                </span>
+              )}
+            </div>
+            <div className="space-y-3 pr-1 min-h-[280px]">
               {appointmentLogs.length === 0 ? (
                 <div className="text-[#6b7280] text-sm">No logs yet.</div>
               ) : (
-                appointmentLogs.map((log, idx) => (
+                appointmentLogs
+                  .slice(appointmentPage * APPOINTMENTS_PER_PAGE, (appointmentPage + 1) * APPOINTMENTS_PER_PAGE)
+                  .map((log, idx) => (
                   <div key={`${String(log?.log_id ?? 'log')}-${String(log?.downloaded_at ?? log?.created_at ?? idx)}-${idx}`} className={`${styles.tileRow}`}>
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <div className="text-sm font-semibold text-[#111827]">{log.form_type || 'Form'} downloaded</div>
-                      <div className="text-xs text-[#6b7280]">User #{log.user_id} • {formatDate(log.downloaded_at, true)}</div>
+                      <div className="text-xs text-[#6b7280]">
+                        <span className="font-medium text-primary">{log.user_nickname || log.user_name || `User #${log.user_id}`}</span>
+                        <span className="mx-1">•</span>
+                        {formatDate(log.downloaded_at, true)}
+                      </div>
                       {log.remarks && <div className="text-[11px] text-[#94a3b8] truncate">{log.remarks}</div>}
                     </div>
                     <span className="text-[#bdbdbd] text-xl">↓</span>
@@ -1633,6 +1652,37 @@ export default function CounselorDashboard() {
                 ))
               )}
             </div>
+            {/* Pagination controls */}
+            {appointmentLogs.length > APPOINTMENTS_PER_PAGE && (
+              <div className="flex items-center justify-center gap-2 mt-3 pt-3 border-t">
+                <button
+                  onClick={() => setAppointmentPage(p => Math.max(0, p - 1))}
+                  disabled={appointmentPage === 0}
+                  className="p-1 rounded-full border hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                  aria-label="Previous page"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                <div className="flex gap-1">
+                  {Array.from({ length: Math.ceil(appointmentLogs.length / APPOINTMENTS_PER_PAGE) }).map((_, i) => (
+                    <button
+                      key={i}
+                      onClick={() => setAppointmentPage(i)}
+                      className={`w-2 h-2 rounded-full transition-all ${appointmentPage === i ? 'bg-primary scale-125' : 'bg-gray-300 hover:bg-gray-400'}`}
+                      aria-label={`Page ${i + 1}`}
+                    />
+                  ))}
+                </div>
+                <button
+                  onClick={() => setAppointmentPage(p => Math.min(Math.ceil(appointmentLogs.length / APPOINTMENTS_PER_PAGE) - 1, p + 1))}
+                  disabled={appointmentPage >= Math.ceil(appointmentLogs.length / APPOINTMENTS_PER_PAGE) - 1}
+                  className="p-1 rounded-full border hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                  aria-label="Next page"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+            )}
             {/* AI Analysis below Appointment Logs */}
             <div className="mt-5 pt-4 border-t">
               <div className="text-sm font-medium text-primary mb-2">AI Analysis (Last Week)</div>

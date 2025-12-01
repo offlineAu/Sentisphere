@@ -69,6 +69,18 @@ CREATE TABLE checkin_sentiment (
     analyzed_at DATETIME,
     FOREIGN KEY (checkin_id) REFERENCES emotional_checkin(checkin_id)
 );
+CREATE TABLE alert (
+    alert_id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT,
+    reason VARCHAR(255),
+    severity ENUM('low', 'medium', 'high', 'critical'),
+    assigned_to INT,
+    status ENUM('open', 'in_progress', 'resolved') DEFAULT 'open',
+    resolved_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES user(user_id),
+    FOREIGN KEY (assigned_to) REFERENCES user(user_id)
+);
 CREATE TABLE notification (
     id INT AUTO_INCREMENT PRIMARY KEY,
 
@@ -124,18 +136,6 @@ CREATE TABLE user_activities (
     duration_seconds INT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES user(user_id)
-);
-CREATE TABLE alert (
-    alert_id INT PRIMARY KEY AUTO_INCREMENT,
-    user_id INT,
-    reason VARCHAR(255),
-    severity ENUM('low', 'medium', 'high', 'critical'),
-    assigned_to INT,
-    status ENUM('open', 'in_progress', 'resolved') DEFAULT 'open',
-    resolved_at DATETIME,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES user(user_id),
-    FOREIGN KEY (assigned_to) REFERENCES user(user_id)
 );
 CREATE TABLE conversations (
     conversation_id INT PRIMARY KEY AUTO_INCREMENT,
