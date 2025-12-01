@@ -1978,6 +1978,316 @@ def delete_journal_mobile(
     return None
 
 
+# --- Push Notifications ---
+
+class PushTokenRequest(BaseModel):
+    push_token: str
+
+@app.post("/api/push-token")
+async def register_push_token(
+    payload: PushTokenRequest,
+    token: str = Depends(oauth2_scheme),
+):
+    """Register or update user's Expo push notification token."""
+    try:
+        data = decode_token(token)
+        uid = int(data.get("sub"))
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    
+    push_token = payload.push_token
+    if not push_token or not push_token.startswith("ExponentPushToken"):
+        raise HTTPException(status_code=400, detail="Invalid push token format")
+    
+    update_q = text(
+        """
+        UPDATE user SET push_token = :push_token
+        WHERE user_id = :uid
+        """
+    )
+    try:
+        with mobile_engine.begin() as conn:
+            conn.execute(update_q, {"push_token": push_token, "uid": uid})
+        return {"ok": True, "message": "Push token registered successfully"}
+    except Exception as e:
+        logging.error(f"Failed to register push token: {e}")
+        raise HTTPException(status_code=500, detail="Failed to register push token")
+
+
+@app.delete("/api/push-token")
+async def unregister_push_token(
+    token: str = Depends(oauth2_scheme),
+):
+    """Remove user's push notification token."""
+    try:
+        data = decode_token(token)
+        uid = int(data.get("sub"))
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    
+    update_q = text(
+        """
+        UPDATE user SET push_token = NULL
+        WHERE user_id = :uid
+        """
+    )
+    try:
+        with mobile_engine.begin() as conn:
+            conn.execute(update_q, {"uid": uid})
+        return {"ok": True, "message": "Push token removed"}
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to remove push token")
+
+
+# ============================================================================
+# UNIFIED NOTIFICATION API ENDPOINTS
+# ============================================================================
+
+from app.schemas.notification import (
+    NotificationCreate,
+    NotificationRead,
+    NotificationUpdate,
+    NotificationCategoryEnum,
+    NotificationSourceEnum,
+)
+
+
+@app.get("/api/daily-quote")
+async def get_daily_quote():
+    """Get a random positive quote for the day."""
+    from app.services.quote_service import fetch_daily_quote
+    quote_data = await fetch_daily_quote()
+    return quote_data
+
+
+@app.post("/api/notifications", response_model=NotificationRead, status_code=status.HTTP_201_CREATED)
+async def create_notification_endpoint(
+    user_id: int,
+    title: Optional[str] = None,
+    message: str = "",
+    category: str = "system",
+    source: str = "manual",
+    related_alert_id: Optional[int] = None,
+):
+    """
+    Create a manual/system notification.
+    Used for admin-generated or system notifications.
+    """
+    from app.services.push_notification_service import create_notification, send_push_notification
+    
+    notif_id = create_notification(
+        mobile_engine=mobile_engine,
+        user_id=user_id,
+        title=title,
+        message=message,
+        category=category,
+        source=source,
+        related_alert_id=related_alert_id
+    )
+    
+    if not notif_id:
+        raise HTTPException(status_code=500, detail="Failed to create notification")
+    
+    # Optionally send immediately
+    await send_push_notification(mobile_engine, user_id, notif_id)
+    
+    # Fetch and return the created notification
+    select_q = text(
+        """
+        SELECT id, user_id, title, message, category, source, related_alert_id,
+               is_sent, sent_at, is_read, read_at, created_at
+        FROM notification WHERE id = :id
+        """
+    )
+    with mobile_engine.connect() as conn:
+        row = conn.execute(select_q, {"id": notif_id}).mappings().first()
+    
+    return dict(row)
+
+
+@app.get("/api/notifications")
+async def get_user_notifications_endpoint(
+    token: str = Depends(oauth2_scheme),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+):
+    """
+    Get all notifications for the authenticated user.
+    Returns notifications sorted by created_at DESC.
+    """
+    from app.services.push_notification_service import get_user_notifications
+    
+    try:
+        data = decode_token(token)
+        user_id = int(data.get("sub"))
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    
+    notifications = get_user_notifications(
+        mobile_engine=mobile_engine,
+        user_id=user_id,
+        limit=limit,
+        offset=offset
+    )
+    
+    # Get total count
+    count_q = text("SELECT COUNT(*) as total FROM notification WHERE user_id = :user_id")
+    with mobile_engine.connect() as conn:
+        total = conn.execute(count_q, {"user_id": user_id}).scalar() or 0
+    
+    return {
+        "notifications": notifications,
+        "total": total
+    }
+
+
+@app.patch("/api/notifications/{notification_id}/read")
+async def mark_notification_read_endpoint(
+    notification_id: int,
+    token: str = Depends(oauth2_scheme),
+):
+    """
+    Mark a notification as read.
+    Sets is_read = TRUE and read_at = NOW()
+    """
+    from app.services.push_notification_service import mark_notification_read
+    
+    try:
+        data = decode_token(token)
+        user_id = int(data.get("sub"))
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    
+    # Verify ownership
+    check_q = text("SELECT id FROM notification WHERE id = :id AND user_id = :user_id")
+    with mobile_engine.connect() as conn:
+        exists = conn.execute(check_q, {"id": notification_id, "user_id": user_id}).first()
+    
+    if not exists:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    
+    success = mark_notification_read(mobile_engine, notification_id)
+    
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to mark notification as read")
+    
+    return {"ok": True, "notification_id": notification_id, "is_read": True}
+
+
+@app.post("/api/send-daily-quotes")
+async def send_daily_quotes_endpoint():
+    """
+    Trigger daily quote notifications manually (for testing).
+    Uses the unified notification table.
+    """
+    from app.services.push_notification_service import send_daily_quote_notifications
+    
+    result = await send_daily_quote_notifications(mobile_engine)
+    
+    return {
+        "ok": True,
+        "message": f"Created {result['created']}, sent {result['sent']}, failed {result['failed']}",
+        **result
+    }
+
+
+@app.post("/api/trigger-wellness-reminder")
+async def trigger_wellness_reminder_endpoint(
+    alert_id: int,
+):
+    """
+    Trigger a wellness reminder for a specific alert (for testing).
+    
+    This manually sends a gentle support notification for the given alert.
+    The message does NOT reveal high-risk status.
+    """
+    from app.services.push_notification_service import send_wellness_reminder
+    
+    result = await send_wellness_reminder(mobile_engine, alert_id)
+    
+    return result
+
+
+@app.post("/api/monitor-alerts")
+async def monitor_alerts_endpoint():
+    """
+    Run the alert monitor to send wellness reminders for high-risk alerts.
+    
+    Finds all open alerts with severity 'high' or 'critical' that haven't
+    received a wellness notification yet, and sends gentle reminders.
+    
+    This endpoint ONLY READS from the alert table, never modifies it.
+    """
+    from app.services.push_notification_service import monitor_alerts_for_wellness_notifications
+    
+    result = await monitor_alerts_for_wellness_notifications(mobile_engine)
+    
+    return {
+        "ok": True,
+        **result
+    }
+
+
+# ============================================================================
+# APSCHEDULER - UNIFIED NOTIFICATION JOBS
+# ============================================================================
+
+def schedule_daily_quotes():
+    """
+    Background task to send daily quotes using the unified notification table.
+    Runs at 9 AM daily.
+    """
+    import asyncio
+    from app.services.push_notification_service import send_daily_quote_notifications
+    
+    try:
+        result = asyncio.run(send_daily_quote_notifications(mobile_engine))
+        logging.info(f"Scheduled daily quotes: created={result.get('created')}, sent={result.get('sent')}")
+    except Exception as e:
+        logging.error(f"Scheduled daily quote failed: {e}")
+
+
+def schedule_alert_monitor():
+    """
+    Background task to monitor alerts and send wellness reminders.
+    Runs every 15 minutes to catch new high-risk alerts.
+    """
+    import asyncio
+    from app.services.push_notification_service import monitor_alerts_for_wellness_notifications
+    
+    try:
+        result = asyncio.run(monitor_alerts_for_wellness_notifications(mobile_engine))
+        logging.info(f"Alert monitor: processed={result.get('processed')}, sent={result.get('sent')}")
+    except Exception as e:
+        logging.error(f"Alert monitor failed: {e}")
+
+
+# Initialize scheduler with unified notification jobs
+try:
+    scheduler = BackgroundScheduler()
+    
+    # Daily quotes at 9 AM
+    scheduler.add_job(
+        schedule_daily_quotes,
+        CronTrigger(hour=9, minute=0),
+        id="daily_quotes",
+        replace_existing=True
+    )
+    
+    # Alert monitor every 15 minutes
+    scheduler.add_job(
+        schedule_alert_monitor,
+        CronTrigger(minute="*/15"),
+        id="alert_monitor",
+        replace_existing=True
+    )
+    
+    scheduler.start()
+    logging.info("Notification scheduler initialized (daily quotes at 9AM, alert monitor every 15min)")
+except Exception as e:
+    logging.warning(f"Failed to initialize scheduler: {e}")
+
+
 @app.get("/reports/top-stats")
 def get_top_stats(
     _user: User = Depends(require_counselor),
