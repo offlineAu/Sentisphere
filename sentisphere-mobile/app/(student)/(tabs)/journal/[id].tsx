@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { Alert, StyleSheet, View, Animated, Easing, Pressable, Platform, useWindowDimensions, Modal, ScrollView } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
-import { LinearGradient } from 'expo-linear-gradient';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
@@ -11,6 +10,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Button } from '@/components/ui/button';
 import * as Haptics from 'expo-haptics';
 import { useFocusEffect } from '@react-navigation/native';
+import { addDeletedJournalId } from '@/utils/soft-delete';
 
 export default function JournalDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -160,34 +160,14 @@ export default function JournalDetailScreen() {
     setIsDeleting(true);
     setDeleteError(null);
     try {
-      const tok = await getAuthToken();
-      if (!tok) {
-        setIsDeleting(false);
-        Alert.alert('Not signed in', 'Please sign in again.');
-        return;
-      }
-      const res = await fetch(`${API}/api/journals/${id}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${tok}` },
-      });
-      if (res.status === 401) {
-        await clearAuthToken();
-        closeConfirm(() => router.replace('/auth'));
-        return;
-      }
-      if (res.status === 404) {
-        closeConfirm(() => router.replace('/(student)/(tabs)/journal'));
-        return;
-      }
-      if (!res.ok) {
-        let detail = '';
-        try { const d = await res.json(); detail = d?.detail || d?.message || ''; } catch {}
-        throw new Error(detail || `Delete failed: ${res.status}`);
-      }
+      // Soft delete - only store the ID locally, don't call backend
+      // This keeps the data in backend for analytics purposes
+      await addDeletedJournalId(id);
+      
       if (Platform.OS !== 'web') {
         try { await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
       }
-      // Use replace to ensure list refreshes on both web and mobile
+      // Navigate back to journal list
       closeConfirm(() => router.replace('/(student)/(tabs)/journal'));
     } catch (e: any) {
       setDeleteError(e?.message || 'Unable to delete this journal entry. Please try again.');
@@ -199,12 +179,6 @@ export default function JournalDetailScreen() {
 
   return (
     <View style={styles.container}>
-      <LinearGradient
-        colors={['#d1fae5', '#ecfdf5', '#ffffff']}
-        start={{ x: 0.5, y: 0 }}
-        end={{ x: 0.5, y: 0.5 }}
-        style={StyleSheet.absoluteFillObject}
-      />
 
       {/* Floating back button */}
       <Animated.View style={[styles.floatingHeader, makeFadeUp(entranceHeader)]}>
@@ -290,7 +264,7 @@ export default function JournalDetailScreen() {
             </View>
             <ThemedText style={styles.confirmTitle}>Let this story go?</ThemedText>
             <ThemedText style={styles.confirmMessage}>
-              Oh no, this is your journal! Deleting it will permanently remove this entry from your history.
+              This entry will be hidden from your journal. You can always write new entries to express yourself.
             </ThemedText>
             {deleteError ? (
               <View style={[styles.noticeBox, { backgroundColor: '#FEF2F2', borderColor: '#FCA5A5' }]}>
@@ -325,7 +299,7 @@ export default function JournalDetailScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#FAFBFC',
   },
   floatingHeader: {
     position: 'absolute',
@@ -334,17 +308,19 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   floatingBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(255,255,255,0.9)',
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#064e3b',
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 6,
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.04)',
   },
   loadingWrap: {
     flex: 1,
@@ -357,12 +333,12 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    backgroundColor: '#F3F4F6',
   },
   skeletonLine: {
     height: 16,
     borderRadius: 10,
-    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    backgroundColor: '#F3F4F6',
     alignSelf: 'stretch',
   },
   errorWrap: {
@@ -374,82 +350,89 @@ const styles = StyleSheet.create({
   cardWrap: {
     flex: 1,
     marginTop: 116,
-    marginHorizontal: 20,
+    marginHorizontal: 16,
     marginBottom: 24,
     backgroundColor: '#FFFFFF',
-    borderRadius: 32,
-    shadowColor: '#064e3b',
-    shadowOpacity: 0.12,
-    shadowRadius: 24,
-    shadowOffset: { width: 0, height: 12 },
-    elevation: 10,
+    borderRadius: 24,
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
     overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.03)',
   },
   cardContent: {
-    paddingTop: 32,
-    paddingHorizontal: 28,
-    paddingBottom: 100,
-    alignItems: 'center',
+    paddingTop: 40,
+    paddingHorizontal: 24,
+    paddingBottom: 120,
   },
   iconBadge: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
-    backgroundColor: 'rgba(16, 185, 129, 0.12)',
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#F0FDF4',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 20,
+    marginBottom: 24,
+    alignSelf: 'center',
+    shadowColor: '#10B981',
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
   },
   cardTitle: {
-    fontFamily: 'Inter_700Bold',
-    fontSize: 26,
-    color: '#064e3b',
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 22,
+    color: '#111827',
     textAlign: 'center',
-    letterSpacing: -0.5,
-    lineHeight: 34,
+    letterSpacing: -0.3,
+    lineHeight: 30,
   },
   cardDate: {
-    fontFamily: 'Inter_500Medium',
-    fontSize: 14,
-    color: '#6b7280',
+    fontFamily: 'Inter_400Regular',
+    fontSize: 13,
+    color: '#9CA3AF',
     marginTop: 8,
     textAlign: 'center',
   },
   cardBody: {
     fontFamily: 'Inter_400Regular',
     fontSize: 16,
-    lineHeight: 26,
-    color: '#374151',
-    marginTop: 28,
+    lineHeight: 28,
+    color: '#4B5563',
+    marginTop: 32,
     textAlign: 'left',
     alignSelf: 'stretch',
+    letterSpacing: 0.1,
   },
   cardFooter: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    paddingHorizontal: 24,
-    paddingVertical: 20,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
     backgroundColor: '#FFFFFF',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#E5E7EB',
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
   },
   deleteBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 10,
-    paddingVertical: 16,
-    borderRadius: 999,
-    backgroundColor: 'rgba(239, 68, 68, 0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.2)',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: 14,
+    backgroundColor: '#FEF2F2',
+    borderWidth: 0,
   },
   deleteBtnText: {
-    fontFamily: 'Inter_600SemiBold',
-    fontSize: 15,
-    color: '#b91c1c',
+    fontFamily: 'Inter_500Medium',
+    fontSize: 14,
+    color: '#DC2626',
   },
   overlay: {
     flex: 1,
