@@ -32,13 +32,22 @@ export default function MoodScreen() {
   const scheme = useColorScheme() ?? 'light';
   const palette = Colors[scheme] as any;
   const insets = useSafeAreaInsets();
-  const { width: screenWidth } = useWindowDimensions();
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const API = process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8010';
 
-  // Responsive calculations
-  const GRID_PADDING = 24 * 2; // paddingHorizontal on both sides
-  const GRID_GAP = 12;
-  const emojiButtonWidth = Math.floor((screenWidth - GRID_PADDING - GRID_GAP * 2) / 3);
+  // Responsive calculations for different screen sizes
+  const isSmallScreen = screenWidth < 375;
+  const isMediumScreen = screenWidth >= 375 && screenWidth < 414;
+  const HORIZONTAL_PADDING = isSmallScreen ? 16 : 24;
+  const GRID_GAP = isSmallScreen ? 8 : 12;
+  const COLUMNS = 3;
+  // Calculate button width: (screenWidth - padding*2 - gaps*(columns-1)) / columns
+  const emojiButtonWidth = Math.floor((screenWidth - (HORIZONTAL_PADDING * 2) - (GRID_GAP * (COLUMNS - 1))) / COLUMNS);
+  
+  // Responsive font and element sizes
+  const titleFontSize = isSmallScreen ? 26 : isMediumScreen ? 28 : 32;
+  const emojiSize = isSmallScreen ? 28 : 32;
+  const emojiCircleSize = isSmallScreen ? 48 : 56;
   
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const slideAnim = useRef(new Animated.Value(0)).current;
@@ -313,11 +322,31 @@ export default function MoodScreen() {
 
     return (
       <Pressable onPress={onPress} onPressIn={handlePressIn} onPressOut={handlePressOut}>
-        <Animated.View style={[styles.emojiButton, { width: buttonWidth }, selected && { backgroundColor: `${color}15`, borderColor: color, borderWidth: 2 }, { transform: [{ scale }] }]}>
-          <View style={[styles.emojiCircle, { backgroundColor: `${color}20` }]}>
-            <ThemedText style={styles.emojiLarge}>{emoji}</ThemedText>
+        <Animated.View style={[
+          styles.emojiButton, 
+          { 
+            width: buttonWidth,
+            paddingVertical: isSmallScreen ? 12 : 16,
+          }, 
+          selected && { backgroundColor: `${color}15`, borderColor: color, borderWidth: 2 }, 
+          { transform: [{ scale }] }
+        ]}>
+          <View style={[
+            styles.emojiCircle, 
+            { 
+              backgroundColor: `${color}20`,
+              width: emojiCircleSize,
+              height: emojiCircleSize,
+              borderRadius: emojiCircleSize / 2,
+            }
+          ]}>
+            <ThemedText style={[styles.emojiLarge, { fontSize: emojiSize }]}>{emoji}</ThemedText>
           </View>
-          <ThemedText style={[styles.emojiLabel, selected && { color, fontFamily: 'Inter_600SemiBold' }]}>{label}</ThemedText>
+          <ThemedText style={[
+            styles.emojiLabel, 
+            { fontSize: isSmallScreen ? 11 : 13 },
+            selected && { color, fontFamily: 'Inter_600SemiBold' }
+          ]}>{label}</ThemedText>
         </Animated.View>
       </Pressable>
     );
@@ -425,12 +454,18 @@ export default function MoodScreen() {
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <Animated.View style={[styles.stepContainer, makeFadeUp(entrance.content), { opacity: Animated.multiply(entrance.content, fadeAnim), transform: [{ translateX: slideAnim }] }]}>
           {step === 0 && (
-            <ScrollView style={styles.stepScrollContent} contentContainerStyle={styles.stepScrollInner} showsVerticalScrollIndicator={false}>
-              <View style={[styles.stepHeader, { marginTop: 24, marginBottom: 16 }]}>
-                <ThemedText style={styles.welcomeEmoji}>👋</ThemedText>
+            <ScrollView 
+              style={[styles.stepScrollContent, { paddingHorizontal: HORIZONTAL_PADDING }]} 
+              contentContainerStyle={[styles.stepScrollInner, { paddingTop: isSmallScreen ? 8 : 12 }]} 
+              showsVerticalScrollIndicator={false}
+            >
+              <View style={[styles.stepHeader, { marginTop: isSmallScreen ? 8 : 12, marginBottom: isSmallScreen ? 8 : 12 }]}>
+                <ThemedText style={[styles.welcomeEmoji, { fontSize: isSmallScreen ? 40 : 48 }]}>👋</ThemedText>
               </View>
-              <ThemedText style={styles.stepTitle}>How are you{'\n'}feeling right now?</ThemedText>
-              <View style={styles.moodGrid}>
+              <ThemedText style={[styles.stepTitle, { fontSize: titleFontSize, lineHeight: titleFontSize * 1.25, marginBottom: isSmallScreen ? 20 : 28 }]}>
+                How are you{'\n'}feeling right now?
+              </ThemedText>
+              <View style={[styles.moodGrid, { gap: GRID_GAP }]}>
                 {moods.map((m) => (
                   <EmojiButton
                     key={m.key}
@@ -447,12 +482,18 @@ export default function MoodScreen() {
           )}
 
           {step === 1 && (
-            <ScrollView style={styles.stepScrollContent} contentContainerStyle={styles.stepScrollInner} showsVerticalScrollIndicator={false}>
-              <View style={[styles.stepHeader, { marginTop: 24, marginBottom: 16 }]}>
-                <ThemedText style={styles.selectedEmoji}>{getSelectedMoodEmoji()}</ThemedText>
+            <ScrollView 
+              style={[styles.stepScrollContent, { paddingHorizontal: HORIZONTAL_PADDING }]} 
+              contentContainerStyle={[styles.stepScrollInner, { paddingTop: isSmallScreen ? 8 : 12 }]} 
+              showsVerticalScrollIndicator={false}
+            >
+              <View style={[styles.stepHeader, { marginTop: isSmallScreen ? 8 : 12, marginBottom: isSmallScreen ? 8 : 12 }]}>
+                <ThemedText style={[styles.selectedEmoji, { fontSize: isSmallScreen ? 40 : 48 }]}>{getSelectedMoodEmoji()}</ThemedText>
               </View>
-              <ThemedText style={styles.stepTitle}>What's your{'\n'}energy level?</ThemedText>
-              <View style={styles.chipGrid}>
+              <ThemedText style={[styles.stepTitle, { fontSize: titleFontSize, lineHeight: titleFontSize * 1.25, marginBottom: isSmallScreen ? 20 : 28 }]}>
+                What's your{'\n'}energy level?
+              </ThemedText>
+              <View style={[styles.chipGrid, { gap: GRID_GAP }]}>
                 {energies.map((e) => (
                   <ChipButton
                     key={e.key}
@@ -468,12 +509,18 @@ export default function MoodScreen() {
           )}
 
           {step === 2 && (
-            <ScrollView style={styles.stepScrollContent} contentContainerStyle={styles.stepScrollInner} showsVerticalScrollIndicator={false}>
-              <View style={[styles.stepHeader, { marginTop: 24, marginBottom: 16 }]}>
-                <ThemedText style={styles.selectedEmoji}>{getSelectedMoodEmoji()}</ThemedText>
+            <ScrollView 
+              style={[styles.stepScrollContent, { paddingHorizontal: HORIZONTAL_PADDING }]} 
+              contentContainerStyle={[styles.stepScrollInner, { paddingTop: isSmallScreen ? 8 : 12 }]} 
+              showsVerticalScrollIndicator={false}
+            >
+              <View style={[styles.stepHeader, { marginTop: isSmallScreen ? 8 : 12, marginBottom: isSmallScreen ? 8 : 12 }]}>
+                <ThemedText style={[styles.selectedEmoji, { fontSize: isSmallScreen ? 40 : 48 }]}>{getSelectedMoodEmoji()}</ThemedText>
               </View>
-              <ThemedText style={styles.stepTitle}>How stressed{'\n'}do you feel?</ThemedText>
-              <View style={styles.chipGrid}>
+              <ThemedText style={[styles.stepTitle, { fontSize: titleFontSize, lineHeight: titleFontSize * 1.25, marginBottom: isSmallScreen ? 20 : 28 }]}>
+                How stressed{'\n'}do you feel?
+              </ThemedText>
+              <View style={[styles.chipGrid, { gap: GRID_GAP }]}>
                 {stresses.map((s) => (
                   <ChipButton
                     key={s.key}
@@ -489,14 +536,18 @@ export default function MoodScreen() {
           )}
 
           {step === 3 && (
-            <ScrollView style={styles.stepScrollContent} contentContainerStyle={styles.stepScrollInner} showsVerticalScrollIndicator={false}>
-              <View style={[styles.stepHeader, { marginTop: 24, marginBottom: 8 }]}>
-                <ThemedText style={styles.selectedEmoji}>{getSelectedMoodEmoji()}</ThemedText>
+            <ScrollView 
+              style={[styles.stepScrollContent, { paddingHorizontal: HORIZONTAL_PADDING }]} 
+              contentContainerStyle={[styles.stepScrollInner, { paddingTop: isSmallScreen ? 8 : 12 }]} 
+              showsVerticalScrollIndicator={false}
+            >
+              <View style={[styles.stepHeader, { marginTop: isSmallScreen ? 8 : 12, marginBottom: isSmallScreen ? 4 : 8 }]}>
+                <ThemedText style={[styles.selectedEmoji, { fontSize: isSmallScreen ? 40 : 48 }]}>{getSelectedMoodEmoji()}</ThemedText>
               </View>
-              <ThemedText style={styles.stepTitleFeelBetter}>
-                {displayName ? `${displayName},` : 'Hey,'}{`\n`}do you feel better{`\n`}than yesterday?
+              <ThemedText style={[styles.stepTitleFeelBetter, { fontSize: isSmallScreen ? 24 : 28, lineHeight: isSmallScreen ? 32 : 38 }]}>
+                {displayName ? `${displayName},` : 'Hey,'}{'\n'}do you feel better{'\n'}than yesterday?
               </ThemedText>
-              <View style={styles.feelBetterGrid}>
+              <View style={[styles.feelBetterGrid, { gap: isSmallScreen ? 12 : 16 }]}>
                 {feelBetterOptions.map((f) => (
                   <FeelBetterButton
                     key={f.key}
@@ -512,12 +563,21 @@ export default function MoodScreen() {
           )}
 
           {step === 4 && (
-            <ScrollView style={styles.stepScrollContent} contentContainerStyle={styles.stepScrollInner} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-              <View style={[styles.stepHeader, { marginTop: 24, marginBottom: 16 }]}>
-                <ThemedText style={styles.selectedEmoji}>{getSelectedMoodEmoji()}</ThemedText>
+            <ScrollView 
+              style={[styles.stepScrollContent, { paddingHorizontal: HORIZONTAL_PADDING }]} 
+              contentContainerStyle={[styles.stepScrollInner, { paddingTop: isSmallScreen ? 8 : 12 }]} 
+              showsVerticalScrollIndicator={false} 
+              keyboardShouldPersistTaps="handled"
+            >
+              <View style={[styles.stepHeader, { marginTop: isSmallScreen ? 8 : 12, marginBottom: isSmallScreen ? 8 : 12 }]}>
+                <ThemedText style={[styles.selectedEmoji, { fontSize: isSmallScreen ? 40 : 48 }]}>{getSelectedMoodEmoji()}</ThemedText>
               </View>
-              <ThemedText style={styles.stepTitle}>Anything else{'\n'}on your mind?</ThemedText>
-              <ThemedText style={styles.stepSubtitle}>Add a note about what's affecting your mood (optional)</ThemedText>
+              <ThemedText style={[styles.stepTitle, { fontSize: titleFontSize, lineHeight: titleFontSize * 1.25, marginBottom: isSmallScreen ? 20 : 28 }]}>
+                Anything else{'\n'}on your mind?
+              </ThemedText>
+              <ThemedText style={[styles.stepSubtitle, { marginTop: isSmallScreen ? -12 : -16, marginBottom: isSmallScreen ? 16 : 20 }]}>
+                Add a note about what's affecting your mood (optional)
+              </ThemedText>
               <View style={styles.noteCard}>
                 <Textarea
                   placeholder="What's on your mind today..."
@@ -533,7 +593,7 @@ export default function MoodScreen() {
         </Animated.View>
 
         {step === 4 && (
-          <Animated.View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 16) }, makeFadeUp(entrance.footer)]}>
+          <Animated.View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 16), paddingHorizontal: HORIZONTAL_PADDING }, makeFadeUp(entrance.footer)]}>
             <Pressable 
               style={[styles.continueButton, saving && styles.continueButtonDisabled]} 
               onPress={handleSubmit}
@@ -556,7 +616,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 8,
   },
   backButton: {
     width: 40,
@@ -589,19 +649,17 @@ const styles = StyleSheet.create({
   stepContent: {
     flex: 1,
     paddingHorizontal: 24,
-    paddingTop: 20,
+    paddingTop: 12,
   },
   stepScrollContent: {
     flex: 1,
-    paddingHorizontal: 24,
   },
   stepScrollInner: {
-    paddingTop: 20,
-    paddingBottom: 40,
+    paddingBottom: 32,
+    flexGrow: 1,
   },
   stepHeader: {
     alignItems: 'center',
-    marginBottom: 8,
   },
   selectedEmoji: {
     fontSize: 48,
@@ -628,7 +686,7 @@ const styles = StyleSheet.create({
     color: '#111827',
     textAlign: 'center',
     lineHeight: 40,
-    marginBottom: 32,
+    marginBottom: 24,
   },
   stepSubtitle: {
     fontSize: 15,
@@ -641,23 +699,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'center',
-    gap: 12,
+    alignItems: 'flex-start',
   },
   emojiButton: {
     alignItems: 'center',
-    paddingVertical: 16,
+    paddingVertical: 14,
     borderRadius: 16,
     backgroundColor: '#F9FAFB',
     borderWidth: 1,
     borderColor: '#E5E7EB',
   },
   emojiCircle: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 8,
+    marginBottom: 6,
   },
   emojiLarge: {
     fontSize: 32,
@@ -671,7 +726,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'center',
-    gap: 12,
+    alignItems: 'center',
   },
   chipButton: {
     flexDirection: 'row',
@@ -698,12 +753,11 @@ const styles = StyleSheet.create({
     color: '#111827',
     textAlign: 'center',
     lineHeight: 38,
-    marginTop: 8,
-    marginBottom: 32,
+    marginTop: 4,
+    marginBottom: 24,
   },
   feelBetterGrid: {
     alignItems: 'center',
-    gap: 16,
   },
   feelBetterButton: {
     alignItems: 'center',
@@ -741,8 +795,7 @@ const styles = StyleSheet.create({
     borderWidth: 0,
   },
   footer: {
-    paddingHorizontal: 24,
-    paddingTop: 16,
+    paddingTop: 12,
   },
   continueButton: {
     flexDirection: 'row',

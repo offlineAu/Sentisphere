@@ -1850,8 +1850,11 @@ def create_emotional_checkin(
     if stress == "Very High":
         stress = "Very High Stress"
 
+    checkin_id = None
+    nickname = None
+    
     # Insert into the MOBILE database
-    with mobile_engine.connect() as conn:
+    with mobile_engine.begin() as conn:
         try:
             ins = conn.execute(text(
                 """
@@ -1865,17 +1868,76 @@ def create_emotional_checkin(
                 "stress": stress,
                 "comment": (payload.comment or None),
             })
-            conn.commit()
+            checkin_id = int(ins.lastrowid)
         except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"Failed to save check-in: {exc.__class__.__name__}")
+            logging.error(f"Checkin insert error: {exc}")
+            raise HTTPException(status_code=500, detail=f"Failed to save check-in: {str(exc)[:100]}")
+    
+    # Get user's nickname for notification
+    try:
+        with mobile_engine.connect() as conn:
+            user_row = conn.execute(
+                text("SELECT nickname, name FROM user WHERE user_id = :uid LIMIT 1"),
+                {"uid": uid}
+            ).mappings().first()
+            if user_row:
+                nickname = user_row.get("nickname") or user_row.get("name") or "there"
+            else:
+                nickname = "there"
+    except Exception:
+        nickname = "there"
+    
     # Background analytics persistence: sentiments
     try:
-        SentimentService.remove_existing_checkin_sentiments(db, int(ins.lastrowid))
-        SentimentService.analyze_checkin(db, int(ins.lastrowid))
+        SentimentService.remove_existing_checkin_sentiments(db, checkin_id)
+        SentimentService.analyze_checkin(db, checkin_id)
         db.commit()
     except Exception:
         db.rollback()
-    return {"ok": True, "checkin_id": int(ins.lastrowid)}
+    
+    # Send instant "Thanks for Checking in" notification
+    notification_sent = False
+    try:
+        import asyncio
+        from app.services.push_notification_service import send_notification_instantly
+        
+        # Determine message based on mood
+        mood = payload.mood_level.lower()
+        if mood in ["great", "happy", "good"]:
+            message = f"That's wonderful! Keep up the positive energy 🌟"
+        elif mood in ["sad", "awful", "terrible"]:
+            message = f"Thanks for sharing how you feel. Remember, we're here for you 💙"
+        else:
+            message = f"Taking time to reflect is a great habit. Keep it up! ✨"
+        
+        # Run async notification in sync context
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result = loop.run_until_complete(
+                send_notification_instantly(
+                    mobile_engine=mobile_engine,
+                    user_id=uid,
+                    title=f"Thanks for Checking in, {nickname}! 🎉",
+                    message=message,
+                    category="system",
+                    source="system",
+                    extra_data={"checkin_id": checkin_id, "mood": payload.mood_level}
+                )
+            )
+            notification_sent = result.get("success", False)
+        finally:
+            loop.close()
+        
+        logging.info(f"Checkin notification for user {uid}: {notification_sent}")
+    except Exception as e:
+        logging.error(f"Failed to send checkin notification: {e}")
+    
+    return {
+        "ok": True, 
+        "checkin_id": checkin_id,
+        "notification_sent": notification_sent
+    }
 
 
 @app.get("/api/emotional-checkins")
@@ -1946,6 +2008,7 @@ def create_journal(
     if not content:
         raise HTTPException(status_code=422, detail="Content required")
 
+    journal_id = None
     with mobile_engine.connect() as conn:
         try:
             ins = conn.execute(
@@ -1958,15 +2021,91 @@ def create_journal(
                 {"uid": uid, "content": content},
             )
             conn.commit()
+            journal_id = int(ins.lastrowid)
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Failed to save journal: {exc.__class__.__name__}")
+    
+    # Analyze sentiment
+    sentiment_result = None
     try:
-        SentimentService.remove_existing_journal_sentiments(db, int(ins.lastrowid))
-        SentimentService.analyze_journal(db, int(ins.lastrowid))
+        SentimentService.remove_existing_journal_sentiments(db, journal_id)
+        sentiment_result = SentimentService.analyze_journal(db, journal_id)
         db.commit()
     except Exception:
         db.rollback()
-    return {"ok": True, "journal_id": int(ins.lastrowid)}
+    
+    # Auto-create alert for highly negative sentiment AND send notification INSTANTLY
+    alert_created = False
+    alert_id = None
+    notification_result = None
+    
+    if sentiment_result and sentiment_result.sentiment == "negative" and sentiment_result.confidence >= 0.6:
+        try:
+            # Check if user already has a recent open alert (within 24 hours)
+            check_recent_q = text(
+                """
+                SELECT alert_id FROM alert 
+                WHERE user_id = :uid AND status = 'open' 
+                AND created_at > DATE_SUB(NOW(), INTERVAL 24 HOUR)
+                LIMIT 1
+                """
+            )
+            with mobile_engine.connect() as conn:
+                existing = conn.execute(check_recent_q, {"uid": uid}).first()
+            
+            if not existing:
+                # Create alert for counselor review
+                insert_alert_q = text(
+                    """
+                    INSERT INTO alert (user_id, reason, severity, status, created_at)
+                    VALUES (:uid, :reason, :severity, 'open', NOW())
+                    """
+                )
+                # Determine severity based on confidence and emotions
+                emotions = sentiment_result.emotions or ""
+                severity = "high" if sentiment_result.confidence >= 0.75 or "crisis" in emotions.lower() else "medium"
+                reason = f"Auto-detected negative sentiment in journal (confidence: {sentiment_result.confidence:.0%})"
+                
+                with mobile_engine.begin() as conn:
+                    result = conn.execute(insert_alert_q, {
+                        "uid": uid,
+                        "reason": reason,
+                        "severity": severity
+                    })
+                    alert_id = result.lastrowid
+                
+                alert_created = True
+                logging.info(f"Auto-created {severity} alert {alert_id} for user {uid} due to negative sentiment")
+                
+                # Send wellness notification INSTANTLY (only for high/critical severity)
+                if severity in ("high", "critical") and alert_id:
+                    import asyncio
+                    from app.services.push_notification_service import send_alert_notification_instantly
+                    
+                    try:
+                        notification_result = asyncio.get_event_loop().run_until_complete(
+                            send_alert_notification_instantly(
+                                mobile_engine=mobile_engine,
+                                alert_id=alert_id,
+                                user_id=uid,
+                                severity=severity
+                            )
+                        )
+                        logging.info(f"Instant notification sent for alert {alert_id}: {notification_result.get('success')}")
+                    except Exception as notif_err:
+                        logging.error(f"Failed to send instant notification: {notif_err}")
+                        
+        except Exception as e:
+            logging.error(f"Failed to auto-create alert: {e}")
+    
+    return {
+        "ok": True, 
+        "journal_id": journal_id,
+        "sentiment": sentiment_result.sentiment if sentiment_result else None,
+        "alert_created": alert_created,
+        "alert_id": alert_id,
+        "notification_sent": notification_result.get("success") if notification_result else False
+    }
 
 @app.get("/api/journals")
 def list_journals(limit: int = Query(50, ge=1, le=200), token: str = Depends(oauth2_scheme)):
@@ -2162,7 +2301,7 @@ async def get_daily_quote():
     return quote_data
 
 
-@app.post("/api/notifications", response_model=NotificationRead, status_code=status.HTTP_201_CREATED)
+@app.post("/api/notifications", status_code=status.HTTP_201_CREATED)
 async def create_notification_endpoint(
     user_id: int,
     title: Optional[str] = None,
@@ -2172,12 +2311,14 @@ async def create_notification_endpoint(
     related_alert_id: Optional[int] = None,
 ):
     """
-    Create a manual/system notification.
-    Used for admin-generated or system notifications.
-    """
-    from app.services.push_notification_service import create_notification, send_push_notification
+    Create a notification and send it INSTANTLY via Expo Push.
     
-    notif_id = create_notification(
+    Used for admin-generated or system notifications.
+    Sends immediately - no delay.
+    """
+    from app.services.push_notification_service import send_notification_instantly
+    
+    result = await send_notification_instantly(
         mobile_engine=mobile_engine,
         user_id=user_id,
         title=title,
@@ -2187,11 +2328,8 @@ async def create_notification_endpoint(
         related_alert_id=related_alert_id
     )
     
-    if not notif_id:
+    if not result.get("notification_id"):
         raise HTTPException(status_code=500, detail="Failed to create notification")
-    
-    # Optionally send immediately
-    await send_push_notification(mobile_engine, user_id, notif_id)
     
     # Fetch and return the created notification
     select_q = text(
@@ -2202,9 +2340,13 @@ async def create_notification_endpoint(
         """
     )
     with mobile_engine.connect() as conn:
-        row = conn.execute(select_q, {"id": notif_id}).mappings().first()
+        row = conn.execute(select_q, {"id": result["notification_id"]}).mappings().first()
     
-    return dict(row)
+    return {
+        **dict(row),
+        "push_sent": result.get("push_sent", False),
+        "push_result": result.get("push_result")
+    }
 
 
 @app.get("/api/notifications")
@@ -2276,11 +2418,60 @@ async def mark_notification_read_endpoint(
     return {"ok": True, "notification_id": notification_id, "is_read": True}
 
 
+class TestNotificationRequest(BaseModel):
+    user_id: int
+    title: str
+    message: str
+
+
+@app.post("/api/notifications/test")
+async def send_test_notification_endpoint(
+    payload: TestNotificationRequest,
+):
+    """
+    Send a test push notification for QA testing via Postman.
+    
+    Creates a notification record and sends immediately via Expo Push.
+    
+    Request body:
+    {
+        "user_id": 123,
+        "title": "Test Notification",
+        "message": "This is a test message"
+    }
+    
+    Returns:
+    - notification_id
+    - expo_response
+    - message sent
+    - token used (truncated)
+    """
+    from app.services.push_notification_service import send_test_notification
+    
+    result = await send_test_notification(
+        mobile_engine=mobile_engine,
+        user_id=payload.user_id,
+        title=payload.title,
+        message=payload.message
+    )
+    
+    return {
+        "ok": result.get("success", False),
+        "notification_id": result.get("notification_id"),
+        "push_sent": result.get("push_sent", False),
+        "expo_response": result.get("expo_response"),
+        "token_used": result.get("token_used"),
+        "error": result.get("error"),
+        "message_sent": payload.message,
+        "title_sent": payload.title
+    }
+
+
 @app.post("/api/send-daily-quotes")
 async def send_daily_quotes_endpoint():
     """
     Trigger daily quote notifications manually (for testing).
-    Uses the unified notification table.
+    Uses the unified notification table. Sends INSTANTLY.
     """
     from app.services.push_notification_service import send_daily_quote_notifications
     
