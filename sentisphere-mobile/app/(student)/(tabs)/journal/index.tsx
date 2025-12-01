@@ -15,10 +15,10 @@ import { Link, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as SecureStore from 'expo-secure-store';
+import { getDeletedJournalIds, addDeletedJournalId } from '@/utils/soft-delete';
 
 const JournalListIcon = require('@/assets/images/journal list.png');
 
-import { analyzeSentiment, makeCoachIntro, coachReply, Analysis } from '@/utils/sentiment';
 
 type Entry = { id: string; title: string; body: string; date: string };
 
@@ -49,42 +49,6 @@ export default function JournalListScreen() {
     }).start();
   };
 
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const brainSpin = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    if (isAnalyzing) {
-      brainSpin.setValue(0);
-      Animated.loop(
-        Animated.timing(brainSpin, { toValue: 1, duration: 1200, easing: Easing.linear, useNativeDriver: true })
-      ).start();
-    } else {
-      // stop gracefully
-      brainSpin.stopAnimation();
-    }
-  }, [isAnalyzing]);
-
-  const handleAnalyzePress = async () => {
-    const text = body.trim();
-    if (!text) {
-      Alert.alert('Write your entry', 'Please write something first so I can analyze it.');
-      return;
-    }
-    // Haptic nudge
-    if (Platform.OS !== 'web') { try { await Haptics.selectionAsync(); } catch {} }
-    setAnalysisText(text);
-    setAnalysisResult(null);
-    setAnalysisVisible(true);
-    setIsAnalyzing(true);
-    // Simulate a slightly longer analysis time for UX pacing
-    setTimeout(() => {
-      const a = analyzeSentiment(text);
-      setAnalysisResult(a);
-      setCoachMessages([{ role: 'coach', text: makeCoachIntro(text, a) }]);
-      setIsAnalyzing(false);
-      if (Platform.OS !== 'web') { try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {} }
-    }, 1500);
-  };
 
   // Voice dictation (web) via Web Speech API. Mobile: placeholder alert.
   const recognitionRef = useRef<any>(null);
@@ -201,34 +165,6 @@ export default function JournalListScreen() {
     try { await SecureStore.deleteItemAsync('auth_token') } catch {}
   };
 
-  // Analysis & coach chat state
-  const [analysisVisible, setAnalysisVisible] = useState(false);
-  const [analysisResult, setAnalysisResult] = useState<Analysis | null>(null);
-  const [coachMessages, setCoachMessages] = useState<Array<{ role: 'coach' | 'user'; text: string }>>([]);
-  const [coachInput, setCoachInput] = useState('');
-  const [analysisText, setAnalysisText] = useState('');
-
-  const refreshAnalysis = () => {
-    const text = body.trim();
-    if (!text) return;
-    const a = analyzeSentiment(text);
-    setAnalysisResult(a);
-    setAnalysisText(text);
-  };
-
-  const handleSendCoach = () => {
-    const input = coachInput.trim();
-    if (!input) return;
-    setCoachMessages((prev) => {
-      const reply = coachReply(input, {
-        analysis: analysisResult ?? analyzeSentiment(body),
-        transcript: prev.map((m) => m.text).join(' '),
-        turn: prev.length,
-      });
-      return [...prev, { role: 'user', text: input }, { role: 'coach', text: reply }];
-    });
-    setCoachInput('');
-  };
   const [entries, setEntries] = useState<Entry[]>([]);
   const [pendingDelete, setPendingDelete] = useState<Entry | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -271,37 +207,13 @@ export default function JournalListScreen() {
     setIsDeleting(true);
     setDeleteError(null);
     try {
-      const tok = await getAuthToken();
-      if (!tok) {
-        setIsDeleting(false);
-        Alert.alert('Not signed in', 'Please sign in again.');
-        return;
-      }
-      const res = await fetch(`${API}/api/journals/${pendingDelete.id}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${tok}` },
-      });
-      if (res.status === 401) {
-        await clearAuthToken();
-        animateDeleteSheet(0, () => {
-          clearDeleteState();
-          Alert.alert('Session expired', 'Please sign in again to continue.', [
-            { text: 'OK', onPress: () => router.replace('/auth') },
-          ]);
-        });
-        return;
-      }
-      if (res.status === 404) {
-        setEntries((prev) => prev.filter((it) => it.id !== pendingDelete.id));
-        animateDeleteSheet(0, clearDeleteState);
-        return;
-      }
-      if (!res.ok) {
-        let detail = '';
-        try { const d = await res.json(); detail = d?.detail || d?.message || ''; } catch {}
-        throw new Error(detail || `Delete failed: ${res.status}`);
-      }
+      // Soft delete - only store the ID locally, don't call backend
+      // This keeps the data in backend for analytics purposes
+      await addDeletedJournalId(pendingDelete.id);
+      
+      // Remove from UI immediately
       setEntries((prev) => prev.filter((it) => it.id !== pendingDelete.id));
+      
       if (Platform.OS !== 'web') {
         try { await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
       }
@@ -321,14 +233,20 @@ export default function JournalListScreen() {
       const res = await fetch(`${API}/api/journals`, { headers: { Authorization: `Bearer ${tok}` } });
       if (!res.ok) { setLoadingEntries(false); return; }
       const arr = await res.json();
-      const mapped: Entry[] = (arr || []).map((r: any) => {
-        const content = String(r?.content || '');
-        const firstLine = content.trim().split(/\n+/)[0]?.trim() || '';
-        const title = firstLine.slice(0, 60) || 'Journal Entry';
-        const body = content.slice(0, 160);
-        const date = (r?.created_at || '').slice(0, 10) || '';
-        return { id: String(r?.journal_id), title, body, date };
-      });
+      
+      // Get soft-deleted IDs to filter them out
+      const deletedIds = await getDeletedJournalIds();
+      
+      const mapped: Entry[] = (arr || [])
+        .filter((r: any) => !deletedIds.has(String(r?.journal_id)))
+        .map((r: any) => {
+          const content = String(r?.content || '');
+          const firstLine = content.trim().split(/\n+/)[0]?.trim() || '';
+          const title = firstLine.slice(0, 60) || 'Journal Entry';
+          const body = content.slice(0, 160);
+          const date = (r?.created_at || '').slice(0, 10) || '';
+          return { id: String(r?.journal_id), title, body, date };
+        });
       setEntries(mapped);
     } catch {
     } finally {
@@ -435,18 +353,18 @@ export default function JournalListScreen() {
         <ScrollView
           keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
           keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{ padding: 16, paddingBottom: 100, backgroundColor: '#FFFFFF' }}
+          contentContainerStyle={{ padding: 24, paddingTop: 20, paddingBottom: 120, backgroundColor: scheme === 'dark' ? palette.background : '#FAFBFC' }}
         >
           <Animated.View style={makeFadeUp(entranceHeader)}>
-            <View style={{ height: 16 }} />
+            <View style={{ height: 24 }} />
             <ThemedText type="title">Journal</ThemedText>
-            <ThemedText style={{ color: palette.muted }}>Express your thoughts and track your emotional journey</ThemedText>
+            <ThemedText style={{ color: palette.muted, marginTop: 6 }}>Express your thoughts and track your emotional journey</ThemedText>
           </Animated.View>
 
           {/* Segmented control */}
           <Animated.View style={makeFadeUp(entranceTabs)}>
             <View
-              style={[styles.segment, { backgroundColor: '#EEF2F7', borderColor: palette.border, marginTop: 16 }]}
+              style={[styles.segment, { backgroundColor: scheme === 'dark' ? '#1F2937' : '#EEF2F7', borderColor: palette.border, marginTop: 24 }]}
               onLayout={(e) => setSegW(e.nativeEvent.layout.width)}
             >
               {Platform.OS !== 'web' && (
@@ -483,10 +401,10 @@ export default function JournalListScreen() {
       {tab === 0 ? (
         Platform.OS === 'web' ? (
           <Animated.View style={{ opacity: contentOpacity, transform: [{ translateY: contentTranslateY }] }}>
-            <Card style={{ marginTop: 16 }}>
+            <Card style={{ marginTop: 24 }}>
               <CardContent>
-                <ThemedText type="subtitle" style={{ marginTop: 12 }}>New Journal Entry</ThemedText>
-                <ThemedText style={{ color: palette.muted }}>Write about your day, thoughts, or feelings. Your entries are private and secure.</ThemedText>
+                <ThemedText type="subtitle" style={{ marginTop: 16 }}>New Journal Entry</ThemedText>
+                <ThemedText style={{ color: palette.muted, marginTop: 4, marginBottom: 8 }}>Write about your day, thoughts, or feelings. Your entries are private and secure.</ThemedText>
 
                 {/* Title input */}
                 <TextInput
@@ -528,10 +446,14 @@ export default function JournalListScreen() {
 
                 {/* Toolbar */}
                 <View style={styles.toolbar}>
-                  <ToolbarButton icon="mic" label="Voice" onPress={handleVoicePress} active={isListening} bgColor="#FEE2E2" fgColor="#B91C1C" />
-                  <ToolbarButton icon="activity" label="Analyze" onPress={handleAnalyzePress} bgColor="#EDE9FE" fgColor="#6D28D9" />
+                  <Button 
+                    title="Voice" 
+                    variant="outline" 
+                    onPress={handleVoicePress} 
+                    style={isListening ? { backgroundColor: '#DCFCE7', borderColor: '#0D8C4F' } : {}}
+                  />
                   <View style={{ flex: 1 }} />
-                  <Button title="Save" onPress={handleSave} disabled={!body.trim() || isSaving} loading={isSaving} />
+                  <Button title="Record Journal" onPress={handleSave} disabled={!body.trim() || isSaving} loading={isSaving} />
                 </View>
               </CardContent>
             </Card>
@@ -539,10 +461,10 @@ export default function JournalListScreen() {
         ) : (
           <TouchableWithoutFeedback accessibilityRole="none" onPress={Keyboard.dismiss}>
             <Animated.View style={{ opacity: contentOpacity, transform: [{ translateY: contentTranslateY }] }}>
-              <Card style={{ marginTop: 16 }}>
+              <Card style={{ marginTop: 24 }}>
                 <CardContent>
-                  <ThemedText type="subtitle" style={{ marginTop: 12 }}>New Journal Entry</ThemedText>
-                  <ThemedText style={{ color: palette.muted }}>Write about your day, thoughts, or feelings. Your entries are private and secure.</ThemedText>
+                  <ThemedText type="subtitle" style={{ marginTop: 16 }}>New Journal Entry</ThemedText>
+                  <ThemedText style={{ color: palette.muted, marginTop: 4, marginBottom: 8 }}>Write about your day, thoughts, or feelings. Your entries are private and secure.</ThemedText>
 
                   {/* Title input */}
                   <TextInput
@@ -584,10 +506,14 @@ export default function JournalListScreen() {
 
                   {/* Toolbar */}
                   <View style={styles.toolbar}>
-                    <ToolbarButton icon="mic" label="Voice" onPress={handleVoicePress} active={isListening} bgColor="#FEE2E2" fgColor="#B91C1C" />
-                    <ToolbarButton icon="activity" label="Analyze" onPress={handleAnalyzePress} bgColor="#EDE9FE" fgColor="#6D28D9" />
+                    <Button 
+                      title="Voice" 
+                      variant="outline" 
+                      onPress={handleVoicePress} 
+                      style={isListening ? { backgroundColor: '#DCFCE7', borderColor: '#0D8C4F' } : {}}
+                    />
                     <View style={{ flex: 1 }} />
-                    <Button title="Save" onPress={handleSave} disabled={!body.trim() || isSaving} loading={isSaving} />
+                    <Button title="Record Journal" onPress={handleSave} disabled={!body.trim() || isSaving} loading={isSaving} />
                   </View>
                 </CardContent>
               </Card>
@@ -665,165 +591,6 @@ export default function JournalListScreen() {
           <ThemedText style={{ color: '#FFFFFF' }}>Saved</ThemedText>
         </View>
       </Animated.View>
-      {/* Analysis Modal */}
-      <Modal visible={analysisVisible} transparent animationType="fade" onRequestClose={() => setAnalysisVisible(false)}>
-        <View style={styles.overlay}>
-          <View style={[styles.modalCard, { maxHeight: Math.min(winH - 96, 640), maxWidth: Math.min(winW - 32, 560), width: '100%' }]}> 
-            {/* Close button */}
-            <Pressable onPress={() => setAnalysisVisible(false)} style={styles.closeBtn} accessibilityRole="button" accessibilityLabel="Close">
-              <Feather name="x" size={18} color={palette.icon} />
-            </Pressable>
-
-            {/* Header (hidden during loading for clean look) */}
-            {!isAnalyzing && (
-              <>
-                <View style={styles.sheetHeaderRow}>
-                  <View style={styles.sectionIconWrap}><Icon name="brain" size={20} color={palette.text} /></View>
-                  <ThemedText type="subtitle">Sentiment Analysis</ThemedText>
-                </View>
-                <ThemedText style={styles.subtle}>Here's what we learned about your entry</ThemedText>
-              </>
-            )}
-
-            {/* Loading state */}
-            {isAnalyzing ? (
-              <View style={styles.loadingOnly}>
-                <Animated.View style={[styles.loadingBrain, { transform: [{ rotate: brainSpin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] }) }] }]}>
-                  <Icon name="brain" size={28} color="#10B981" />
-                </Animated.View>
-              </View>
-            ) : null}
-
-            {!isAnalyzing ? (
-              <ScrollView style={{ alignSelf: 'stretch' }} contentContainerStyle={{ paddingBottom: 12 }}>
-
-                {/* Overall Mood card */}
-                {!isAnalyzing && analysisResult ? (
-              <View style={StyleSheet.flatten([styles.moodCard, moodCardTint(analysisResult.label)])}>
-                <View style={styles.moodRow}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                    <ThemedText style={{ fontSize: 20 }}>{moodEmoji(analysisResult.label)}</ThemedText>
-                    <View>
-                      <ThemedText style={{ fontFamily: 'Inter_600SemiBold' }}>Overall Mood</ThemedText>
-                      <ThemedText style={{ color: moodTextColor(analysisResult.label) }}>{titleCase(analysisResult.label)}</ThemedText>
-                    </View>
-                  </View>
-                  <View>
-                    <ThemedText style={{ color: palette.muted }}>Sentiment Score</ThemedText>
-                    <ThemedText style={{ fontFamily: 'Inter_700Bold', textAlign: 'right' }}>{intensityPercent(analysisResult)}%</ThemedText>
-                  </View>
-                </View>
-                <View style={styles.progressTrack}>
-                  <View style={StyleSheet.flatten([styles.progressFill, { width: `${intensityPercent(analysisResult)}%` }])} />
-                </View>
-              </View>
-            ) : null}
-
-                {/* Detected Emotions */}
-                {!isAnalyzing && analysisResult ? (
-              <View>
-                <View style={styles.sectionHeaderRow}>
-                  <Icon name="heart" size={18} color={palette.icon} />
-                  <ThemedText style={{ fontFamily: 'Inter_600SemiBold' }}>Detected Emotions</ThemedText>
-                </View>
-                {(() => {
-                  const sorted = Object.entries(analysisResult.emotions).sort((a,b) => (b[1] as number) - (a[1] as number));
-                  const [k, v] = sorted[0] || ['neutral', 0];
-                  return (
-                    <View style={styles.emojiSquare}>
-                      <ThemedText style={{ fontSize: 24 }}>{emotionEmoji(k as any)}</ThemedText>
-                      <ThemedText style={{ color: palette.muted, marginTop: 4 }}>{k}</ThemedText>
-                    </View>
-                  );
-                })()}
-              </View>
-            ) : null}
-
-                {!isAnalyzing && analysisResult ? (
-              <View>
-                <View style={styles.sectionHeaderRow}>
-                  <Icon name="activity" size={18} color={palette.icon} />
-                  <ThemedText style={{ fontFamily: 'Inter_600SemiBold' }}>Mood Shift</ThemedText>
-                </View>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                  <ThemedText>Shift: {formatDelta(analysisResult.shift)}</ThemedText>
-                  {analysisResult.maskingPossible ? (
-                    <View style={styles.themeChip}><ThemedText>Possible masking</ThemedText></View>
-                  ) : null}
-                </View>
-              </View>
-            ) : null}
-
-                {!isAnalyzing && analysisResult && analysisResult.phraseMatches && analysisResult.phraseMatches.length > 0 ? (
-              <View>
-                <View style={styles.sectionHeaderRow}>
-                  <Icon name="message-square" size={18} color={palette.icon} />
-                  <ThemedText style={{ fontFamily: 'Inter_600SemiBold' }}>Key Phrases</ThemedText>
-                </View>
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                  {uniqueStrings(analysisResult.phraseMatches).slice(0, 5).map((p) => (
-                    <View key={p} style={styles.themeChip}><ThemedText>“{p}”</ThemedText></View>
-                  ))}
-                </View>
-              </View>
-            ) : null}
-
-                {!isAnalyzing && analysisResult ? (
-              <View>
-                <View style={styles.sectionHeaderRow}>
-                  <Icon name="target" size={18} color={palette.icon} />
-                  <ThemedText style={{ fontFamily: 'Inter_600SemiBold' }}>Risk Indicators</ThemedText>
-                </View>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                  <ThemedText>Score: {Math.round(((analysisResult.risk.score ?? 0) * 100))}%</ThemedText>
-                  {analysisResult.risk.crisis ? (<View style={styles.themeChip}><ThemedText>CRISIS</ThemedText></View>) : null}
-                </View>
-                {(() => {
-                  const terms = uniqueStrings(analysisResult.risk.terms || []).slice(0, 6);
-                  const flags = uniqueStrings(analysisResult.risk.flags || []).slice(0, 6);
-                  if (terms.length === 0 && flags.length === 0) return null;
-                  return (
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
-                      {flags.map((f) => (<View key={`f-${f}`} style={styles.themeChip}><ThemedText>{f}</ThemedText></View>))}
-                      {terms.map((t) => (<View key={`t-${t}`} style={styles.themeChip}><ThemedText>{t}</ThemedText></View>))}
-                    </View>
-                  );
-                })()}
-              </View>
-            ) : null}
-
-                {!isAnalyzing && analysisResult && analysisResult.sentences && analysisResult.sentences.length > 0 ? (
-              <View>
-                <View style={styles.sectionHeaderRow}>
-                  <Icon name="book-open" size={18} color={palette.icon} />
-                  <ThemedText style={{ fontFamily: 'Inter_600SemiBold' }}>Sentence Insights</ThemedText>
-                </View>
-                <View style={{ gap: 6 }}>
-                  {analysisResult.sentences.slice(0, 3).map((s, idx) => (
-                    <View key={idx} style={styles.suggestCard}>
-                      <ThemedText style={{ marginRight: 6 }}>{moodEmoji(s.label as any)}</ThemedText>
-                      <ThemedText numberOfLines={2} style={{ flex: 1 }}>{s.text}</ThemedText>
-                    </View>
-                  ))}
-                </View>
-              </View>
-            ) : null}
-
-                {/* Actions */}
-                <View style={{ flexDirection: 'row', gap: 10, alignSelf: 'stretch', marginTop: 10 }}>
-                  <Button title="Re-analyze" variant="outline" onPress={refreshAnalysis} />
-                  <View style={{ flex: 1 }} />
-                  <Button title="Close" onPress={() => setAnalysisVisible(false)} />
-                </View>
-                <ThemedText style={{ color: palette.muted, fontSize: 11, marginTop: 6, textAlign: 'center' }}>
-                  This is not medical advice. For emergencies, contact local services.
-                </ThemedText>
-
-              </ScrollView>
-            ) : null}
-          </View>
-        </View>
-      </Modal>
       <Modal visible={!!pendingDelete} transparent animationType="fade" onRequestClose={handleCancelDelete}>
         <View style={styles.overlay}>
           <Animated.View
@@ -1046,82 +813,6 @@ function ToolbarButton({ icon, label, disabled, onPress, active, bgColor, fgColo
   );
 }
 
-// ---------- Helpers for analysis UI (module scope) ----------
-function titleCase(s: string) {
-  if (!s) return s;
-  return s.charAt(0).toUpperCase() + s.slice(1);
-}
-
-function moodEmoji(label: 'positive' | 'neutral' | 'negative') {
-  if (label === 'positive') return '😊';
-  if (label === 'negative') return '😞';
-  return '😐';
-}
-
-function moodTextColor(label: 'positive' | 'neutral' | 'negative') {
-  switch (label) {
-    case 'positive': return '#166534';
-    case 'negative': return '#991B1B';
-    default: return '#111827';
-  }
-}
-
-function intensityPercent(a: Analysis) {
-  const v = a.intensity !== undefined ? Math.min(1, Math.max(0, a.intensity as number)) : Math.min(1, Math.max(0, Math.abs(a.comparative)));
-  return Math.max(5, Math.round(v * 100));
-}
-
-function moodCardTint(label: 'positive' | 'neutral' | 'negative') {
-  if (label === 'positive') return { backgroundColor: '#ECFDF5', borderColor: '#A7F3D0' };
-  if (label === 'negative') return { backgroundColor: '#FEF2F2', borderColor: '#FECACA' };
-  return { backgroundColor: '#F3F4F6', borderColor: '#E5E7EB' };
-}
-
-function emotionEmoji(k: keyof Analysis['emotions'] | string) {
-  switch (k) {
-    case 'joy': return '😊';
-    case 'sadness': return '😢';
-    case 'anger': return '😡';
-    case 'anxiety': return '😟';
-    case 'stress': return '😣';
-    case 'calm': return '😌';
-    default: return '🙂';
-  }
-}
-
-function formatDelta(n?: number) {
-  if (typeof n !== 'number' || isNaN(n)) return '0.00';
-  const sign = n > 0 ? '+' : '';
-  return `${sign}${n.toFixed(2)}`;
-}
-
-function uniqueStrings(arr: string[] = []) {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const s of arr) { if (!seen.has(s)) { seen.add(s); out.push(s); } }
-  return out;
-}
-
-function primarySuggestion(a: Analysis): string {
-  if (a.risk.crisis) return 'If you are in danger or thinking about harm, please contact emergency services or a crisis hotline immediately.';
-  const top = Object.entries(a.emotions).sort((x, y) => (y[1] as number) - (x[1] as number))[0]?.[0];
-  switch (top) {
-    case 'anxiety':
-      return 'Consider practicing mindfulness or meditation to help manage difficult emotions';
-    case 'sadness':
-      return 'Try a gentle act of self-care — a short walk, hydration, or a few kind words to yourself';
-    case 'stress':
-      return 'Break a task into a small step and take a brief breathing break to reset';
-    case 'anger':
-      return 'Try a quick grounding exercise (name 5 things you see, 4 you feel) to lower intensity';
-    case 'calm':
-      return 'Notice what supported this calm so you can return to it later';
-    case 'joy':
-      return 'Celebrate a small win and consider repeating what worked for you';
-    default:
-      return 'Take a slow breath and jot one small next step you can do today';
-  }
-}
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
@@ -1155,20 +846,21 @@ const styles = StyleSheet.create({
 
   editorWrap: {
     borderWidth: 1,
-    borderRadius: 10,
-    padding: 6,
-    marginTop: 8,
+    borderRadius: 12,
+    padding: 8,
+    marginTop: 12,
   },
   textarea: {
-    minHeight: 160,
-    padding: 12,
+    minHeight: 200,
+    padding: 14,
     textAlignVertical: 'top',
     fontFamily: 'Inter_400Regular',
     fontSize: 16,
     color: '#000000',
+    lineHeight: 24,
   },
-  counterRow: { alignItems: 'flex-end' },
-  toolbar: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 4 },
+  counterRow: { alignItems: 'flex-end', marginTop: 12, marginBottom: 8 },
+  toolbar: { flexDirection: 'row', alignItems: 'center', gap: 16, marginTop: 16 },
   toolBtn: {
     paddingVertical: 10,
     paddingHorizontal: 14,
@@ -1179,53 +871,20 @@ const styles = StyleSheet.create({
   titleInput: {
     borderWidth: 1,
     borderColor: '#E5E7EB',
-    borderRadius: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
     fontFamily: 'Inter_600SemiBold',
     fontSize: 18,
-    marginTop: 10,
+    marginTop: 16,
     color: '#000000',
   },
-  // Analysis modal additions
-  closeBtn: {
-    position: 'absolute',
-    top: 10,
-    right: 10,
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sheetHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  sectionIconWrap: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center' },
-  subtle: { color: '#6B7280', marginTop: 2 },
-  moodCard: { borderWidth: 1, borderRadius: 12, padding: 12, marginTop: 12 },
-  moodRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
-  progressTrack: { height: 8, backgroundColor: '#E5E7EB', borderRadius: 999, overflow: 'hidden' },
-  progressFill: { height: '100%', backgroundColor: '#111827', width: '100%', alignSelf: 'flex-start' },
-  sectionHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 14, marginBottom: 8 },
-  emojiSquare: { width: 64, height: 64, borderRadius: 12, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center', marginTop: 6 },
-  themeChip: { paddingVertical: 6, paddingHorizontal: 10, borderRadius: 999, backgroundColor: '#EEF2F7', borderWidth: 1, borderColor: '#E5E7EB' },
-  suggestCard: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 12, backgroundColor: '#F9FAFB', borderWidth: 1, borderColor: '#E5E7EB' },
-  numBadge: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: '#E5E7EB' },
   overlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.25)',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 24,
-  },
-  modalCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 20,
-    alignItems: 'stretch',
-    justifyContent: 'flex-start',
-    gap: 12,
-    width: '100%',
-    maxWidth: 420,
   },
   confirmCard: {
     backgroundColor: '#FFFFFF',
@@ -1253,71 +912,6 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     marginHorizontal: 8,
     marginTop: -2,
-  },
-  loadingOnly: { minHeight: 160, alignItems: 'center', justifyContent: 'center', alignSelf: 'stretch' },
-  loadingBrain: { width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center', backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0' },
-  loadingCard: { borderWidth: 1, borderRadius: 12, padding: 12, backgroundColor: '#F9FAFB', borderColor: '#E5E7EB', marginTop: 12 },
-  chip: {
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  emotionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 4,
-  },
-  meterTrack: {
-    flex: 1,
-    height: 8,
-    borderRadius: 999,
-    backgroundColor: '#EEF2F7',
-    overflow: 'hidden',
-  },
-  meterFill: {
-    height: '100%',
-    backgroundColor: '#111827',
-  },
-  chatBubbleCoach: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#F3F4F6',
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    maxWidth: '90%',
-  },
-  chatBubbleUser: {
-    alignSelf: 'flex-end',
-    backgroundColor: '#111827',
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    maxWidth: '90%',
-  },
-  chatInputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 6,
-  },
-  chatInput: {
-    flex: 1,
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    backgroundColor: '#FFFFFF',
-  },
-  sendBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#111827',
   },
   noticeBox: { borderWidth: 1, borderRadius: 12, padding: 12, gap: 4, marginTop: 6 },
   confirmIconWrap: {

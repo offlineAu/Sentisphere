@@ -16,3 +16,4 @@ class MobileUser(MobileBase):
     last_login = Column(DateTime, nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, server_default=func.now())
+    push_token = Column(String(255), nullable=True)  # Expo push notification token
