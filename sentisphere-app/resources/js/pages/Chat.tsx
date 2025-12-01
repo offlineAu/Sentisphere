@@ -131,9 +131,22 @@ export default function Chat() {
       try {
         const res = await api.get<Conversation[]>(`/conversations`);
         const unique = Array.from(new Map(res.data.map(c => [c.conversation_id, c])).values());
-        setConversations(unique);
-        if (unique.length > 0) {
-          setActiveConversation(unique[0].conversation_id);
+
+        // Enrich with initiator nickname for display in the sidebar list
+        const withNicknames = await Promise.all(
+          unique.map(async (c) => {
+            try {
+              const { data } = await api.get<{ nickname: string }>(`/users/${c.initiator_user_id}`);
+              return { ...c, initiator_nickname: data.nickname || c.initiator_nickname };
+            } catch {
+              return c;
+            }
+          })
+        );
+
+        setConversations(withNicknames);
+        if (withNicknames.length > 0) {
+          setActiveConversation(withNicknames[0].conversation_id);
         }
       } catch (err) {
         console.error("Error fetching conversations:", err);
@@ -385,14 +398,20 @@ export default function Chat() {
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center justify-between gap-3">
                                 <div className="min-w-0">
-                                  <div className="font-semibold text-sm text-gray-900 truncate">{c.subject || `Conversation #${convId}`}</div>
-                                  <div className="text-[12px] text-gray-500 truncate">{c.initiator_nickname || ''}</div>
+                                  <div className="font-semibold text-sm text-gray-900 truncate">{c.initiator_nickname || `Conversation #${convId}`}</div>
+                                  <div className="text-[12px] text-gray-500 truncate">{c.subject || ''}</div>
                                 </div>
                                 <div className="flex items-center gap-3 shrink-0">
                                   <span className="text-xs opacity-75">
                                     {(() => {
                                       const t = last?.timestamp || c.last_activity_at;
-                                      return t ? new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+                                      return t
+                                        ? new Date(t).toLocaleTimeString([], {
+                                            hour: '2-digit',
+                                            minute: '2-digit',
+                                            hour12: true,
+                                          })
+                                        : '';
                                     })()}
                                   </span>
                                   <span
@@ -471,6 +490,7 @@ export default function Chat() {
                             {new Date(m.timestamp).toLocaleTimeString([], {
                               hour: "2-digit",
                               minute: "2-digit",
+                              hour12: true,
                             })}
                           </small>
                         </div>

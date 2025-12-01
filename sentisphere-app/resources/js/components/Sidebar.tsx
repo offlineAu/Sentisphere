@@ -51,18 +51,23 @@ export default function Sidebar() {
     <motion.aside
       aria-label="Primary sidebar"
       className={`${styles.sidebar} ${open ? styles.open : styles.closed}`}
-      animate={{ width: open ? "17rem" : "5rem" }}
+      animate={{ width: open ? "16rem" : "4.5rem" }}
       transition={{ duration: 0.35, ease: "easeInOut" }}
     >
       {/* Logo Row */}
       <div className={styles.logoRow}>
         <div
           className={styles.logoWrap}
-          role={open ? undefined : "button"}
-          tabIndex={open ? -1 : 0}
-          aria-label={open ? undefined : "Open sidebar"}
-          onClick={() => { if (!open) setOpen(true); }}
-          onKeyDown={(e) => { if (!open && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setOpen(true); } }}
+          role="button"
+          tabIndex={0}
+          aria-label={open ? "Collapse sidebar" : "Expand sidebar"}
+          onClick={() => setOpen(!open)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              setOpen(!open);
+            }
+          }}
         >
           <div className={styles.logoCircle}>
             <img
@@ -85,15 +90,6 @@ export default function Sidebar() {
             )}
           </AnimatePresence>
         </div>
-        {open && (
-          <button
-            className={styles.chevron}
-            onClick={() => setOpen(false)}
-            title="Collapse sidebar"
-          >
-            <ChevronLeft className="w-[18px] h-[18px]" />
-          </button>
-        )}
       </div>
 
       <div className={styles.divider} />

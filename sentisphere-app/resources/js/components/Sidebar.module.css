@@ -3,22 +3,22 @@
   top: 0;
   left: 0;
   height: 100vh;
-  width: 17rem; /* align with motion animate open width */
-  background: var(--sidebar);
+  width: 10rem; /* align with motion animate open width */
+  background: #ffffff; /* white sidebar background */
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--sidebar-border);
+  border-right: 1px solid #e5e7eb; /* gray-200 */
   transition: width 0.3s ease;
   box-shadow: 0 0 8px rgba(0, 0, 0, 0.08);
   overflow: hidden; /* avoid overlap when collapsed */
 }
 
 .open {
-  width: 17rem;
+  width: 16rem;
 }
 
 .closed {
-  width: 5rem;
+  width: 4.5rem;
 }
 
 .logoRow {
@@ -35,6 +35,7 @@
   align-items: center;
   gap: 0.75rem;
   min-width: 0; /* allow text to truncate if needed */
+  cursor: pointer;
 }
 
 .logoIcon {
@@ -50,20 +51,20 @@
 .logoText {
   font-size: 1.4rem;
   font-weight: 700;
-  color: var(--sidebar-foreground);
+  color: var(--sidebar-primary); /* brand green for Sentisphere text */
   white-space: nowrap;
 }
 
 .divider {
   height: 1px;
-  background: var(--sidebar-border);
+  background: #e5e7eb; /* gray-200 */
   margin: 1rem 0;
 }
 
 .menuTitle {
   font-size: 0.75rem;
   font-weight: 700;
-  color: rgba(236, 253, 245, 0.6); /* subtle on dark sidebar */
+  color: #6b7280; /* gray-500 on white sidebar */
   letter-spacing: 0.08em;
   margin: 0 1.5rem 0.5rem 1.5rem;
 }
@@ -79,7 +80,7 @@
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  color: var(--sidebar-foreground);
+  color: #111827; /* gray-900 */
   text-decoration: none;
   font-weight: 500;
   border-radius: 0.75rem;
@@ -89,13 +90,13 @@
 }
 
 .navLink:hover {
-  background: var(--sidebar-accent);
-  color: var(--sidebar-accent-foreground);
+  background: #f3f4f6; /* gray-100 */
+  color: #111827;
 }
 
 .active {
-  color: var(--sidebar-accent-foreground);
-  background: var(--sidebar-accent);
+  color: #047857; /* emerald-700 */
+  background: #d1fae5; /* emerald-100 */
   font-weight: 700;
 }
 
@@ -120,19 +121,19 @@
 .navLink svg {
   width: 20px;
   height: 20px;
-  color: #94a3b8; /* gray-400 outline look for inactive */
+  color: #9ca3af; /* gray-400 outline look for inactive */
 }
 
 /* Disabled nav item (e.g., Coming Soon) */
 .navLinkDisabled {
-  color: rgba(236, 253, 245, 0.6); /* muted */
+  color: #9ca3af; /* muted gray */
   opacity: 0.7;
   cursor: not-allowed;
 }
 
 .navLinkDisabled:hover {
   background: transparent; /* disable hover background */
-  color: rgba(236, 253, 245, 0.6); /* keep muted color */
+  color: #9ca3af; /* keep muted color */
 }
 
 .spacer {
@@ -157,7 +158,7 @@
 }
 
 .signoutBtn:hover {
-  background: rgba(239, 68, 68, 0.12); /* red-500 / 12% */
+  background: rgba(239, 68, 68, 0.06); /* lighter red tint on white */
   color: #b91c1c;
 }
 
@@ -252,7 +253,6 @@
 
 /* Clickable logo when sidebar is closed */
 .closed .logoWrap {
-  cursor: pointer;
   border-radius: 0.5rem;
   margin: 0 auto; /* ensure centered container */
 }
