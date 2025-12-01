@@ -1,9 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, TrendingUp, AlertTriangle, UserRound, CalendarDays, Activity, Download, Filter } from "lucide-react";
+import { ChevronLeft, ChevronRight, TrendingUp, TrendingDown, AlertTriangle, UserRound, CalendarDays, Activity, Download, Filter, Lightbulb } from "lucide-react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, Legend } from "recharts";
 import { motion, AnimatePresence } from "framer-motion";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { LoadingSpinner } from "../components/loading-spinner";
+import { RiskBadge } from "@/components/ui/RiskBadge";
+import { MoodTimeline, StressBar } from "@/components/insights";
 import api from "../lib/api";
 import styles from "./Reports.module.css";
 import Slider from "react-slick";
@@ -67,6 +69,36 @@ type TrendPoint = {
   event_type?: string | null;
 };
 
+type MoodDataPoint = {
+  date: string;
+  avg_mood_score: number;
+};
+
+type MoodTrends = {
+  daily: MoodDataPoint[];
+  trend: 'improving' | 'worsening' | 'stable';
+  week_avg?: number;
+  prev_week_avg?: number | null;
+  change_percent?: number | null;
+};
+
+type Streaks = {
+  high_stress_consecutive_days: number;
+  negative_mood_consecutive_days: number;
+  feel_better_no_streak: number;
+};
+
+type InsightMetadata = {
+  risk_level: 'low' | 'medium' | 'high' | 'critical';
+  risk_score: number;
+  risk_reasoning?: string;
+  week_avg?: number;
+  journal_count: number;
+  checkin_count: number;
+  alerts_count: number;
+  generated_at?: string;
+};
+
 type WeeklyInsight = {
   week_start: string;
   week_end: string;
@@ -74,13 +106,33 @@ type WeeklyInsight = {
   event_type?: string | null;
   title: string;
   description: string;
+  summary?: string;
   recommendation: string;
+  recommendations?: string[];
+  mood_trends?: MoodTrends;
+  dominant_emotions?: string[];
+  sentiment_breakdown?: { positive: number; neutral: number; negative: number };
+  stress_energy_patterns?: { stress: Record<string, number>; energy: Record<string, number> };
+  streaks?: Streaks;
+  what_improved?: string[];
+  what_declined?: string[];
+  metadata?: InsightMetadata;
 };
 
 type BehaviorInsight = {
   title: string;
   description: string;
   metrics?: Array<{ label: string; value: number | string }>;
+  recommendation?: string;
+  risk_flags?: {
+    negative_sentiment_ratio_percent: number;
+    high_stress_days: number;
+    high_stress_streak?: number;
+    negative_mood_streak?: number;
+    feel_better_no_streak?: number;
+    late_night_journals: number;
+  };
+  metadata?: InsightMetadata;
 };
 
 type CalendarEvent = { name: string; start: string; end: string; type?: string };
@@ -370,11 +422,11 @@ function Reports() {
           setAlertsLoading(false);
         }
 
-        const concernsRes = await api.get<any[]>(`/reports/concerns`, { params: filterParams });
-        const concernsData = concernsRes.data || [];
+        const concernsRes = await api.get<any[]>(`/reports/concerns`, { params: { ...filterParams } });
+        const concernsData = Array.isArray(concernsRes.data) ? concernsRes.data : [];
         setConcerns(concernsData.map((c: any) => ({ ...c, barColor: "#2563eb" })));
 
-        const interventionsRes = await api.get<any>(`/reports/interventions`, { params: filterParams });
+        const interventionsRes = await api.get<any>(`/reports/interventions`, { params: { ...filterParams } });
         const interventionsData = interventionsRes.data || {};
         setInterventionSummary(interventionsData.summary || null);
         const byType = Array.isArray(interventionsData.by_type) ? interventionsData.by_type : [];
@@ -456,9 +508,7 @@ function Reports() {
           >
             <option value="this_week">This Week</option>
             <option value="last_week">Last Week</option>
-            <option value="last_30d">Last 30 Days</option>
             <option value="this_month">This Month</option>
-            <option value="this_semester">This Semester</option>
             <option value="custom">Custom Range</option>
           </select>
           {globalRange === 'custom' && (
@@ -690,17 +740,73 @@ function Reports() {
                 {insights.map((insight, idx) => (
                   <div key={`${insight.week_start}-${idx}`} className="px-1 h-full">
                     <div className="rounded-2xl shadow-sm border bg-gray-50 p-4 text-sm flex h-full flex-col space-y-3 transition hover:shadow-md">
-                      <div className="flex items-center justify-between text-xs text-[#6b7280]">
-                        <span>{new Date(insight.week_start).toLocaleDateString()} - {new Date(insight.week_end).toLocaleDateString()}</span>
-                        <span className="font-medium text-[#111827]">{insight.event_name ?? "No Event"}</span>
+                      {/* Header with date range and risk badge */}
+                      <div className="flex items-center justify-between">
+                        <div className="text-xs text-[#6b7280]">
+                          <span>{new Date(insight.week_start).toLocaleDateString()} - {new Date(insight.week_end).toLocaleDateString()}</span>
+                          {insight.event_name && (
+                            <span className="ml-2 px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-full text-[10px] font-medium">
+                              {insight.event_name}
+                            </span>
+                          )}
+                        </div>
+                        {insight.metadata?.risk_level && (
+                          <RiskBadge
+                            level={insight.metadata.risk_level}
+                            score={insight.metadata.risk_score}
+                            reasoning={insight.metadata.risk_reasoning}
+                            size="sm"
+                          />
+                        )}
                       </div>
+
+                      {/* Title and summary */}
                       <div>
                         <h3 className="text-base font-semibold text-[#111827]">{insight.title}</h3>
-                        <p className="text-[#374151] mt-1 leading-relaxed">{insight.description}</p>
+                        <p className="text-[#374151] mt-1 leading-relaxed">{insight.summary || insight.description}</p>
                       </div>
+
+                      {/* Mood Timeline */}
+                      {insight.mood_trends && insight.mood_trends.daily && insight.mood_trends.daily.length > 0 && (
+                        <div className="bg-white rounded-lg p-3 border">
+                          <MoodTimeline moodTrends={insight.mood_trends} height={80} showTrendBadge={true} />
+                        </div>
+                      )}
+
+                      {/* What Changed section */}
+                      {(insight.what_improved?.length || insight.what_declined?.length) && (
+                        <div className="grid grid-cols-2 gap-2">
+                          {insight.what_improved && insight.what_improved.length > 0 && (
+                            <div className="bg-green-50 rounded-lg p-2">
+                              <div className="flex items-center gap-1 text-green-700 text-[10px] font-semibold">
+                                <TrendingUp className="h-3 w-3" /> Improved
+                              </div>
+                              <div className="text-xs text-green-800 mt-1">
+                                {insight.what_improved.map(item => item.replace(/_/g, ' ')).join(', ')}
+                              </div>
+                            </div>
+                          )}
+                          {insight.what_declined && insight.what_declined.length > 0 && (
+                            <div className="bg-red-50 rounded-lg p-2">
+                              <div className="flex items-center gap-1 text-red-700 text-[10px] font-semibold">
+                                <TrendingDown className="h-3 w-3" /> Declined
+                              </div>
+                              <div className="text-xs text-red-800 mt-1">
+                                {insight.what_declined.map(item => item.replace(/_/g, ' ')).join(', ')}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Recommendation */}
                       <div className="bg-white rounded-lg p-3 border border-dashed border-primary/40">
-                        <div className="text-xs uppercase tracking-wide text-primary font-semibold mb-1">Recommendation</div>
-                        <p className="text-sm text-[#0f172a] leading-relaxed">{insight.recommendation}</p>
+                        <div className="flex items-center gap-1 text-xs uppercase tracking-wide text-primary font-semibold mb-1">
+                          <Lightbulb className="h-3 w-3" /> Recommendation
+                        </div>
+                        <p className="text-sm text-[#0f172a] leading-relaxed">
+                          {insight.recommendations?.[0] || insight.recommendation}
+                        </p>
                       </div>
                     </div>
                   </div>
@@ -741,17 +847,58 @@ function Reports() {
               >
                 {behaviorInsights.map((bi, idx) => (
                   <div key={idx} className="px-1">
-                    <div className="rounded-2xl shadow-sm border bg-gray-50 p-4 text-sm">
-                      <h3 className="text-base font-semibold text-[#111827] mb-1">{bi.title}</h3>
-                      <p className="text-[#374151] leading-relaxed mb-3">{bi.description}</p>
+                    <div className="rounded-2xl shadow-sm border bg-gray-50 p-4 text-sm space-y-3">
+                      {/* Header with risk badge */}
+                      <div className="flex items-start justify-between">
+                        <h3 className="text-base font-semibold text-[#111827]">{bi.title}</h3>
+                        {bi.metadata?.risk_level && (
+                          <RiskBadge level={bi.metadata.risk_level} size="sm" />
+                        )}
+                      </div>
+                      <p className="text-[#374151] leading-relaxed">{bi.description}</p>
+                      
+                      {/* Metrics grid */}
                       {Array.isArray(bi.metrics) && bi.metrics.length > 0 && (
                         <div className="grid grid-cols-2 gap-2">
                           {bi.metrics.map((m, i) => (
                             <div key={i} className="bg-white rounded-lg border p-2 text-center">
                               <div className="text-[11px] text-[#6b7280]">{m.label}</div>
-                              <div className="text-lg font-bold text-[#111827]">{m.value}</div>
+                              <div className={`text-lg font-bold ${
+                                String(m.value).startsWith('+') ? 'text-green-600' : 
+                                String(m.value).startsWith('-') ? 'text-red-600' : 'text-[#111827]'
+                              }`}>{m.value}</div>
                             </div>
                           ))}
+                        </div>
+                      )}
+                      
+                      {/* Risk flags summary */}
+                      {bi.risk_flags && ((bi.risk_flags.high_stress_streak ?? 0) >= 3 || (bi.risk_flags.negative_mood_streak ?? 0) >= 3 || bi.risk_flags.late_night_journals >= 3) && (
+                        <div className="bg-amber-50 border border-amber-200 rounded-lg p-2 mt-2">
+                          <div className="flex items-center gap-1 text-amber-700 text-xs font-medium">
+                            <AlertTriangle className="h-3 w-3" /> Risk Indicators
+                          </div>
+                          <div className="text-xs text-amber-600 mt-1 space-y-0.5">
+                            {(bi.risk_flags.high_stress_streak ?? 0) >= 3 && (
+                              <div>• {bi.risk_flags.high_stress_streak}+ day high stress streak</div>
+                            )}
+                            {(bi.risk_flags.negative_mood_streak ?? 0) >= 3 && (
+                              <div>• {bi.risk_flags.negative_mood_streak}+ day negative mood streak</div>
+                            )}
+                            {bi.risk_flags.late_night_journals >= 3 && (
+                              <div>• {bi.risk_flags.late_night_journals} late night journals</div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Recommendation */}
+                      {bi.recommendation && (
+                        <div className="bg-white rounded-lg p-2 border border-dashed border-primary/40 mt-2">
+                          <div className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-primary font-semibold">
+                            <Lightbulb className="h-3 w-3" /> Action
+                          </div>
+                          <p className="text-xs text-[#0f172a] leading-relaxed mt-1">{bi.recommendation}</p>
                         </div>
                       )}
                     </div>
@@ -792,7 +939,7 @@ function Reports() {
           <h3 className="text-[#333] font-semibold mb-2 text-sm">Top Student Concerns</h3>
           <div className="space-y-2">
             {concerns.length === 0 ? (
-              <div className="text-sm text-gray-500">No data for this period.</div>
+              <div className="text-sm text-gray-500">{globalRange === 'this_week' ? 'No student concerns this week.' : 'No data for this period.'}</div>
             ) : (
               concerns.map((c, i) => (
                 <div key={i}>

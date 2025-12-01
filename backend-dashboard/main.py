@@ -363,6 +363,17 @@ def create_checkin(
             user_id=current_user.user_id,
         )
     created = CheckinService.create_checkin(db, payload)
+
+    # Automatically analyze sentiment for the new check-in
+    try:
+        SentimentService.analyze_checkin(db, created.checkin_id)
+        db.commit()
+        db.refresh(created)
+    except Exception:
+        # Do not fail the check-in creation if sentiment analysis fails
+        db.rollback()
+        db.refresh(created)
+
     return created
 
 
@@ -431,6 +442,16 @@ def create_journal(
             user_id=current_user.user_id,
         )
     created = JournalService.create_journal(db, payload)
+
+    # Automatically analyze sentiment for the new journal
+    try:
+        SentimentService.analyze_journal(db, created.journal_id)
+        db.commit()
+        db.refresh(created)
+    except Exception:
+        # Do not fail journal creation if sentiment analysis fails
+        db.rollback()
+        db.refresh(created)
 
     # Publish a realtime journal.created event for connected dashboards
     try:
@@ -697,6 +718,87 @@ async def conversations_ws(websocket: WebSocket, token: Optional[str] = None) ->
         pass
     finally:
         await ws_conv_manager.disconnect(websocket)
+
+
+# --- Insight WebSocket for real-time updates ---
+class InsightConnectionManager:
+    """Manages WebSocket connections for insight notifications."""
+
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: dict):
+        """Broadcast insight event to all connected clients."""
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except Exception:
+                pass
+
+
+insight_ws_manager = InsightConnectionManager()
+
+
+@app.websocket("/ws/insights")
+async def insights_ws(websocket: WebSocket, token: Optional[str] = Query(None)) -> None:
+    """WebSocket endpoint for real-time insight notifications.
+    
+    Events sent:
+    - insight_generated: When a new insight is created
+    - insight_updated: When an existing insight is updated
+    """
+    if not token:
+        await websocket.close(code=4401)
+        return
+    try:
+        _ = _extract_user_id(token)
+    except HTTPException:
+        await websocket.close(code=4401)
+        return
+
+    await insight_ws_manager.connect(websocket)
+    try:
+        # Send connection confirmation
+        await websocket.send_json({
+            "type": "connected",
+            "message": "Connected to insight notifications",
+            "timestamp": datetime.utcnow().isoformat() + "Z"
+        })
+        # Keep connection alive
+        while True:
+            msg = await websocket.receive_text()
+            try:
+                data = json.loads(msg)
+                if data.get("action") == "ping":
+                    await websocket.send_json({"type": "pong", "ts": datetime.utcnow().isoformat() + "Z"})
+            except Exception:
+                continue
+    except WebSocketDisconnect:
+        pass
+    finally:
+        insight_ws_manager.disconnect(websocket)
+
+
+async def notify_insight_generated(insight_type: str, user_id: Optional[int], timeframe_start: str, timeframe_end: str, risk_level: str):
+    """Broadcast insight generation notification to all connected clients."""
+    await insight_ws_manager.broadcast({
+        "type": "insight_generated",
+        "insight_type": insight_type,
+        "user_id": user_id,
+        "timeframe_start": timeframe_start,
+        "timeframe_end": timeframe_end,
+        "risk_level": risk_level,
+        "generated_at": datetime.utcnow().isoformat() + "Z"
+    })
+
 
 @app.get("/api/auth/me")
 def auth_me(token: str = Depends(oauth2_scheme)):
@@ -1189,7 +1291,7 @@ def counselor_list_conversations(
                 """
                 SELECT c.conversation_id, c.initiator_user_id, c.initiator_role,
                        c.subject, c.counselor_id, c.status, c.created_at, c.last_activity_at,
-                       u.name AS student_name, u.email AS student_email, u.nickname AS student_nickname
+                       u.name AS initiator_name, u.email AS initiator_email, u.nickname AS initiator_nickname
                 FROM conversations c
                 LEFT JOIN user u ON c.initiator_user_id = u.user_id
                 WHERE c.counselor_id = :counselor_id
@@ -1748,8 +1850,11 @@ def create_emotional_checkin(
     if stress == "Very High":
         stress = "Very High Stress"
 
+    checkin_id = None
+    nickname = None
+    
     # Insert into the MOBILE database
-    with mobile_engine.connect() as conn:
+    with mobile_engine.begin() as conn:
         try:
             ins = conn.execute(text(
                 """
@@ -1763,17 +1868,76 @@ def create_emotional_checkin(
                 "stress": stress,
                 "comment": (payload.comment or None),
             })
-            conn.commit()
+            checkin_id = int(ins.lastrowid)
         except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"Failed to save check-in: {exc.__class__.__name__}")
+            logging.error(f"Checkin insert error: {exc}")
+            raise HTTPException(status_code=500, detail=f"Failed to save check-in: {str(exc)[:100]}")
+    
+    # Get user's nickname for notification
+    try:
+        with mobile_engine.connect() as conn:
+            user_row = conn.execute(
+                text("SELECT nickname, name FROM user WHERE user_id = :uid LIMIT 1"),
+                {"uid": uid}
+            ).mappings().first()
+            if user_row:
+                nickname = user_row.get("nickname") or user_row.get("name") or "there"
+            else:
+                nickname = "there"
+    except Exception:
+        nickname = "there"
+    
     # Background analytics persistence: sentiments
     try:
-        SentimentService.remove_existing_checkin_sentiments(db, int(ins.lastrowid))
-        SentimentService.analyze_checkin(db, int(ins.lastrowid))
+        SentimentService.remove_existing_checkin_sentiments(db, checkin_id)
+        SentimentService.analyze_checkin(db, checkin_id)
         db.commit()
     except Exception:
         db.rollback()
-    return {"ok": True, "checkin_id": int(ins.lastrowid)}
+    
+    # Send instant "Thanks for Checking in" notification
+    notification_sent = False
+    try:
+        import asyncio
+        from app.services.push_notification_service import send_notification_instantly
+        
+        # Determine message based on mood
+        mood = payload.mood_level.lower()
+        if mood in ["great", "happy", "good"]:
+            message = f"That's wonderful! Keep up the positive energy 🌟"
+        elif mood in ["sad", "awful", "terrible"]:
+            message = f"Thanks for sharing how you feel. Remember, we're here for you 💙"
+        else:
+            message = f"Taking time to reflect is a great habit. Keep it up! ✨"
+        
+        # Run async notification in sync context
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result = loop.run_until_complete(
+                send_notification_instantly(
+                    mobile_engine=mobile_engine,
+                    user_id=uid,
+                    title=f"Thanks for Checking in, {nickname}! 🎉",
+                    message=message,
+                    category="system",
+                    source="system",
+                    extra_data={"checkin_id": checkin_id, "mood": payload.mood_level}
+                )
+            )
+            notification_sent = result.get("success", False)
+        finally:
+            loop.close()
+        
+        logging.info(f"Checkin notification for user {uid}: {notification_sent}")
+    except Exception as e:
+        logging.error(f"Failed to send checkin notification: {e}")
+    
+    return {
+        "ok": True, 
+        "checkin_id": checkin_id,
+        "notification_sent": notification_sent
+    }
 
 
 @app.get("/api/emotional-checkins")
@@ -1844,6 +2008,7 @@ def create_journal(
     if not content:
         raise HTTPException(status_code=422, detail="Content required")
 
+    journal_id = None
     with mobile_engine.connect() as conn:
         try:
             ins = conn.execute(
@@ -1856,15 +2021,91 @@ def create_journal(
                 {"uid": uid, "content": content},
             )
             conn.commit()
+            journal_id = int(ins.lastrowid)
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Failed to save journal: {exc.__class__.__name__}")
+    
+    # Analyze sentiment
+    sentiment_result = None
     try:
-        SentimentService.remove_existing_journal_sentiments(db, int(ins.lastrowid))
-        SentimentService.analyze_journal(db, int(ins.lastrowid))
+        SentimentService.remove_existing_journal_sentiments(db, journal_id)
+        sentiment_result = SentimentService.analyze_journal(db, journal_id)
         db.commit()
     except Exception:
         db.rollback()
-    return {"ok": True, "journal_id": int(ins.lastrowid)}
+    
+    # Auto-create alert for highly negative sentiment AND send notification INSTANTLY
+    alert_created = False
+    alert_id = None
+    notification_result = None
+    
+    if sentiment_result and sentiment_result.sentiment == "negative" and sentiment_result.confidence >= 0.6:
+        try:
+            # Check if user already has a recent open alert (within 24 hours)
+            check_recent_q = text(
+                """
+                SELECT alert_id FROM alert 
+                WHERE user_id = :uid AND status = 'open' 
+                AND created_at > DATE_SUB(NOW(), INTERVAL 24 HOUR)
+                LIMIT 1
+                """
+            )
+            with mobile_engine.connect() as conn:
+                existing = conn.execute(check_recent_q, {"uid": uid}).first()
+            
+            if not existing:
+                # Create alert for counselor review
+                insert_alert_q = text(
+                    """
+                    INSERT INTO alert (user_id, reason, severity, status, created_at)
+                    VALUES (:uid, :reason, :severity, 'open', NOW())
+                    """
+                )
+                # Determine severity based on confidence and emotions
+                emotions = sentiment_result.emotions or ""
+                severity = "high" if sentiment_result.confidence >= 0.75 or "crisis" in emotions.lower() else "medium"
+                reason = f"Auto-detected negative sentiment in journal (confidence: {sentiment_result.confidence:.0%})"
+                
+                with mobile_engine.begin() as conn:
+                    result = conn.execute(insert_alert_q, {
+                        "uid": uid,
+                        "reason": reason,
+                        "severity": severity
+                    })
+                    alert_id = result.lastrowid
+                
+                alert_created = True
+                logging.info(f"Auto-created {severity} alert {alert_id} for user {uid} due to negative sentiment")
+                
+                # Send wellness notification INSTANTLY (only for high/critical severity)
+                if severity in ("high", "critical") and alert_id:
+                    import asyncio
+                    from app.services.push_notification_service import send_alert_notification_instantly
+                    
+                    try:
+                        notification_result = asyncio.get_event_loop().run_until_complete(
+                            send_alert_notification_instantly(
+                                mobile_engine=mobile_engine,
+                                alert_id=alert_id,
+                                user_id=uid,
+                                severity=severity
+                            )
+                        )
+                        logging.info(f"Instant notification sent for alert {alert_id}: {notification_result.get('success')}")
+                    except Exception as notif_err:
+                        logging.error(f"Failed to send instant notification: {notif_err}")
+                        
+        except Exception as e:
+            logging.error(f"Failed to auto-create alert: {e}")
+    
+    return {
+        "ok": True, 
+        "journal_id": journal_id,
+        "sentiment": sentiment_result.sentiment if sentiment_result else None,
+        "alert_created": alert_created,
+        "alert_id": alert_id,
+        "notification_sent": notification_result.get("success") if notification_result else False
+    }
 
 @app.get("/api/journals")
 def list_journals(limit: int = Query(50, ge=1, le=200), token: str = Depends(oauth2_scheme)):
@@ -2060,7 +2301,7 @@ async def get_daily_quote():
     return quote_data
 
 
-@app.post("/api/notifications", response_model=NotificationRead, status_code=status.HTTP_201_CREATED)
+@app.post("/api/notifications", status_code=status.HTTP_201_CREATED)
 async def create_notification_endpoint(
     user_id: int,
     title: Optional[str] = None,
@@ -2070,12 +2311,14 @@ async def create_notification_endpoint(
     related_alert_id: Optional[int] = None,
 ):
     """
-    Create a manual/system notification.
-    Used for admin-generated or system notifications.
-    """
-    from app.services.push_notification_service import create_notification, send_push_notification
+    Create a notification and send it INSTANTLY via Expo Push.
     
-    notif_id = create_notification(
+    Used for admin-generated or system notifications.
+    Sends immediately - no delay.
+    """
+    from app.services.push_notification_service import send_notification_instantly
+    
+    result = await send_notification_instantly(
         mobile_engine=mobile_engine,
         user_id=user_id,
         title=title,
@@ -2085,11 +2328,8 @@ async def create_notification_endpoint(
         related_alert_id=related_alert_id
     )
     
-    if not notif_id:
+    if not result.get("notification_id"):
         raise HTTPException(status_code=500, detail="Failed to create notification")
-    
-    # Optionally send immediately
-    await send_push_notification(mobile_engine, user_id, notif_id)
     
     # Fetch and return the created notification
     select_q = text(
@@ -2100,9 +2340,13 @@ async def create_notification_endpoint(
         """
     )
     with mobile_engine.connect() as conn:
-        row = conn.execute(select_q, {"id": notif_id}).mappings().first()
+        row = conn.execute(select_q, {"id": result["notification_id"]}).mappings().first()
     
-    return dict(row)
+    return {
+        **dict(row),
+        "push_sent": result.get("push_sent", False),
+        "push_result": result.get("push_result")
+    }
 
 
 @app.get("/api/notifications")
@@ -2174,11 +2418,60 @@ async def mark_notification_read_endpoint(
     return {"ok": True, "notification_id": notification_id, "is_read": True}
 
 
+class TestNotificationRequest(BaseModel):
+    user_id: int
+    title: str
+    message: str
+
+
+@app.post("/api/notifications/test")
+async def send_test_notification_endpoint(
+    payload: TestNotificationRequest,
+):
+    """
+    Send a test push notification for QA testing via Postman.
+    
+    Creates a notification record and sends immediately via Expo Push.
+    
+    Request body:
+    {
+        "user_id": 123,
+        "title": "Test Notification",
+        "message": "This is a test message"
+    }
+    
+    Returns:
+    - notification_id
+    - expo_response
+    - message sent
+    - token used (truncated)
+    """
+    from app.services.push_notification_service import send_test_notification
+    
+    result = await send_test_notification(
+        mobile_engine=mobile_engine,
+        user_id=payload.user_id,
+        title=payload.title,
+        message=payload.message
+    )
+    
+    return {
+        "ok": result.get("success", False),
+        "notification_id": result.get("notification_id"),
+        "push_sent": result.get("push_sent", False),
+        "expo_response": result.get("expo_response"),
+        "token_used": result.get("token_used"),
+        "error": result.get("error"),
+        "message_sent": payload.message,
+        "title_sent": payload.title
+    }
+
+
 @app.post("/api/send-daily-quotes")
 async def send_daily_quotes_endpoint():
     """
     Trigger daily quote notifications manually (for testing).
-    Uses the unified notification table.
+    Uses the unified notification table. Sends INSTANTLY.
     """
     from app.services.push_notification_service import send_daily_quote_notifications
     
@@ -2359,29 +2652,45 @@ def get_attention_students(
 @app.get("/reports/concerns")
 def get_concerns(
     period: str = Query("month", enum=["week", "month"]),
+    range: Optional[str] = Query(None),
+    start: Optional[str] = Query(None),
+    end: Optional[str] = Query(None),
     _user: User = Depends(require_counselor),
     db: Session = Depends(get_db),
 ):
-    now = datetime.utcnow()
-    if period == "week":
-        start = now - timedelta(days=7)
+    # Prefer explicit global range (ISO calendar week via parse_global_range)
+    if range or start or end:
+        start_dt, end_dt = parse_global_range(range or "this_week", start, end)
     else:
-        start = now.replace(day=1)
-    return CounselorReportService.concerns(db, start=start)
+        now = datetime.utcnow()
+        if period == "week":
+            # Align with ISO "this week" semantics used elsewhere
+            start_dt, end_dt = parse_global_range("this_week", None, None)
+        else:
+            start_dt = now.replace(day=1)
+            end_dt = now
+    return CounselorReportService.concerns(db, start=start_dt, end=end_dt)
 
 
 @app.get("/reports/interventions")
 def get_interventions(
     period: str = Query("month", enum=["week", "month"]),
+    range: Optional[str] = Query(None),
+    start: Optional[str] = Query(None),
+    end: Optional[str] = Query(None),
     _user: User = Depends(require_counselor),
     db: Session = Depends(get_db),
 ):
-    now = datetime.utcnow()
-    if period == "week":
-        start = now - timedelta(days=7)
+    if range or start or end:
+        start_dt, end_dt = parse_global_range(range or "this_week", start, end)
     else:
-        start = now.replace(day=1)
-    return CounselorReportService.interventions(db, start=start)
+        now = datetime.utcnow()
+        if period == "week":
+            start_dt, end_dt = parse_global_range("this_week", None, None)
+        else:
+            start_dt = now.replace(day=1)
+            end_dt = now
+    return CounselorReportService.interventions(db, start=start_dt, end=end_dt)
 
 
 @app.get("/reports/participation")
@@ -3498,10 +3807,9 @@ def weekly_insights(
     current_user: str = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    # Delegate to CounselorReportService for privacy-aware weekly wellness insights.
-    # The current implementation ignores explicit range/start/end values and always
-    # computes relative to the current week window.
-    return CounselorReportService.weekly_insights(db)
+    """Privacy-aware weekly wellness insights with global date filter support."""
+    start_dt, end_dt = parse_global_range(range, start, end)
+    return CounselorReportService.weekly_insights(db, start=start_dt, end=end_dt)
 
 
 @app.get("/api/reports/behavior-insights")
@@ -3512,10 +3820,9 @@ def behavior_insights(
     current_user: str = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    # Delegate to CounselorReportService for behavioral stress/journaling insights.
-    # As with weekly_insights, date-range query parameters are currently unused and
-    # the service computes insights for this week vs last week.
-    return CounselorReportService.behavior_insights(db)
+    """Behavioral stress/journaling insights with global date filter support."""
+    start_dt, end_dt = parse_global_range(range, start, end)
+    return CounselorReportService.behavior_insights(db, start=start_dt, end=end_dt)
 
 
 @app.get("/api/ai/sentiment-summary")
@@ -3708,6 +4015,7 @@ def get_concerns(
 
     # Use the same global date filter contract as other report endpoints.
     start_dt, end_dt = parse_global_range(range or "this_week", start, end)
+    logging.info("/api/reports/concerns range=%s start=%s end=%s", range, start_dt, end_dt)
 
     # Aggregate distinct student-level concern labels from journal and check-in
     # emotions within the window, then count unique students per label.
@@ -3720,7 +4028,7 @@ def get_concerns(
                    LOWER(TRIM(SUBSTRING_INDEX(js.emotions, ',', 1))) AS label
             FROM journal_sentiment js
             JOIN journal j ON j.journal_id = js.journal_id
-            WHERE j.created_at BETWEEN :start AND :end
+            WHERE js.analyzed_at BETWEEN :start AND :end
               AND js.emotions IS NOT NULL AND js.emotions <> ''
 
             UNION ALL
@@ -3748,7 +4056,7 @@ def get_concerns(
                    LOWER(TRIM(SUBSTRING_INDEX(cs.emotions, ',', 1))) AS label
             FROM checkin_sentiment cs
             JOIN emotional_checkin ec ON ec.checkin_id = cs.checkin_id
-            WHERE ec.created_at BETWEEN :start AND :end
+            WHERE cs.analyzed_at BETWEEN :start AND :end
               AND cs.emotions IS NOT NULL AND cs.emotions <> ''
 
             UNION ALL
@@ -3783,14 +4091,14 @@ def get_concerns(
             SELECT j.user_id AS student_id, LOWER(js.sentiment) AS label
             FROM journal_sentiment js
             JOIN journal j ON j.journal_id = js.journal_id
-            WHERE j.created_at BETWEEN :start AND :end
+            WHERE js.analyzed_at BETWEEN :start AND :end
 
             UNION ALL
 
             SELECT ec.user_id AS student_id, LOWER(cs.sentiment) AS label
             FROM checkin_sentiment cs
             JOIN emotional_checkin ec ON ec.checkin_id = cs.checkin_id
-            WHERE ec.created_at BETWEEN :start AND :end
+            WHERE cs.analyzed_at BETWEEN :start AND :end
         ) s
         WHERE s.label IS NOT NULL AND s.label <> ''
         GROUP BY label
@@ -3807,42 +4115,24 @@ def get_concerns(
 
         # Try emotions within the requested window first.
         rows = list(conn.execute(emotions_sql, params).mappings())
+        logging.info(
+            "/api/reports/concerns emotions rows=%d for start=%s end=%s",
+            len(rows),
+            params["start"],
+            params["end"],
+        )
 
         # Fallback to high-level sentiments if no emotion data is present.
         if not rows:
             rows = list(conn.execute(sentiments_sql, params).mappings())
-
-        # Final fallback: widen window to last 90 days relative to end_dt.
-        if not rows:
-            wide_start = (end_dt - timedelta(days=90)).strftime('%Y-%m-%d %H:%M:%S')
-            wide_params = {"start": wide_start, "end": params["end"]}
-            rows = list(conn.execute(emotions_sql, wide_params).mappings())
-            if not rows:
-                rows = list(conn.execute(sentiments_sql, wide_params).mappings())
-
-        # Proxy fallback: top alert reasons (last 90 days)
-        if not rows:
-            alerts_q = text(
-                """
-                SELECT LOWER(TRIM(reason)) AS label, COUNT(*) AS students
-                FROM alert
-                WHERE created_at >= :date AND reason IS NOT NULL AND reason <> ''
-                GROUP BY LOWER(TRIM(reason))
-                ORDER BY students DESC
-                LIMIT 5
-                """
-            )
-            rows = list(
-                conn.execute(
-                    alerts_q,
-                    {"date": (end_dt - timedelta(days=90)).strftime('%Y-%m-%d %H:%M:%S')},
-                ).mappings()
+            logging.info(
+                "/api/reports/concerns sentiments rows=%d for start=%s end=%s",
+                len(rows),
+                params["start"],
+                params["end"],
             )
 
-        if not rows:
-            return []
-
-        total_students = sum(int(r["students"] or 0) for r in rows) or 1
+        total_students = sum(int(row["students"] or 0) for row in rows) or 1
         return [
             {
                 "label": r["label"],
@@ -4097,10 +4387,12 @@ def get_appointment_logs(
         params["uid"] = user_id
 
     query = f"""
-        SELECT log_id, user_id, form_type, downloaded_at, remarks
-        FROM appointment_log
+        SELECT a.log_id, a.user_id, a.form_type, a.downloaded_at, a.remarks,
+               u.nickname AS user_nickname, u.name AS user_name
+        FROM appointment_log a
+        LEFT JOIN user u ON a.user_id = u.user_id
         WHERE {' AND '.join(where)}
-        ORDER BY downloaded_at DESC
+        ORDER BY a.downloaded_at DESC
         LIMIT :limit
     """
     with engine.connect() as conn:
@@ -4112,6 +4404,8 @@ def get_appointment_logs(
                 "form_type": r["form_type"],
                 "downloaded_at": r["downloaded_at"].strftime("%Y-%m-%d %H:%M:%S") if r["downloaded_at"] else None,
                 "remarks": r["remarks"],
+                "user_nickname": r["user_nickname"],
+                "user_name": r["user_name"],
             }
             for r in rows
         ]

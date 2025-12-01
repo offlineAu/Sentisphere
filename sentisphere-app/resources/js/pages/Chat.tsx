@@ -456,8 +456,12 @@ export default function Chat() {
                     {/* Chat Header (compact) */}
                     <div className="px-4 py-3 border-b flex items-center justify-between bg-gradient-to-r from-emerald-50 to-transparent flex-none w-full">
                       <div className="min-w-0">
-                        <h2 className="font-semibold text-[15px] text-primary truncate">{currentConversation.subject || `Conversation #${currentConversation.conversation_id}`}</h2>
-                        <div className="text-xs text-gray-500 truncate">{participantNickname}</div>
+                        <h2 className="font-semibold text-[15px] text-primary truncate">
+                          {currentConversation.initiator_nickname || participantNickname || `Conversation #${currentConversation.conversation_id}`}
+                        </h2>
+                        {currentConversation.subject && (
+                          <div className="text-xs text-gray-500 truncate">{currentConversation.subject}</div>
+                        )}
                         <div className="mt-1">
                           <span className={`text-[10px] px-2 py-[2px] rounded-full uppercase tracking-wide ${
                             currentConversation.status === 'open'

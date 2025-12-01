@@ -413,12 +413,24 @@ class CounselorReportService:
         cls,
         db: Session,
         *,
+        start: Optional[datetime] = None,
+        end: Optional[datetime] = None,
         academic_events: Optional[Sequence[Dict[str, Any]]] = None,
         weeks: int = 6,
     ) -> List[Dict[str, Any]]:
+        """Generate weekly insights, optionally filtered by date range."""
         events = list(academic_events or cls.load_academic_events())
         today = datetime.utcnow().date()
-        base_start, _ = cls._week_bounds(today)
+        
+        # If start/end provided, use them to determine base_start as datetime
+        if start and end:
+            anchor_date = start.date() if isinstance(start, datetime) else start
+            # Adjust to week boundary and convert to datetime
+            adjusted_date = anchor_date - timedelta(days=anchor_date.weekday())
+            base_start = datetime.combine(adjusted_date, datetime.min.time())
+        else:
+            base_start, _ = cls._week_bounds(today)
+        
         records: List[Dict[str, Any]] = []
 
         for offset in range(weeks - 1, -1, -1):
@@ -435,7 +447,10 @@ class CounselorReportService:
                 title = "Wellness Dip"
 
             recommendation = cls._build_recommendation(change, cls._sentiment_labels(db, start_dt, end_dt))
-            matched_event = next((ev for ev in events if cls._event_overlaps(ev, start_dt.date(), end_dt.date())), None)
+            # Convert datetime to date for event matching
+            start_date = start_dt.date() if isinstance(start_dt, datetime) else start_dt
+            end_date = end_dt.date() if isinstance(end_dt, datetime) else end_dt
+            matched_event = next((ev for ev in events if cls._event_overlaps(ev, start_date, end_date)), None)
 
             records.append(
                 {
@@ -455,11 +470,25 @@ class CounselorReportService:
     def behavior_insights(
         cls,
         db: Session,
+        *,
+        start: Optional[datetime] = None,
+        end: Optional[datetime] = None,
     ) -> List[Dict[str, Any]]:
+        """Generate behavioral insights, optionally filtered by date range."""
         today = datetime.utcnow().date()
-        this_start, this_end = cls._week_bounds(today)
-        last_start = this_start - timedelta(days=7)
-        last_end = this_end - timedelta(days=7)
+        
+        # If start/end provided, use them as this week's window
+        if start and end:
+            this_start = start
+            this_end = end
+            # Calculate last week relative to provided range
+            range_days = (end - start).days if hasattr(end - start, 'days') else 7
+            last_start = start - timedelta(days=range_days + 1)
+            last_end = start - timedelta(days=1)
+        else:
+            this_start, this_end = cls._week_bounds(today)
+            last_start = this_start - timedelta(days=7)
+            last_end = this_end - timedelta(days=7)
 
         stress_stmt = select(func.count(EmotionalCheckin.checkin_id)).where(
             and_(
@@ -651,7 +680,7 @@ class CounselorReportService:
         return items
 
     @classmethod
-    def concerns(cls, db: Session, *, start: datetime) -> List[Dict[str, Any]]:
+    def concerns(cls, db: Session, *, start: datetime, end: datetime) -> List[Dict[str, Any]]:
         def _all_emotions(stmt):
             rows = db.execute(stmt).all()
             counter = Counter()
@@ -670,13 +699,17 @@ class CounselorReportService:
 
         journal_stmt = (
             select(JournalSentiment.emotions)
-            .join(Journal)
-            .where(Journal.created_at >= start)
+            .where(
+                JournalSentiment.analyzed_at >= start,
+                JournalSentiment.analyzed_at <= end,
+            )
         )
         checkin_stmt = (
             select(CheckinSentiment.emotions)
-            .join(EmotionalCheckin)
-            .where(EmotionalCheckin.created_at >= start)
+            .where(
+                CheckinSentiment.analyzed_at >= start,
+                CheckinSentiment.analyzed_at <= end,
+            )
         )
 
         combined = _all_emotions(journal_stmt) + _all_emotions(checkin_stmt)
@@ -702,7 +735,11 @@ class CounselorReportService:
 
         # Fallback: sentiment distribution
         sentiment_stmt = (
-            select(JournalSentiment.sentiment).join(Journal).where(Journal.created_at >= start)
+            select(JournalSentiment.sentiment)
+            .where(
+                JournalSentiment.analyzed_at >= start,
+                JournalSentiment.analyzed_at <= end,
+            )
         )
         sentiments = [row[0] for row in db.execute(sentiment_stmt)]
         if sentiments:
@@ -717,11 +754,12 @@ class CounselorReportService:
                 for label, count in counter.most_common(5)
             ]
 
-        # Final fallback: top alert reasons last 90 days
+        # Final fallback: top alert reasons in the same window
         alerts_stmt = (
             select(Alert.reason)
             .where(
-                Alert.created_at >= datetime.utcnow() - timedelta(days=90),
+                Alert.created_at >= start,
+                Alert.created_at <= end,
                 Alert.reason.isnot(None),
             )
         )
@@ -737,9 +775,13 @@ class CounselorReportService:
         ]
 
     @classmethod
-    def interventions(cls, db: Session, *, start: datetime) -> Dict[str, Any]:
-        alert_stmt = select(func.count(Alert.alert_id), func.sum(case((Alert.status == AlertStatus.RESOLVED, 1), else_=0))).where(
-            Alert.created_at >= start
+    def interventions(cls, db: Session, *, start: datetime, end: datetime) -> Dict[str, Any]:
+        alert_stmt = select(
+            func.count(Alert.alert_id),
+            func.sum(case((Alert.status == AlertStatus.RESOLVED, 1), else_=0)),
+        ).where(
+            Alert.created_at >= start,
+            Alert.created_at <= end,
         )
         total_alerts, resolved = db.execute(alert_stmt).one_or_none() or (0, 0)
         total_alerts = int(total_alerts or 0)
@@ -752,7 +794,10 @@ class CounselorReportService:
                 AppointmentLog.form_type,
                 func.count(AppointmentLog.log_id).label("participants"),
             )
-            .where(AppointmentLog.downloaded_at >= start)
+            .where(
+                AppointmentLog.downloaded_at >= start,
+                AppointmentLog.downloaded_at <= end,
+            )
             .group_by(AppointmentLog.form_type)
             .order_by(func.count(AppointmentLog.log_id).desc())
         )

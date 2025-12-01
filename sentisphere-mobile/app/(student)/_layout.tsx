@@ -16,6 +16,7 @@ export default function StudentLayout() {
   const notificationListener = useRef<Notifications.Subscription | null>(null);
   const responseListener = useRef<Notifications.Subscription | null>(null);
 
+  // Check authentication - this runs first, BEFORE any push notification logic
   useEffect(() => {
     let isMounted = true;
 
@@ -55,37 +56,70 @@ export default function StudentLayout() {
     };
   }, [router]);
 
-  // Initialize push notifications when authorized
+  /**
+   * Initialize push notifications AFTER successful authentication.
+   * 
+   * IMPORTANT: This is completely optional and will NOT:
+   * - Block authentication
+   * - Prevent the app from working if it fails
+   * - Crash the app on any errors
+   * 
+   * Push notifications require:
+   * - Physical device (or iOS simulator with limitations)
+   * - EAS Dev Build (not Expo Go) for full functionality
+   * - User permission granted
+   */
   useEffect(() => {
-    if (authorized && Platform.OS !== 'web') {
-      // Initialize push notifications
-      initializePushNotifications();
+    if (!authorized) return;
+    if (Platform.OS === 'web') return;
 
-      // Listen for notifications received while app is foregrounded
-      notificationListener.current = addNotificationReceivedListener(notification => {
-        console.log('Notification received:', notification);
-      });
+    let mounted = true;
 
-      // Listen for notification taps
-      responseListener.current = addNotificationResponseListener(response => {
-        console.log('Notification tapped:', response);
-        // You can navigate to specific screens based on notification data here
-        const data = response.notification.request.content.data;
-        if (data?.type === 'daily_quote') {
-          // Could navigate to a quotes screen or show a modal
-          console.log('Daily quote notification tapped');
-        }
-      });
+    const setupPushNotifications = async () => {
+      try {
+        // Initialize push notifications (requests permission, gets token, registers with backend)
+        // This is wrapped in try-catch and will NOT crash the app
+        await initializePushNotifications();
 
-      return () => {
-        if (notificationListener.current) {
-          removeNotificationListener(notificationListener.current);
-        }
-        if (responseListener.current) {
-          removeNotificationListener(responseListener.current);
-        }
-      };
-    }
+        if (!mounted) return;
+
+        // Setup notification listeners for when app is in foreground
+        notificationListener.current = addNotificationReceivedListener(notification => {
+          console.log('[Notification] Received in foreground:', notification.request.content.title);
+        });
+
+        // Setup tap listener for when user taps on notification
+        responseListener.current = addNotificationResponseListener(response => {
+          console.log('[Notification] User tapped notification');
+          const data = response.notification.request.content.data;
+          
+          // Handle different notification types
+          if (data?.category === 'daily_quote') {
+            console.log('[Notification] Daily quote tapped');
+            // Could navigate to a quotes/wellness screen
+          } else if (data?.category === 'wellness_reminder') {
+            console.log('[Notification] Wellness reminder tapped');
+            // Could navigate to counselor info or support screen
+          }
+        });
+      } catch (error) {
+        // Log but don't crash - push notifications are optional
+        console.error('[Push] Error setting up notifications:', error);
+      }
+    };
+
+    setupPushNotifications();
+
+    // Cleanup listeners on unmount
+    return () => {
+      mounted = false;
+      if (notificationListener.current) {
+        removeNotificationListener(notificationListener.current);
+      }
+      if (responseListener.current) {
+        removeNotificationListener(responseListener.current);
+      }
+    };
   }, [authorized]);
 
   if (authorized !== true) {
