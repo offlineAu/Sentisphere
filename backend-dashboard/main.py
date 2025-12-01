@@ -3385,47 +3385,79 @@ def get_attention_students(
 
 
 @app.get("/api/reports/concerns")
-def get_concerns(period: str = Query("month", enum=["week", "month"])):
-    now = datetime.now()
-    if period == "week":
-        start = now - timedelta(days=7)
-    else:
-        start = now.replace(day=1)
+def get_concerns(
+    range: Optional[str] = Query(None),
+    start: Optional[str] = Query(None),
+    end: Optional[str] = Query(None),
+):
+    """Top student concerns for the selected global date range.
 
-    # Attempt to aggregate emotions (comma-separated) from journal_sentiment and checkin_sentiment
+    We treat each student as a single contributor per concern label within the
+    selected window, combining emotions from both journals and check-ins.
+    """
+
+    # Use the same global date filter contract as other report endpoints.
+    start_dt, end_dt = parse_global_range(range or "this_week", start, end)
+
+    # Aggregate distinct student-level concern labels from journal and check-in
+    # emotions within the window, then count unique students per label.
     emotions_sql = text(
         """
-        SELECT label, COUNT(*) AS students
+        SELECT label, COUNT(DISTINCT student_id) AS students
         FROM (
-            SELECT LOWER(TRIM(SUBSTRING_INDEX(js.emotions, ',', 1))) AS label
+            -- Journal emotions (up to 3 tokens per entry)
+            SELECT j.user_id AS student_id,
+                   LOWER(TRIM(SUBSTRING_INDEX(js.emotions, ',', 1))) AS label
             FROM journal_sentiment js
             JOIN journal j ON j.journal_id = js.journal_id
-            WHERE j.created_at >= :date AND js.emotions IS NOT NULL AND js.emotions <> ''
+            WHERE j.created_at BETWEEN :start AND :end
+              AND js.emotions IS NOT NULL AND js.emotions <> ''
+
             UNION ALL
-            SELECT LOWER(TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(js.emotions, ',', 2), ',', -1)))
+
+            SELECT j.user_id AS student_id,
+                   LOWER(TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(js.emotions, ',', 2), ',', -1))) AS label
             FROM journal_sentiment js
             JOIN journal j ON j.journal_id = js.journal_id
-            WHERE j.created_at >= :date AND js.emotions LIKE '%,%'
+            WHERE j.created_at BETWEEN :start AND :end
+              AND js.emotions LIKE '%,%'
+
             UNION ALL
-            SELECT LOWER(TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(js.emotions, ',', 3), ',', -1)))
+
+            SELECT j.user_id AS student_id,
+                   LOWER(TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(js.emotions, ',', 3), ',', -1))) AS label
             FROM journal_sentiment js
             JOIN journal j ON j.journal_id = js.journal_id
-            WHERE j.created_at >= :date AND js.emotions LIKE '%,%,%'
+            WHERE j.created_at BETWEEN :start AND :end
+              AND js.emotions LIKE '%,%,%'
+
             UNION ALL
-            SELECT LOWER(TRIM(SUBSTRING_INDEX(cs.emotions, ',', 1)))
+
+            -- Check-in emotions (up to 3 tokens per entry)
+            SELECT ec.user_id AS student_id,
+                   LOWER(TRIM(SUBSTRING_INDEX(cs.emotions, ',', 1))) AS label
             FROM checkin_sentiment cs
             JOIN emotional_checkin ec ON ec.checkin_id = cs.checkin_id
-            WHERE ec.created_at >= :date AND cs.emotions IS NOT NULL AND cs.emotions <> ''
+            WHERE ec.created_at BETWEEN :start AND :end
+              AND cs.emotions IS NOT NULL AND cs.emotions <> ''
+
             UNION ALL
-            SELECT LOWER(TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(cs.emotions, ',', 2), ',', -1)))
+
+            SELECT ec.user_id AS student_id,
+                   LOWER(TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(cs.emotions, ',', 2), ',', -1))) AS label
             FROM checkin_sentiment cs
             JOIN emotional_checkin ec ON ec.checkin_id = cs.checkin_id
-            WHERE ec.created_at >= :date AND cs.emotions LIKE '%,%'
+            WHERE ec.created_at BETWEEN :start AND :end
+              AND cs.emotions LIKE '%,%'
+
             UNION ALL
-            SELECT LOWER(TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(cs.emotions, ',', 3), ',', -1)))
+
+            SELECT ec.user_id AS student_id,
+                   LOWER(TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(cs.emotions, ',', 3), ',', -1))) AS label
             FROM checkin_sentiment cs
             JOIN emotional_checkin ec ON ec.checkin_id = cs.checkin_id
-            WHERE ec.created_at >= :date AND cs.emotions LIKE '%,%,%'
+            WHERE ec.created_at BETWEEN :start AND :end
+              AND cs.emotions LIKE '%,%,%'
         ) t
         WHERE t.label IS NOT NULL AND t.label <> ''
         GROUP BY label
@@ -3436,17 +3468,21 @@ def get_concerns(period: str = Query("month", enum=["week", "month"])):
 
     sentiments_sql = text(
         """
-        SELECT label, COUNT(*) AS students FROM (
-            SELECT LOWER(js.sentiment) AS label
+        SELECT label, COUNT(DISTINCT student_id) AS students
+        FROM (
+            SELECT j.user_id AS student_id, LOWER(js.sentiment) AS label
             FROM journal_sentiment js
             JOIN journal j ON j.journal_id = js.journal_id
-            WHERE j.created_at >= :date
+            WHERE j.created_at BETWEEN :start AND :end
+
             UNION ALL
-            SELECT LOWER(cs.sentiment)
+
+            SELECT ec.user_id AS student_id, LOWER(cs.sentiment) AS label
             FROM checkin_sentiment cs
             JOIN emotional_checkin ec ON ec.checkin_id = cs.checkin_id
-            WHERE ec.created_at >= :date
+            WHERE ec.created_at BETWEEN :start AND :end
         ) s
+        WHERE s.label IS NOT NULL AND s.label <> ''
         GROUP BY label
         ORDER BY students DESC
         LIMIT 5
@@ -3454,18 +3490,26 @@ def get_concerns(period: str = Query("month", enum=["week", "month"])):
     )
 
     with engine.connect() as conn:
-        # Try emotions within requested period
-        params = {"date": start.strftime('%Y-%m-%d %H:%M:%S')}
+        params = {
+            "start": start_dt.strftime('%Y-%m-%d %H:%M:%S'),
+            "end": end_dt.strftime('%Y-%m-%d %H:%M:%S'),
+        }
+
+        # Try emotions within the requested window first.
         rows = list(conn.execute(emotions_sql, params).mappings())
-        # Fallback to sentiments within requested period
+
+        # Fallback to high-level sentiments if no emotion data is present.
         if not rows:
             rows = list(conn.execute(sentiments_sql, params).mappings())
-        # Final fallback: widen window to last 90 days
+
+        # Final fallback: widen window to last 90 days relative to end_dt.
         if not rows:
-            wide_start = (now - timedelta(days=90)).strftime('%Y-%m-%d %H:%M:%S')
-            rows = list(conn.execute(emotions_sql, {"date": wide_start}).mappings())
+            wide_start = (end_dt - timedelta(days=90)).strftime('%Y-%m-%d %H:%M:%S')
+            wide_params = {"start": wide_start, "end": params["end"]}
+            rows = list(conn.execute(emotions_sql, wide_params).mappings())
             if not rows:
-                rows = list(conn.execute(sentiments_sql, {"date": wide_start}).mappings())
+                rows = list(conn.execute(sentiments_sql, wide_params).mappings())
+
         # Proxy fallback: top alert reasons (last 90 days)
         if not rows:
             alerts_q = text(
@@ -3478,19 +3522,25 @@ def get_concerns(period: str = Query("month", enum=["week", "month"])):
                 LIMIT 5
                 """
             )
-            rows = list(conn.execute(alerts_q, {"date": (now - timedelta(days=90)).strftime('%Y-%m-%d %H:%M:%S')}).mappings())
+            rows = list(
+                conn.execute(
+                    alerts_q,
+                    {"date": (end_dt - timedelta(days=90)).strftime('%Y-%m-%d %H:%M:%S')},
+                ).mappings()
+            )
 
-        total = sum(int(r["students"]) for r in rows)
+        if not rows:
+            return []
+
+        total_students = sum(int(r["students"] or 0) for r in rows) or 1
         return [
             {
-                "label": (r["label"] or "").strip(),
-                "students": int(r["students"]),
-                "percent": round((int(r["students"]) / total) * 100, 1) if total > 0 else 0,
+                "label": r["label"],
+                "students": int(r["students"] or 0),
+                "percent": round((int(r["students"] or 0) / total_students) * 100, 1),
             }
             for r in rows
         ]
-
-
 @app.get("/api/reports/interventions")
 def get_interventions(period: str = Query("month", enum=["week", "month"])):
     now = datetime.now()
