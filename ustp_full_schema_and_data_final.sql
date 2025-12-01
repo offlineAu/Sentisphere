@@ -10,6 +10,7 @@ CREATE TABLE user (
     name VARCHAR(100),
     role ENUM('student', 'counselor') NOT NULL,
     password_hash VARCHAR(255),
+    push_token VARCHAR(255),
     nickname VARCHAR(50),
     last_login DATETIME,
     is_active BOOLEAN DEFAULT TRUE,
@@ -69,27 +70,15 @@ CREATE TABLE checkin_sentiment (
     analyzed_at DATETIME,
     FOREIGN KEY (checkin_id) REFERENCES emotional_checkin(checkin_id)
 );
-CREATE TABLE alert (
-    alert_id INT PRIMARY KEY AUTO_INCREMENT,
-    user_id INT,
-    reason VARCHAR(255),
-    severity ENUM('low', 'medium', 'high', 'critical'),
-    assigned_to INT,
-    status ENUM('open', 'in_progress', 'resolved') DEFAULT 'open',
-    resolved_at DATETIME,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES user(user_id),
-    FOREIGN KEY (assigned_to) REFERENCES user(user_id)
-);
-CREATE TABLE notification (
-    id INT AUTO_INCREMENT PRIMARY KEY,
+-- If a notification table already exists and you want to replace it:
+-- DROP TABLE IF EXISTS `notification`;
 
-    user_id INT NOT NULL,
-
-    title VARCHAR(150) NULL,
-    message TEXT NOT NULL,
-
-    category ENUM(
+CREATE TABLE `notification` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `user_id` INT NOT NULL,
+    `title` VARCHAR(150) NULL,
+    `message` TEXT NOT NULL,
+    `category` ENUM(
         'daily_quote',
         'wellness_reminder',
         'system',
@@ -97,27 +86,24 @@ CREATE TABLE notification (
         'insight',
         'other'
     ) NOT NULL,
-
-    source ENUM(
+    `source` ENUM(
         'scheduler',
         'alert_trigger',
         'manual',
         'system'
     ) NOT NULL,
-
-    related_alert_id INT NULL,
-
-    is_sent BOOLEAN DEFAULT FALSE,
-    sent_at DATETIME NULL,
-
-    is_read BOOLEAN DEFAULT FALSE,
-    read_at DATETIME NULL,
-
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-
-    FOREIGN KEY (user_id) REFERENCES user(user_id),
-    FOREIGN KEY (related_alert_id) REFERENCES alert(alert_id)
+    `related_alert_id` INT NULL,
+    `is_sent` BOOLEAN DEFAULT FALSE,
+    `sent_at` DATETIME NULL,
+    `is_read` BOOLEAN DEFAULT FALSE,
+    `read_at` DATETIME NULL,
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT `fk_notification_user`
+        FOREIGN KEY (`user_id`) REFERENCES `user`(`user_id`),
+    CONSTRAINT `fk_notification_alert`
+        FOREIGN KEY (`related_alert_id`) REFERENCES `alert`(`alert_id`)
 );
+
 CREATE TABLE resource_log (
     resource_id INT PRIMARY KEY AUTO_INCREMENT,
     title VARCHAR(100),

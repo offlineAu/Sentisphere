@@ -9,7 +9,11 @@
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.sentisphere.mobile",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -19,7 +23,8 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.sentisphere.mobile"
     },
     "androidStatusBar": {
       "barStyle": "dark-content",
@@ -49,11 +54,26 @@
       ],
       "expo-font",
       "expo-web-browser",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/icon.png",
+          "color": "#10B981",
+          "sounds": []
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "a1db9780-ce18-4502-a99b-c0679af493b9"
+      },
+      "router": {}
+    },
+    "owner": "hyun00"
   }
 }
