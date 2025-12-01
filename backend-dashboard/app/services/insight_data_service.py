@@ -20,12 +20,22 @@ def _iso(dt: Optional[datetime]) -> Optional[str]:
 
 
 def discover_active_user_ids(start_dt: datetime, end_dt: datetime) -> List[int]:
+    """Find users who had analyzed journals or check-ins in the given window."""
     sql = text(
         """
         SELECT DISTINCT u FROM (
-          SELECT user_id AS u FROM journal WHERE user_id IS NOT NULL AND created_at >= :start AND created_at <= :end
+          SELECT j.user_id AS u 
+          FROM journal j
+          JOIN journal_sentiment js ON js.journal_id = j.journal_id
+          WHERE j.user_id IS NOT NULL 
+            AND j.deleted_at IS NULL
+            AND js.analyzed_at >= :start AND js.analyzed_at <= :end
           UNION ALL
-          SELECT user_id AS u FROM emotional_checkin WHERE user_id IS NOT NULL AND created_at >= :start AND created_at <= :end
+          SELECT ec.user_id AS u 
+          FROM emotional_checkin ec
+          JOIN checkin_sentiment cs ON cs.checkin_id = ec.checkin_id
+          WHERE ec.user_id IS NOT NULL 
+            AND cs.analyzed_at >= :start AND cs.analyzed_at <= :end
         ) t
         WHERE u IS NOT NULL
         """
@@ -50,15 +60,20 @@ def build_sanitized_payload(user_id: Optional[int], start_dt: datetime, end_dt: 
         "appointments": [],
     }
 
-    # Journals
+    # Journals - filter by analyzed_at to get only analyzed entries in the window
     journals_sql = text(
         """
-        SELECT journal_id, user_id, content, created_at
-        FROM journal
-        WHERE created_at >= :start AND created_at <= :end
+        SELECT DISTINCT j.journal_id, j.user_id, j.content, j.created_at, js.analyzed_at
+        FROM journal j
+        JOIN journal_sentiment js ON js.journal_id = j.journal_id
+        WHERE j.deleted_at IS NULL
+          AND js.analyzed_at >= :start AND js.analyzed_at <= :end
+          AND js.analyzed_at = (
+            SELECT MAX(js2.analyzed_at) FROM journal_sentiment js2 WHERE js2.journal_id = j.journal_id
+          )
         {user_filter}
-        ORDER BY created_at ASC
-        """.format(user_filter=("AND user_id = :uid" if user_id is not None else ""))
+        ORDER BY js.analyzed_at ASC
+        """.format(user_filter=("AND j.user_id = :uid" if user_id is not None else ""))
     )
     params = {
         "start": start_dt.strftime("%Y-%m-%d %H:%M:%S"),
@@ -69,6 +84,7 @@ def build_sanitized_payload(user_id: Optional[int], start_dt: datetime, end_dt: 
 
     with engine.connect() as conn:
         jr_rows = conn.execute(journals_sql, params).mappings().all()
+        # Build sentiments map from the same query results
         sentiments_map: Dict[int, Dict[str, Any]] = {}
         if jr_rows:
             js_sql = text(
@@ -76,7 +92,8 @@ def build_sanitized_payload(user_id: Optional[int], start_dt: datetime, end_dt: 
                 SELECT js.journal_id, js.sentiment, js.emotions, js.confidence, js.model_version, js.analyzed_at
                 FROM journal_sentiment js
                 JOIN journal j ON j.journal_id = js.journal_id
-                WHERE j.created_at >= :start AND j.created_at <= :end
+                WHERE j.deleted_at IS NULL
+                  AND js.analyzed_at >= :start AND js.analyzed_at <= :end
                 {user_filter}
                   AND js.analyzed_at = (
                     SELECT MAX(js2.analyzed_at) FROM journal_sentiment js2 WHERE js2.journal_id = js.journal_id
@@ -100,19 +117,25 @@ def build_sanitized_payload(user_id: Optional[int], start_dt: datetime, end_dt: 
                     "sentiment": (s or {}).get("sentiment"),
                     "emotions": (s or {}).get("emotions"),
                     "created_at": _iso(r.get("created_at")),
+                    "analyzed_at": _iso(r.get("analyzed_at")),
                 }
             )
 
-        # Check-ins
+        # Check-ins - filter by analyzed_at, include feel_better field
         ck_rows = conn.execute(
             text(
                 """
-                SELECT checkin_id, user_id, mood_level, energy_level, stress_level, created_at
-                FROM emotional_checkin
-                WHERE created_at >= :start AND created_at <= :end
+                SELECT DISTINCT ec.checkin_id, ec.user_id, ec.mood_level, ec.energy_level, 
+                       ec.stress_level, ec.feel_better, ec.created_at, cs.analyzed_at
+                FROM emotional_checkin ec
+                JOIN checkin_sentiment cs ON cs.checkin_id = ec.checkin_id
+                WHERE cs.analyzed_at >= :start AND cs.analyzed_at <= :end
+                  AND cs.analyzed_at = (
+                    SELECT MAX(cs2.analyzed_at) FROM checkin_sentiment cs2 WHERE cs2.checkin_id = ec.checkin_id
+                  )
                 {user_filter}
-                ORDER BY created_at ASC
-                """.format(user_filter=("AND user_id = :uid" if user_id is not None else ""))
+                ORDER BY cs.analyzed_at ASC
+                """.format(user_filter=("AND ec.user_id = :uid" if user_id is not None else ""))
             ),
             params,
         ).mappings().all()
@@ -123,7 +146,7 @@ def build_sanitized_payload(user_id: Optional[int], start_dt: datetime, end_dt: 
                 SELECT cs.checkin_id, cs.sentiment, cs.emotions, cs.confidence, cs.model_version, cs.analyzed_at
                 FROM checkin_sentiment cs
                 JOIN emotional_checkin ec ON ec.checkin_id = cs.checkin_id
-                WHERE ec.created_at >= :start AND ec.created_at <= :end
+                WHERE cs.analyzed_at >= :start AND cs.analyzed_at <= :end
                 {user_filter}
                   AND cs.analyzed_at = (
                     SELECT MAX(cs2.analyzed_at) FROM checkin_sentiment cs2 WHERE cs2.checkin_id = cs.checkin_id
@@ -141,9 +164,11 @@ def build_sanitized_payload(user_id: Optional[int], start_dt: datetime, end_dt: 
                     "mood_level": r.get("mood_level"),
                     "energy_level": r.get("energy_level"),
                     "stress_level": r.get("stress_level"),
+                    "feel_better": r.get("feel_better"),
                     "sentiment": (s or {}).get("sentiment"),
                     "emotions": (s or {}).get("emotions"),
                     "created_at": _iso(r.get("created_at")),
+                    "analyzed_at": _iso(r.get("analyzed_at")),
                 }
             )
 
@@ -186,13 +211,14 @@ def build_sanitized_payload(user_id: Optional[int], start_dt: datetime, end_dt: 
             {"action": r.get("action"), "count": int(r.get("cnt") or 0)} for r in act_rows
         ]
 
-        # Appointments (counts by form_type)
+        # Appointments (counts by form_type) - coalesce downloaded_at with created_at fallback
         app_rows = conn.execute(
             text(
                 """
                 SELECT form_type, COUNT(*) AS cnt
                 FROM appointment_log
-                WHERE downloaded_at >= :start AND downloaded_at <= :end
+                WHERE COALESCE(downloaded_at, created_at) >= :start 
+                  AND COALESCE(downloaded_at, created_at) <= :end
                 {user_filter}
                 GROUP BY form_type
                 """.format(user_filter=("AND user_id = :uid" if user_id is not None else ""))
