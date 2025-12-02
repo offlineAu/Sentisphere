@@ -9,6 +9,7 @@ import { Image } from 'expo-image'
 import { Icon } from '@/components/ui/icon'
 import { ThemedView } from '@/components/themed-view'
 import { ThemedText } from '@/components/themed-text'
+import { GlobalScreenWrapper } from '@/components/GlobalScreenWrapper'
 import { getArticleById, getArticleNeighbors } from '../data'
 import { Feather } from '@expo/vector-icons'
 import * as Haptics from 'expo-haptics'
@@ -87,7 +88,7 @@ export default function LearnArticleScreen() {
 
   if (!article || !topic) {
     return (
-      <ThemedView style={[styles.container, { alignItems: 'center', justifyContent: 'center' }]}> 
+      <GlobalScreenWrapper backgroundColor="#FFFFFF" style={{ alignItems: 'center', justifyContent: 'center' }}> 
         <View style={styles.notFoundWrap}>
           <Icon name="book-open" size={48} color="#9CA3AF" />
           <ThemedText style={styles.notFoundText}>Article not found</ThemedText>
@@ -95,7 +96,7 @@ export default function LearnArticleScreen() {
             <ThemedText style={styles.notFoundBtnText}>Go Back</ThemedText>
           </Pressable>
         </View>
-      </ThemedView>
+      </GlobalScreenWrapper>
     )
   }
 
@@ -109,7 +110,7 @@ export default function LearnArticleScreen() {
   const totalReadTime = article.mins
 
   return (
-    <ThemedView style={styles.container}>
+    <GlobalScreenWrapper backgroundColor="#FFFFFF" topPadding={0}>
       <ScrollView ref={scrollRef} showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         {/* Header with Back & Share */}
         <View style={styles.header}>
@@ -266,7 +267,7 @@ export default function LearnArticleScreen() {
 
         <View style={{ height: 40 }} />
       </ScrollView>
-    </ThemedView>
+    </GlobalScreenWrapper>
   )
 }
 

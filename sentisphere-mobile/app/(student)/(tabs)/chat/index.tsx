@@ -2,6 +2,7 @@ import { StyleSheet, View, FlatList, TextInput, KeyboardAvoidingView, Platform, 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
+import { GlobalScreenWrapper } from '@/components/GlobalScreenWrapper';
 import { Icon } from '@/components/ui/icon';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors } from '@/constants/theme';
@@ -361,8 +362,8 @@ export default function ChatScreen() {
   };
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ThemedView style={[styles.container, { paddingTop: insets.top + 24, paddingHorizontal: 16 }]}> 
+    <GlobalScreenWrapper backgroundColor="#FFFFFF" topPadding={24}>
+      <KeyboardAvoidingView style={{ flex: 1, paddingHorizontal: 16, backgroundColor: '#FFFFFF' }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}> 
         {/* Header with back and add buttons */}
         <Animated.View style={[styles.headerRow, makeFadeUp(entrance.header)]}>
           <Pressable
@@ -545,8 +546,8 @@ export default function ChatScreen() {
             </Pressable>
           </Pressable>
         </Modal>
-      </ThemedView>
-    </KeyboardAvoidingView>
+      </KeyboardAvoidingView>
+    </GlobalScreenWrapper>
   );
 }
 

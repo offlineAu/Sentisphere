@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Query, HTTPException, Depends, status, UploadFile, Header, WebSocket, WebSocketDisconnect, Request
+from fastapi import FastAPI, Query, HTTPException, Depends, status, UploadFile, Header, WebSocket, WebSocketDisconnect, Request, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from sqlalchemy import case, func, select, text
@@ -1827,6 +1827,7 @@ class CheckinIn(BaseModel):
     mood_level: str
     energy_level: str
     stress_level: str
+    feel_better: Optional[str] = None
     comment: Optional[str] = None
 
 @app.post("/api/emotional-checkins")
@@ -1845,10 +1846,62 @@ def create_emotional_checkin(
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid token subject")
 
+    # Check rate limit: user can only check-in once every 3 hours
+    # TODO: Uncomment for production - commented out for testing
+    # with mobile_engine.connect() as conn:
+    #     last_checkin = conn.execute(text("""
+    #         SELECT created_at FROM emotional_checkin 
+    #         WHERE user_id = :uid 
+    #         ORDER BY created_at DESC 
+    #         LIMIT 1
+    #     """), {"uid": uid}).mappings().first()
+    #     
+    #     if last_checkin:
+    #         from datetime import datetime, timedelta
+    #         last_time = last_checkin.get("created_at")
+    #         if last_time:
+    #             # Handle both datetime and string formats
+    #             if isinstance(last_time, str):
+    #                 last_time = datetime.fromisoformat(last_time.replace('Z', '+00:00'))
+    #             cooldown_end = last_time + timedelta(hours=3)
+    #             now = datetime.now()
+    #             if now < cooldown_end:
+    #                 remaining = cooldown_end - now
+    #                 hours = int(remaining.total_seconds() // 3600)
+    #                 minutes = int((remaining.total_seconds() % 3600) // 60)
+    #                 raise HTTPException(
+    #                     status_code=429, 
+    #                     detail=f"Please wait {hours}h {minutes}m before your next check-in"
+    #                 )
+
+    # Normalize energy level to match database ENUM: 'Low', 'Moderate', 'High'
+    energy = payload.energy_level
+    energy_map = {
+        "Very High": "High",
+        "Very Low": "Low",
+        "High": "High",
+        "Moderate": "Moderate",
+        "Low": "Low",
+    }
+    energy = energy_map.get(energy, "Moderate")  # Default to Moderate if unknown
+
     # Normalize stress label to match schema
     stress = payload.stress_level
     if stress == "Very High":
         stress = "Very High Stress"
+
+    # Normalize feel_better to match database ENUM: 'Yes', 'No', 'Same'
+    feel_better = payload.feel_better
+    if feel_better:
+        feel_better_map = {
+            "yes": "Yes",
+            "no": "No",
+            "same": "Same",
+            "Yes": "Yes",
+            "No": "No",
+            "Same": "Same",
+        }
+        feel_better = feel_better_map.get(feel_better, None)
 
     checkin_id = None
     nickname = None
@@ -1858,14 +1911,15 @@ def create_emotional_checkin(
         try:
             ins = conn.execute(text(
                 """
-                INSERT INTO emotional_checkin (user_id, mood_level, energy_level, stress_level, comment, created_at)
-                VALUES (:uid, :mood, :energy, :stress, :comment, NOW())
+                INSERT INTO emotional_checkin (user_id, mood_level, energy_level, stress_level, feel_better, comment, created_at)
+                VALUES (:uid, :mood, :energy, :stress, :feel_better, :comment, NOW())
                 """
             ), {
                 "uid": uid,
                 "mood": payload.mood_level,
-                "energy": payload.energy_level,
+                "energy": energy,
                 "stress": stress,
+                "feel_better": feel_better,
                 "comment": (payload.comment or None),
             })
             checkin_id = int(ins.lastrowid)
@@ -1904,11 +1958,11 @@ def create_emotional_checkin(
         # Determine message based on mood
         mood = payload.mood_level.lower()
         if mood in ["great", "happy", "good"]:
-            message = f"That's wonderful! Keep up the positive energy 🌟"
+            message = f"That's wonderful! Keep up the positive energy."
         elif mood in ["sad", "awful", "terrible"]:
-            message = f"Thanks for sharing how you feel. Remember, we're here for you 💙"
+            message = f"Thanks for sharing how you feel. Remember, we're here for you."
         else:
-            message = f"Taking time to reflect is a great habit. Keep it up! ✨"
+            message = f"Taking time to reflect is a great habit. Keep it up!"
         
         # Run async notification in sync context
         loop = asyncio.new_event_loop()
@@ -1918,7 +1972,7 @@ def create_emotional_checkin(
                 send_notification_instantly(
                     mobile_engine=mobile_engine,
                     user_id=uid,
-                    title=f"Thanks for Checking in, {nickname}! 🎉",
+                    title=f"Thanks for Checking in, {nickname}!",
                     message=message,
                     category="system",
                     source="system",
@@ -2522,6 +2576,246 @@ async def monitor_alerts_endpoint():
 
 
 # ============================================================================
+# SAVED RESOURCES ENDPOINTS (Learn & Grow Bookmarks)
+# ============================================================================
+
+@app.get("/api/saved-resources")
+async def get_saved_resources(
+    resource_type: str = "topic",
+    token: str = Depends(oauth2_scheme)
+):
+    """
+    Get all saved resources for the authenticated user.
+    
+    Query params:
+    - resource_type: Filter by type ('topic', 'article', or 'all')
+    """
+    try:
+        data = decode_token(token)
+        user_id = int(data.get("sub"))
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    
+    try:
+        if resource_type == "all":
+            query = text("""
+                SELECT saved_id, resource_type, resource_id, title, metadata, saved_at
+                FROM saved_resources
+                WHERE user_id = :user_id
+                ORDER BY saved_at DESC
+            """)
+        else:
+            query = text("""
+                SELECT saved_id, resource_type, resource_id, title, metadata, saved_at
+                FROM saved_resources
+                WHERE user_id = :user_id AND resource_type = :resource_type
+                ORDER BY saved_at DESC
+            """)
+        
+        with mobile_engine.connect() as conn:
+            if resource_type == "all":
+                result = conn.execute(query, {"user_id": user_id})
+            else:
+                result = conn.execute(query, {"user_id": user_id, "resource_type": resource_type})
+            
+            rows = result.fetchall()
+            resources = []
+            for row in rows:
+                resources.append({
+                    "saved_id": row[0],
+                    "resource_type": row[1],
+                    "resource_id": row[2],
+                    "title": row[3],
+                    "metadata": row[4],
+                    "saved_at": row[5].isoformat() if row[5] else None
+                })
+            
+            return {"resources": resources, "count": len(resources)}
+    except Exception as e:
+        logging.error(f"Error fetching saved resources: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch saved resources")
+
+
+@app.post("/api/saved-resources")
+async def save_resource(
+    body: dict = Body(...),
+    token: str = Depends(oauth2_scheme)
+):
+    """
+    Save a resource for the authenticated user.
+    
+    Body:
+    - resource_type: 'topic' or 'article'
+    - resource_id: The ID of the resource
+    - title: Display title
+    - metadata: Optional JSON metadata
+    """
+    try:
+        data = decode_token(token)
+        user_id = int(data.get("sub"))
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    
+    resource_type = body.get("resource_type", "topic")
+    resource_id = body.get("resource_id")
+    title = body.get("title")
+    metadata = body.get("metadata")
+    
+    if not resource_id:
+        raise HTTPException(status_code=400, detail="resource_id is required")
+    
+    try:
+        # Use INSERT IGNORE or ON DUPLICATE KEY to handle duplicates
+        query = text("""
+            INSERT INTO saved_resources (user_id, resource_type, resource_id, title, metadata)
+            VALUES (:user_id, :resource_type, :resource_id, :title, :metadata)
+            ON DUPLICATE KEY UPDATE title = :title, metadata = :metadata
+        """)
+        
+        with mobile_engine.connect() as conn:
+            conn.execute(query, {
+                "user_id": user_id,
+                "resource_type": resource_type,
+                "resource_id": resource_id,
+                "title": title,
+                "metadata": json.dumps(metadata) if metadata else None
+            })
+            conn.commit()
+        
+        return {"ok": True, "message": "Resource saved", "resource_id": resource_id}
+    except Exception as e:
+        logging.error(f"Error saving resource: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save resource")
+
+
+@app.delete("/api/saved-resources/{resource_id}")
+async def unsave_resource(
+    resource_id: str,
+    resource_type: str = "topic",
+    token: str = Depends(oauth2_scheme)
+):
+    """
+    Remove a saved resource for the authenticated user.
+    """
+    try:
+        data = decode_token(token)
+        user_id = int(data.get("sub"))
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    
+    try:
+        query = text("""
+            DELETE FROM saved_resources
+            WHERE user_id = :user_id AND resource_type = :resource_type AND resource_id = :resource_id
+        """)
+        
+        with mobile_engine.connect() as conn:
+            result = conn.execute(query, {
+                "user_id": user_id,
+                "resource_type": resource_type,
+                "resource_id": resource_id
+            })
+            conn.commit()
+            
+            if result.rowcount > 0:
+                return {"ok": True, "message": "Resource removed", "resource_id": resource_id}
+            else:
+                return {"ok": True, "message": "Resource was not saved", "resource_id": resource_id}
+    except Exception as e:
+        logging.error(f"Error removing resource: {e}")
+        raise HTTPException(status_code=500, detail="Failed to remove resource")
+
+
+# ============================================================================
+# HIGH-RISK ALERT WITH INSTANT NOTIFICATION
+# ============================================================================
+
+class AlertCreate(BaseModel):
+    user_id: int
+    reason: str
+    severity: str = "high"
+    assigned_to: Optional[int] = None
+
+@app.post("/api/alerts/create-with-notification")
+async def create_alert_with_instant_notification(
+    payload: AlertCreate,
+    token: str = Depends(oauth2_scheme),
+):
+    """
+    Create a high-risk alert AND send instant push notification to the user.
+    Works for both iOS and Android.
+    """
+    from app.services.push_notification_service import send_wellness_reminder_instantly
+    
+    # Verify counselor token
+    try:
+        data = decode_token(token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    
+    # Insert the alert
+    try:
+        with mobile_engine.begin() as conn:
+            result = conn.execute(text("""
+                INSERT INTO alert (user_id, reason, severity, assigned_to, status, created_at)
+                VALUES (:user_id, :reason, :severity, :assigned_to, 'open', NOW())
+            """), {
+                "user_id": payload.user_id,
+                "reason": payload.reason,
+                "severity": payload.severity,
+                "assigned_to": payload.assigned_to
+            })
+            alert_id = result.lastrowid
+            logging.info(f"Created alert {alert_id} for user {payload.user_id}")
+    except Exception as e:
+        logging.error(f"Failed to create alert: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to create alert: {e}")
+    
+    # Send instant notification if severity is high
+    notification_result = {"sent": False}
+    if payload.severity == "high":
+        try:
+            notification_result = await send_wellness_reminder_instantly(
+                mobile_engine=mobile_engine,
+                alert_id=alert_id,
+                user_id=payload.user_id,
+                skip_duplicate_check=True
+            )
+            logging.info(f"Instant notification result: {notification_result}")
+        except Exception as e:
+            logging.error(f"Failed to send instant notification: {e}")
+            notification_result = {"sent": False, "error": str(e)}
+    
+    return {
+        "ok": True,
+        "alert_id": alert_id,
+        "user_id": payload.user_id,
+        "severity": payload.severity,
+        "notification": notification_result
+    }
+
+
+# Simple endpoint to trigger notification for existing alert (for testing)
+@app.post("/api/alerts/{alert_id}/notify")
+async def send_alert_notification(
+    alert_id: int,
+    token: str = Depends(oauth2_scheme),
+):
+    """
+    Send instant push notification for an existing alert.
+    Use this to test notifications for alerts already in the database.
+    """
+    from app.services.push_notification_service import send_wellness_reminder
+    
+    try:
+        result = await send_wellness_reminder(mobile_engine, alert_id)
+        return {"ok": True, "alert_id": alert_id, "result": result}
+    except Exception as e:
+        logging.error(f"Failed to send notification for alert {alert_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
 # APSCHEDULER - UNIFIED NOTIFICATION JOBS
 # ============================================================================
 
@@ -2559,24 +2853,26 @@ def schedule_alert_monitor():
 try:
     scheduler = BackgroundScheduler()
     
-    # Daily quotes at 9 AM
+    # Daily quotes - every minute for testing (normally 9 AM daily)
+    # TODO: Change back to CronTrigger(hour=9, minute=0) for production
     scheduler.add_job(
         schedule_daily_quotes,
-        CronTrigger(hour=9, minute=0),
+        CronTrigger(minute="*"),  # Every minute for testing
         id="daily_quotes",
         replace_existing=True
     )
     
-    # Alert monitor every 15 minutes
+    # Alert monitor every 1 minute (for quick response to high-risk alerts)
+    # TODO: Change back to */15 for production
     scheduler.add_job(
         schedule_alert_monitor,
-        CronTrigger(minute="*/15"),
+        CronTrigger(minute="*"),
         id="alert_monitor",
         replace_existing=True
     )
     
     scheduler.start()
-    logging.info("Notification scheduler initialized (daily quotes at 9AM, alert monitor every 15min)")
+    logging.info("Notification scheduler initialized (daily quotes every minute [TESTING], alert monitor every 1min)")
 except Exception as e:
     logging.warning(f"Failed to initialize scheduler: {e}")
 

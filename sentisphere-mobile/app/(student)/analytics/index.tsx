@@ -1,13 +1,14 @@
 import { StyleSheet } from 'react-native';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
+import { GlobalScreenWrapper } from '@/components/GlobalScreenWrapper';
 
 export default function AnalyticsScreen() {
   return (
-    <ThemedView style={styles.container}>
-      <ThemedText type="title">Analytics</ThemedText>
-      <ThemedText>Placeholder for AnalyticsSummary, MoodTrendsChart, and JournalInsights.</ThemedText>
-    </ThemedView>
+    <GlobalScreenWrapper backgroundColor="#FFFFFF">
+      <ThemedText type="title" style={{ paddingHorizontal: 16 }}>Analytics</ThemedText>
+      <ThemedText style={{ paddingHorizontal: 16 }}>Placeholder for AnalyticsSummary, MoodTrendsChart, and JournalInsights.</ThemedText>
+    </GlobalScreenWrapper>
   );
 }
 
