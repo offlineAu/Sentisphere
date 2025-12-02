@@ -736,11 +736,10 @@ export default function CounselorDashboard() {
     return { year, month, week };
   };
 
-  // Filter out weeks without valid mood data and sort by end date (latest first)
+  // Sort by end date (latest first). Keep weeks even if avg_mood is null so
+  // the current ISO week still appears on the chart with an empty value.
   const sortedMoodTrend = [...moodTrend]
-    .filter((entry: any) => (
-      entry && typeof entry.week_end === 'string' && typeof entry.avg_mood === 'number' && !isNaN(entry.avg_mood)
-    ))
+    .filter((entry: any) => entry && typeof entry.week_end === 'string')
     .sort((a: any, b: any) => new Date(b.week_end).getTime() - new Date(a.week_end).getTime());
 
   const getCurrentWeekString = () => {
@@ -916,7 +915,6 @@ export default function CounselorDashboard() {
             <p className={styles.headerSubtitle}>
               Overview of student well-being and risk signals.
             </p>
-            <div />
           </div>
           <div className="flex items-center gap-4">
             <div className={styles.profileChip}>
@@ -1204,11 +1202,11 @@ export default function CounselorDashboard() {
 
           {/* Recent Alerts (1/3 width on desktop) */}
           <div>
-            <div className="bg-white rounded-2xl shadow p-4">
+            <div className="bg-white rounded-2xl shadow p-4 h-[470px] flex flex-col justify-between">
               <h3 className="font-semibold text-primary text-lg mb-1">Recent Alerts</h3>
               <p className="text-[#6b7280] text-sm mb-3">Students who may need attention</p>
-              <div className="space-y-3">
-                {recentAlerts.slice(0, 3).map((alert, idx) => (
+              <div className="space-y-3 flex-1 overflow-y-auto pr-1">
+                {recentAlerts.slice(0, 5).map((alert, idx) => (
                   <div
                     key={alert.id}
                     className="flex items-center justify-between bg-[#f7fafd] rounded-xl px-3 py-2"
@@ -1621,68 +1619,73 @@ export default function CounselorDashboard() {
             </div>
           </div>
           {/* Right rail: Appointment Logs */}
-          <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow p-5 hover:shadow-md transition-all duration-300 border border-gray-100 flex flex-col self-start">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-primary">Appointment Logs</h2>
-              {appointmentLogs.length > APPOINTMENTS_PER_PAGE && (
-                <span className="text-xs text-gray-500">
-                  {appointmentPage * APPOINTMENTS_PER_PAGE + 1}-{Math.min((appointmentPage + 1) * APPOINTMENTS_PER_PAGE, appointmentLogs.length)} of {appointmentLogs.length}
-                </span>
-              )}
-            </div>
-            <div className="space-y-3 pr-1 min-h-[280px]">
-              {appointmentLogs.length === 0 ? (
-                <div className="text-[#6b7280] text-sm">No logs yet.</div>
-              ) : (
-                appointmentLogs
-                  .slice(appointmentPage * APPOINTMENTS_PER_PAGE, (appointmentPage + 1) * APPOINTMENTS_PER_PAGE)
-                  .map((log, idx) => (
-                  <div key={`${String(log?.log_id ?? 'log')}-${String(log?.downloaded_at ?? log?.created_at ?? idx)}-${idx}`} className={`${styles.tileRow}`}>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm font-semibold text-[#111827]">{log.form_type || 'Form'} downloaded</div>
-                      <div className="text-xs text-[#6b7280]">
-                        <span className="font-medium text-primary">{log.user_nickname || log.user_name || `User #${log.user_id}`}</span>
-                        <span className="mx-1">•</span>
-                        {formatDate(log.downloaded_at, true)}
-                      </div>
-                      {log.remarks && <div className="text-[11px] text-[#94a3b8] truncate">{log.remarks}</div>}
-                    </div>
-                    <span className="text-[#bdbdbd] text-xl">↓</span>
+        <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow p-5 hover:shadow-md transition-all duration-300 border border-gray-100 flex flex-col self-start h-[470px] justify-between">
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-lg font-semibold text-primary">Appointment Logs</h2>
+                    {appointmentLogs.length > APPOINTMENTS_PER_PAGE && (
+                      <span className="text-xs text-gray-500">
+                        {appointmentPage * APPOINTMENTS_PER_PAGE + 1}-{Math.min((appointmentPage + 1) * APPOINTMENTS_PER_PAGE, appointmentLogs.length)} of {appointmentLogs.length}
+                      </span>
+                    )}
                   </div>
-                ))
-              )}
-            </div>
-            {/* Pagination controls */}
-            {appointmentLogs.length > APPOINTMENTS_PER_PAGE && (
-              <div className="flex items-center justify-center gap-2 mt-3 pt-3 border-t">
-                <button
-                  onClick={() => setAppointmentPage(p => Math.max(0, p - 1))}
-                  disabled={appointmentPage === 0}
-                  className="p-1 rounded-full border hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
-                  aria-label="Previous page"
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </button>
-                <div className="flex gap-1">
-                  {Array.from({ length: Math.ceil(appointmentLogs.length / APPOINTMENTS_PER_PAGE) }).map((_, i) => (
-                    <button
-                      key={i}
-                      onClick={() => setAppointmentPage(i)}
-                      className={`w-2 h-2 rounded-full transition-all ${appointmentPage === i ? 'bg-primary scale-125' : 'bg-gray-300 hover:bg-gray-400'}`}
-                      aria-label={`Page ${i + 1}`}
-                    />
-                  ))}
+                  <div className="space-y-3 pr-1 flex-1 overflow-y-auto">
+                  {appointmentLogs.length === 0 ? (
+                    <div className="text-[#6b7280] text-sm">No logs yet.</div>
+                  ) : (
+                    appointmentLogs
+                      .slice(appointmentPage * APPOINTMENTS_PER_PAGE, (appointmentPage + 1) * APPOINTMENTS_PER_PAGE)
+                      .map((log, idx) => (
+                        <div
+                          key={`${String(log?.log_id ?? 'log')}-${String(log?.downloaded_at ?? log?.created_at ?? idx)}-${idx}`}
+                          className={`${styles.tileRow}`}
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="text-sm font-semibold text-[#111827]">{log.form_type || 'Form'} downloaded</div>
+                            <div className="text-xs text-[#6b7280]">
+                              <span className="font-medium text-primary">{log.user_nickname || log.user_name || `User #${log.user_id}`}</span>
+                              <span className="mx-1">•</span>
+                              {formatDate(log.downloaded_at, true)}
+                            </div>
+                            {log.remarks && (
+                              <div className="text-[11px] text-[#94a3b8] truncate">{log.remarks}</div>
+                            )}
+                          </div>
+                          <span className="text-[#bdbdbd] text-xl">↓</span>
+                        </div>
+                      ))
+                  )}
                 </div>
-                <button
-                  onClick={() => setAppointmentPage(p => Math.min(Math.ceil(appointmentLogs.length / APPOINTMENTS_PER_PAGE) - 1, p + 1))}
-                  disabled={appointmentPage >= Math.ceil(appointmentLogs.length / APPOINTMENTS_PER_PAGE) - 1}
-                  className="p-1 rounded-full border hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
-                  aria-label="Next page"
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </button>
-              </div>
-            )}
+                {/* Pagination controls */}
+                {appointmentLogs.length > APPOINTMENTS_PER_PAGE && (
+                  <div className="flex items-center justify-center gap-2 mt-3 pt-3 border-t">
+                    <button
+                      onClick={() => setAppointmentPage(p => Math.max(0, p - 1))}
+                      disabled={appointmentPage === 0}
+                      className="p-1 rounded-full border hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                      aria-label="Previous page"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </button>
+                    <div className="flex gap-1">
+                      {Array.from({ length: Math.ceil(appointmentLogs.length / APPOINTMENTS_PER_PAGE) }).map((_, i) => (
+                        <button
+                          key={i}
+                          onClick={() => setAppointmentPage(i)}
+                          className={`w-2 h-2 rounded-full transition-all ${appointmentPage === i ? 'bg-primary scale-125' : 'bg-gray-300 hover:bg-gray-400'}`}
+                          aria-label={`Page ${i + 1}`}
+                        />
+                      ))}
+                    </div>
+                    <button
+                      onClick={() => setAppointmentPage(p => Math.min(Math.ceil(appointmentLogs.length / APPOINTMENTS_PER_PAGE) - 1, p + 1))}
+                      disabled={appointmentPage >= Math.ceil(appointmentLogs.length / APPOINTMENTS_PER_PAGE) - 1}
+                      className="p-1 rounded-full border hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                      aria-label="Next page"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                  </div>
+                )}
             {/* AI Analysis below Appointment Logs */}
             <div className="mt-5 pt-4 border-t">
               <div className="text-sm font-medium text-primary mb-2">AI Analysis (Last Week)</div>

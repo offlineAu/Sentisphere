@@ -12,21 +12,21 @@ from app.db.session import Base
 
 
 class MoodLevel(str, PyEnum):
-    VERY_SAD = "Very Sad"
-    SAD = "Sad"
-    NEUTRAL = "Neutral"
-    GOOD = "Good"
-    HAPPY = "Happy"
-    VERY_HAPPY = "Very Happy"
-    EXCELLENT = "Excellent"
+    AWESOME = "Awesome"
+    GREAT = "Great"
+    LOVED = "Loved"
+    OKAY = "Okay"
+    MEH = "Meh"
+    ANXIOUS = "Anxious"
+    BAD = "Bad"
+    TERRIBLE = "Terrible"
+    UPSET = "Upset"
 
 
 class EnergyLevel(str, PyEnum):
-    VERY_LOW = "Very Low"
     LOW = "Low"
     MODERATE = "Moderate"
     HIGH = "High"
-    VERY_HIGH = "Very High"
 
 
 class StressLevel(str, PyEnum):
@@ -37,19 +37,52 @@ class StressLevel(str, PyEnum):
     VERY_HIGH_STRESS = "Very High Stress"
 
 
+class FeelBetter(str, PyEnum):
+    YES = "Yes"
+    NO = "No"
+    SAME = "Same"
+
+
 class EmotionalCheckin(Base):
     __tablename__ = "emotional_checkin"
 
     checkin_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("user.user_id", ondelete="SET NULL"))
     mood_level: Mapped[MoodLevel] = mapped_column(
-        Enum(MoodLevel, name="mood_level", native_enum=False), nullable=False
+        Enum(
+            MoodLevel,
+            name="mood_level",
+            native_enum=False,
+            values_callable=lambda e: [m.value for m in e],
+        ),
+        nullable=False,
     )
     energy_level: Mapped[EnergyLevel] = mapped_column(
-        Enum(EnergyLevel, name="energy_level", native_enum=False), nullable=False
+        Enum(
+            EnergyLevel,
+            name="energy_level",
+            native_enum=False,
+            values_callable=lambda e: [m.value for m in e],
+        ),
+        nullable=False,
     )
     stress_level: Mapped[StressLevel] = mapped_column(
-        Enum(StressLevel, name="stress_level", native_enum=False), nullable=False
+        Enum(
+            StressLevel,
+            name="stress_level",
+            native_enum=False,
+            values_callable=lambda e: [m.value for m in e],
+        ),
+        nullable=False,
+    )
+    feel_better: Mapped[Optional[FeelBetter]] = mapped_column(
+        Enum(
+            FeelBetter,
+            name="feel_better",
+            native_enum=False,
+            values_callable=lambda e: [m.value for m in e],
+        ),
+        nullable=True,
     )
     comment: Mapped[Optional[str]] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())

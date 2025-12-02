@@ -571,8 +571,8 @@ class InsightGenerationService:
             what_declined.append("stress_levels")
         
         # Check energy trend
-        high_energy = energy_dist.get("High", 0) + energy_dist.get("Very High", 0)
-        low_energy = energy_dist.get("Low", 0) + energy_dist.get("Very Low", 0)
+        high_energy = energy_dist.get("High", 0)
+        low_energy = energy_dist.get("Low", 0)
         if high_energy > low_energy:
             what_improved.append("energy_levels")
         elif low_energy > high_energy:

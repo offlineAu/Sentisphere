@@ -5,6 +5,11 @@ from functools import lru_cache
 from typing import Dict, Optional, List, Tuple
 
 from .text_cleaning import clean_text, tokenize
+from .mental_health_analyzer import (
+    analyze_with_context,
+    analyze_text_simple,
+    SentimentOutput as MHSentimentOutput,
+)
 
 try:  # Optional heavy deps
     import torch
@@ -150,5 +155,63 @@ def get_sentiment_model():
 
 
 def analyze_text(text: str) -> SentimentOutput:
-    model = get_sentiment_model()
-    return model.predict(text)
+    """
+    Analyze text for sentiment (backward compatible, no user context).
+    
+    For better results with mental health check-ins, use analyze_checkin_text()
+    which accepts user-reported mood/stress/energy.
+    """
+    # Use the new mental health analyzer
+    result = analyze_text_simple(text)
+    return SentimentOutput(
+        sentiment=result.sentiment,
+        emotions=result.emotions,
+        confidence=result.confidence,
+        model_version=result.model_version,
+    )
+
+
+def analyze_checkin_text(
+    text: str,
+    mood_level: Optional[str] = None,
+    energy_level: Optional[str] = None,
+    stress_level: Optional[str] = None,
+    feel_better: Optional[str] = None,
+) -> SentimentOutput:
+    """
+    Analyze check-in text with user context for accurate sentiment.
+    
+    This function integrates user-reported emotional state to prevent
+    contradictory outputs (e.g., "positive" when user reports high stress).
+    
+    Args:
+        text: The check-in comment
+        mood_level: User's reported mood (Awesome, Great, Okay, Meh, Anxious, Bad, etc.)
+        energy_level: User's reported energy (Low, Moderate, High)
+        stress_level: User's reported stress (No Stress, Low Stress, Moderate, High Stress, Very High Stress)
+        feel_better: Whether user feels better (Yes, No, Same)
+    
+    Returns:
+        SentimentOutput with context-aware sentiment and emotions
+    """
+    result = analyze_with_context(
+        text,
+        mood_level=mood_level,
+        energy_level=energy_level,
+        stress_level=stress_level,
+        feel_better=feel_better,
+    )
+    return SentimentOutput(
+        sentiment=result.sentiment,
+        emotions=result.emotions,
+        confidence=result.confidence,
+        model_version=result.model_version,
+    )
+
+
+def get_legacy_model():
+    """
+    Get the legacy XLM-RoBERTa or heuristic model.
+    Kept for backward compatibility and comparison testing.
+    """
+    return get_sentiment_model()
