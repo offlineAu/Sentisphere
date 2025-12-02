@@ -17,6 +17,15 @@ yarn-error.log*
 .env.test.local
 .env.production.local
 
+# Firebase / FCM credentials (NEVER COMMIT)
+fcm-key.json
+google-services.json
+GoogleService-Info.plist
+firebase-admin*.json
+service-account*.json
+*-firebase-adminsdk-*.json
+sentisphere-*.json
+
 # Editor settings
 .vscode/
 .idea/

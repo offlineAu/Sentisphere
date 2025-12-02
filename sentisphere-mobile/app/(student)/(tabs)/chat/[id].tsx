@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { StyleSheet, View, FlatList, TextInput, KeyboardAvoidingView, Platform, Pressable, useWindowDimensions, Alert, type AlertButton, Animated, Easing } from 'react-native';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
+import { GlobalScreenWrapper } from '@/components/GlobalScreenWrapper';
 import { Icon } from '@/components/ui/icon';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors } from '@/constants/theme';
@@ -445,8 +446,8 @@ import { useFocusEffect } from '@react-navigation/native';
   };
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ThemedView style={[styles.container, { paddingTop: insets.top }] }>
+    <GlobalScreenWrapper backgroundColor={palette.background}>
+      <KeyboardAvoidingView style={{ flex: 1, backgroundColor: palette.background }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <Stack.Screen options={{ title: (name as string) || 'Chat' }} />
         {/* In-app header */}
         <Animated.View style={[styles.chatHeader, { backgroundColor: palette.background, borderBottomColor: palette.border }, makeFadeUp(entrance.header)]}>
@@ -554,8 +555,8 @@ import { useFocusEffect } from '@react-navigation/native';
               </View>
             )}
           </Animated.View>
-      </ThemedView>
-    </KeyboardAvoidingView>
+      </KeyboardAvoidingView>
+    </GlobalScreenWrapper>
   );
 }
 

@@ -1,17 +1,18 @@
 import { StyleSheet, TextInput, Pressable } from 'react-native';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
+import { GlobalScreenWrapper } from '@/components/GlobalScreenWrapper';
 
 export default function LoginScreen() {
   return (
-    <ThemedView style={styles.container}>
+    <GlobalScreenWrapper backgroundColor="#FFFFFF" style={{ justifyContent: 'center', padding: 16, gap: 12 }}>
       <ThemedText type="title">Login</ThemedText>
       <TextInput placeholder="Email" style={styles.input} />
       <TextInput placeholder="Password" secureTextEntry style={styles.input} />
       <Pressable style={styles.button}>
         <ThemedText style={{ color: 'white', textAlign: 'center' }}>Sign In</ThemedText>
       </Pressable>
-    </ThemedView>
+    </GlobalScreenWrapper>
   );
 }
 

@@ -219,12 +219,7 @@ export default function StudentTabsLayout() {
     <Tabs
       tabBar={(props) => <CustomTabBar {...props} />}
       screenOptions={{
-        headerShown: true,
-        // Explicit light theme styling
-        headerStyle: { backgroundColor: palette.background },
-        headerBackground: () => <View style={{ flex: 1, backgroundColor: palette.background }} />,
-        headerTintColor: palette.text,
-        headerTitleStyle: { color: palette.text },
+        headerShown: false,
         // Note: tabBar styling handled by CustomTabBar
         tabBarActiveTintColor: tint,
         tabBarInactiveTintColor: palette.icon,

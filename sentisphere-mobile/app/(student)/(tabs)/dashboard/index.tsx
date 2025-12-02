@@ -11,6 +11,7 @@ import { useColorScheme } from "@/hooks/use-color-scheme"
 import { Colors } from "@/constants/theme"
 import { Icon } from "@/components/ui/icon"
 import { LinearGradient } from "expo-linear-gradient"
+import { GlobalScreenWrapper } from "@/components/GlobalScreenWrapper"
 
 import * as Haptics from "expo-haptics"
 import * as SecureStore from "expo-secure-store"
@@ -102,16 +103,6 @@ export default function EnhancedDashboardScreen() {
       .then((d) => console.log('health:', d))
       .catch((e) => console.error('health error:', e))
   }, [])
-  // Responsive quick action tile sizing - 2x2 grid
-  const CARD_PADDING = 16 * 2; // CardContent padding on both sides
-  const SCROLL_PADDING = 16 * 2; // scrollContent padding on both sides
-  const TILE_GAP = 10;
-  const availableWidth = screenWidth - SCROLL_PADDING - CARD_PADDING;
-  const tileWidth = Math.floor((availableWidth - TILE_GAP) / 2);
-  const quickActionTileSize = {
-    width: tileWidth,
-    height: Math.max(110, tileWidth * 0.78), // Maintain consistent aspect ratio
-  }
 
   // Feature flags for layout
   const showLegacySections = false
@@ -356,10 +347,9 @@ export default function EnhancedDashboardScreen() {
     }
   }
 
+  // Quick Action tile animations (only 2 tiles now)
   const qa1 = createTileAnim()
   const qa2 = createTileAnim()
-  const qa3 = createTileAnim()
-  const qa4 = createTileAnim()
 
   // Animated scale for Recent Activity rows
   const activityScales = useRef(recentActivity.map(() => new Animated.Value(1))).current
@@ -384,7 +374,7 @@ export default function EnhancedDashboardScreen() {
   }
 
   return (
-    <ThemedView style={styles.container}>
+    <GlobalScreenWrapper backgroundColor="#FFFFFF">
       <LinearGradient colors={["#FFFFFF", "#FFFFFF"]} style={styles.pageBackground} pointerEvents="none" />
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[styles.scrollContent, { backgroundColor: '#FFFFFF' }]}>
         {/* Greeting Section (clean, prominent) */}
@@ -461,151 +451,61 @@ export default function EnhancedDashboardScreen() {
         </Animated.View>
 
 
-        {/* Enhanced Quick Actions */}
-        <Animated.View style={makeFadeUp(entrance.quick)}>
-          <Card style={styles.cardShadow}>
-          <CardContent style={styles.quickActionsContent}>
-            <View style={styles.sectionTitleRow}>
-              <View style={styles.sectionTitleIcon}>
-                <Icon name="sparkles" size={18} color="#6B7280" />
-              </View>
-              <ThemedText type="subtitle" style={styles.sectionTitle}>Quick Actions</ThemedText>
-            </View>
-            <View style={styles.quickActionsGrid}>
-              <Link href="/(student)/(tabs)/mood" asChild>
-                <Pressable
-                  onHoverIn={qa1.onHoverIn}
-                  onHoverOut={qa1.onHoverOut}
-                  onPressIn={() => { qa1.onPressIn(); if (Platform.OS !== 'web') { try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light) } catch {} } }}
-                  onPressOut={qa1.onPressOut}
-                  style={({ hovered, pressed }) =>
-                    StyleSheet.flatten([
-                      styles.quickActionTile,
-                      { borderColor: '#E9D5FF' },
-                      hovered && styles.hoverLift,
-                      pressed && styles.pressScale,
-                      quickActionTileSize,
-                    ])
-                  }
-                >
-                  <Animated.View style={[{ flex: 1 }, qa1.animStyle]}>
-                    <View style={styles.quickActionContent} pointerEvents="none">
-                      <View style={styles.quickActionHeader}>
-                        <View style={[styles.quickActionIconWrap, { backgroundColor: '#F3E8FF' }]}>
-                          <Icon name="brain" size={18} color="#7C3AED" />
-                        </View>
-                        <Icon name="chevron-right" size={16} color="#9CA3AF" />
-                      </View>
-                      <View style={styles.quickActionText}>
-                        <ThemedText style={styles.quickActionTitle}>Check Mood</ThemedText>
-                        <ThemedText style={styles.quickActionSubtitle}>Quick daily check-in</ThemedText>
-                      </View>
-                    </View>
-                  </Animated.View>
-                </Pressable>
-              </Link>
+        {/* Action Card Buttons - Floating Cards Side by Side */}
+        <Animated.View style={[styles.actionCardsRow, makeFadeUp(entrance.quick)]}>
+          {/* Book Appointment Card */}
+          <Link href="/(student)/appointments" asChild style={styles.actionCardLink}>
+            <Pressable
+              onHoverIn={qa1.onHoverIn}
+              onHoverOut={qa1.onHoverOut}
+              onPressIn={() => { qa1.onPressIn(); if (Platform.OS !== 'web') { try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light) } catch {} } }}
+              onPressOut={qa1.onPressOut}
+              style={({ hovered, pressed }) =>
+                StyleSheet.flatten([
+                  styles.actionCardButton,
+                  hovered && styles.hoverLift,
+                  pressed && styles.actionCardPressed,
+                ])
+              }
+            >
+              <Animated.View style={[styles.actionCardInner, qa1.animStyle]}>
+                <View style={styles.actionCardIconWrapBlue}>
+                  <Icon name="calendar" size={26} color="#2563EB" />
+                </View>
+                <View style={styles.actionCardTextWrap}>
+                  <ThemedText style={styles.actionCardTitle}>Book Appointment</ThemedText>
+                  <ThemedText style={styles.actionCardSubtitle}>Request counseling</ThemedText>
+                </View>
+              </Animated.View>
+            </Pressable>
+          </Link>
 
-              <Link href="/(student)/(tabs)/journal" asChild>
-                <Pressable
-                  onHoverIn={qa2.onHoverIn}
-                  onHoverOut={qa2.onHoverOut}
-                  onPressIn={() => { qa2.onPressIn(); if (Platform.OS !== 'web') { try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light) } catch {} } }}
-                  onPressOut={qa2.onPressOut}
-                  style={({ hovered, pressed }) =>
-                    StyleSheet.flatten([
-                      styles.quickActionTile,
-                      { borderColor: '#A7F3D0' },
-                      hovered && styles.hoverLift,
-                      pressed && styles.pressScale,
-                      quickActionTileSize,
-                    ])
-                  }
-                >
-                  <Animated.View style={[{ flex: 1 }, qa2.animStyle]}>
-                    <View style={styles.quickActionContent} pointerEvents="none">
-                      <View style={styles.quickActionHeader}>
-                        <View style={[styles.quickActionIconWrap, { backgroundColor: '#ECFDF5' }]}>
-                          <Icon name="book-open" size={18} color="#0D8C4F" />
-                        </View>
-                        <Icon name="chevron-right" size={16} color="#9CA3AF" />
-                      </View>
-                      <View style={styles.quickActionText}>
-                        <ThemedText style={styles.quickActionTitle}>Write Journal</ThemedText>
-                        <ThemedText style={styles.quickActionSubtitle}>Reflect in minutes</ThemedText>
-                      </View>
-                    </View>
-                  </Animated.View>
-                </Pressable>
-              </Link>
-
-              <Link href="/(student)/appointments" asChild>
-                <Pressable
-                  onHoverIn={qa3.onHoverIn}
-                  onHoverOut={qa3.onHoverOut}
-                  onPressIn={() => { qa3.onPressIn(); if (Platform.OS !== 'web') { try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light) } catch {} } }}
-                  onPressOut={qa3.onPressOut}
-                  style={({ hovered, pressed }) =>
-                    StyleSheet.flatten([
-                      styles.quickActionTile,
-                      { borderColor: '#BFDBFE' },
-                      hovered && styles.hoverLift,
-                      pressed && styles.pressScale,
-                      quickActionTileSize,
-                    ])
-                  }
-                >
-                  <Animated.View style={[{ flex: 1 }, qa3.animStyle]}>
-                    <View style={styles.quickActionContent} pointerEvents="none">
-                      <View style={styles.quickActionHeader}>
-                        <View style={[styles.quickActionIconWrap, { backgroundColor: '#EFF6FF' }]}>
-                          <Icon name="calendar" size={18} color="#2563EB" />
-                        </View>
-                        <Icon name="chevron-right" size={16} color="#9CA3AF" />
-                      </View>
-                      <View style={styles.quickActionText}>
-                        <ThemedText style={styles.quickActionTitle}>Appointment</ThemedText>
-                        <ThemedText style={styles.quickActionSubtitle}>Request counseling</ThemedText>
-                      </View>
-                    </View>
-                  </Animated.View>
-                </Pressable>
-              </Link>
-
-              <Link href="/(student)/(tabs)/chat" asChild>
-                <Pressable
-                  onHoverIn={qa4.onHoverIn}
-                  onHoverOut={qa4.onHoverOut}
-                  onPressIn={() => { qa4.onPressIn(); if (Platform.OS !== 'web') { try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light) } catch {} } }}
-                  onPressOut={qa4.onPressOut}
-                  style={({ hovered, pressed }) =>
-                    StyleSheet.flatten([
-                      styles.quickActionTile,
-                      { borderColor: '#A7F3D0' },
-                      hovered && styles.hoverLift,
-                      pressed && styles.pressScale,
-                      quickActionTileSize,
-                    ])
-                  }
-                >
-                  <Animated.View style={[{ flex: 1 }, qa4.animStyle]}>
-                    <View style={styles.quickActionContent} pointerEvents="none">
-                      <View style={styles.quickActionHeader}>
-                        <View style={[styles.quickActionIconWrap, { backgroundColor: '#F0FDF4' }]}>
-                          <Icon name="message-square" size={18} color="#059669" />
-                        </View>
-                        <Icon name="chevron-right" size={16} color="#9CA3AF" />
-                      </View>
-                      <View style={styles.quickActionText}>
-                        <ThemedText style={styles.quickActionTitle}>Chat</ThemedText>
-                        <ThemedText style={styles.quickActionSubtitle}>Get instant support</ThemedText>
-                      </View>
-                    </View>
-                  </Animated.View>
-                </Pressable>
-              </Link>
-            </View>
-          </CardContent>
-          </Card>
+          {/* Chat Support Card */}
+          <Link href="/(student)/(tabs)/chat" asChild style={styles.actionCardLink}>
+            <Pressable
+              onHoverIn={qa2.onHoverIn}
+              onHoverOut={qa2.onHoverOut}
+              onPressIn={() => { qa2.onPressIn(); if (Platform.OS !== 'web') { try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light) } catch {} } }}
+              onPressOut={qa2.onPressOut}
+              style={({ hovered, pressed }) =>
+                StyleSheet.flatten([
+                  styles.actionCardButton,
+                  hovered && styles.hoverLift,
+                  pressed && styles.actionCardPressed,
+                ])
+              }
+            >
+              <Animated.View style={[styles.actionCardInner, qa2.animStyle]}>
+                <View style={styles.actionCardIconWrapGreen}>
+                  <Icon name="message-square" size={26} color="#059669" />
+                </View>
+                <View style={styles.actionCardTextWrap}>
+                  <ThemedText style={styles.actionCardTitle}>Chat Support</ThemedText>
+                  <ThemedText style={styles.actionCardSubtitle}>Get instant help</ThemedText>
+                </View>
+              </Animated.View>
+            </Pressable>
+          </Link>
         </Animated.View>
 
         {/* Upcoming Appointments */}
@@ -828,7 +728,7 @@ export default function EnhancedDashboardScreen() {
 
               </ScrollView>
       {/* Logout overlay removed; handled by /logout route */}
-    </ThemedView>
+    </GlobalScreenWrapper>
   )
 }
 
@@ -845,7 +745,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: 16,
-    gap: 16,
+    gap: 20,
     paddingBottom: 32,
   },
   greetingSection: {
@@ -1260,10 +1160,10 @@ const styles = StyleSheet.create({
   },
   cardShadow: {
     shadowColor: "#000",
-    shadowOpacity: 0.08,
+    shadowOpacity: 0.12,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 },
-    elevation: 2,
+    elevation: 6,
   },
   inspirationShadow: {
     // Deeper, soft shadow for emphasis
@@ -1284,10 +1184,67 @@ const styles = StyleSheet.create({
   pressScale: {
     opacity: 0.96,
   },
-  quickActionsContent: {
-    padding: 16,
+  // Floating Action Card Buttons - Side by Side Row
+  actionCardsRow: {
+    flexDirection: 'row',
     gap: 14,
   },
+  actionCardLink: {
+    flex: 1,
+  },
+  actionCardButton: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    // Strong visible shadow for iOS
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  actionCardPressed: {
+    opacity: 0.92,
+    transform: [{ scale: 0.98 }],
+  },
+  actionCardInner: {
+    padding: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  actionCardIconWrapBlue: {
+    width: 52,
+    height: 52,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#EFF6FF',
+  },
+  actionCardIconWrapGreen: {
+    width: 52,
+    height: 52,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#ECFDF5',
+  },
+  actionCardTextWrap: {
+    alignItems: 'center',
+    gap: 3,
+  },
+  actionCardTitle: {
+    color: '#111827',
+    fontFamily: 'Inter_700Bold',
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  actionCardSubtitle: {
+    color: '#9CA3AF',
+    fontSize: 11,
+    textAlign: 'center',
+  },
+  // Legacy styles kept for potential reuse
   quickActionsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',

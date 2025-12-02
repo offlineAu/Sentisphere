@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { StyleSheet, View, Animated, Easing, Platform, Image, Pressable } from 'react-native';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
+import { GlobalScreenWrapper } from '@/components/GlobalScreenWrapper';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/ui/icon';
@@ -29,31 +30,52 @@ export default function LogoutScreen() {
   };
 
   return (
-    <ThemedView style={styles.container}>
+    <GlobalScreenWrapper backgroundColor="#FFFFFF" topPadding={16}>
       <LinearGradient colors={["#FFFFFF", "#FEE2E2"]} style={StyleSheet.absoluteFillObject} />
+      {/* Back button at top */}
       <View style={styles.topBar}>
         <Pressable onPress={() => router.back()} accessibilityLabel="Back" style={styles.backBtn}>
-          <Icon name="arrow-left" size={18} color="#991B1B" />
+          <View style={styles.backBtnCircle}>
+            <Icon name="arrow-left" size={18} color="#991B1B" />
+          </View>
         </Pressable>
       </View>
-      <Animated.View style={{ alignItems: 'center', gap: 8, opacity: anim, transform: [{ scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] }) }] }}>
-        <Image source={require('../assets/images/leaving.png')} style={{ width: 120, height: 120 }} accessibilityLabel="Leaving" />
-        <ThemedText style={styles.title}>You're leaving already?</ThemedText>
-        <ThemedText style={styles.subtitle}>You can always come back anytime. We’ll keep your data safe.</ThemedText>
-      </Animated.View>
+      {/* Centered content */}
+      <View style={styles.centerContent}>
+        <Animated.View style={{ alignItems: 'center', gap: 8, opacity: anim, transform: [{ scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] }) }] }}>
+          <Image source={require('../assets/images/leaving.png')} style={{ width: 120, height: 120 }} accessibilityLabel="Leaving" />
+          <ThemedText style={styles.title}>You're leaving already?</ThemedText>
+          <ThemedText style={styles.subtitle}>You can always come back anytime. We'll keep your data safe.</ThemedText>
+        </Animated.View>
+      </View>
+      {/* Bottom button */}
       <View style={styles.bottom}>
         <Button title="Logout" onPress={doLogout} style={styles.logoutBtn} textStyle={{ fontSize: 14, color: '#FFFFFF' }} />
       </View>
-    </ThemedView>
+    </GlobalScreenWrapper>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', padding: 24 },
-  topBar: { position: 'absolute', top: 16, left: 16, right: 16, height: 40, alignItems: 'flex-start', justifyContent: 'center' },
-  backBtn: { width: 40, height: 32, alignItems: 'flex-start', justifyContent: 'center' },
+  container: { flex: 1, backgroundColor: '#FFFFFF' },
+  topBar: { paddingHorizontal: 16, paddingBottom: 8 },
+  backBtn: { alignSelf: 'flex-start' },
+  backBtnCircle: { 
+    width: 40, 
+    height: 40, 
+    borderRadius: 20, 
+    backgroundColor: 'rgba(254, 226, 226, 0.8)', 
+    alignItems: 'center', 
+    justifyContent: 'center' 
+  },
+  centerContent: { 
+    flex: 1, 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    paddingHorizontal: 24 
+  },
   title: { fontSize: 20, fontFamily: 'Inter_700Bold', color: '#111827', marginTop: 6 },
-  subtitle: { fontSize: 13, color: '#6B7280', textAlign: 'center', marginHorizontal: 24 },
-  bottom: { position: 'absolute', left: 16, right: 16, bottom: 24 },
+  subtitle: { fontSize: 13, color: '#6B7280', textAlign: 'center', marginHorizontal: 24, marginTop: 4 },
+  bottom: { paddingHorizontal: 16, paddingBottom: 24 },
   logoutBtn: { paddingVertical: 14, borderRadius: 999, alignSelf: 'stretch', backgroundColor: '#DC2626' },
 });

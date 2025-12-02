@@ -8,6 +8,7 @@ import { Image } from 'expo-image'
 import { Icon } from '@/components/ui/icon'
 import { ThemedView } from '@/components/themed-view'
 import { ThemedText } from '@/components/themed-text'
+import { GlobalScreenWrapper } from '@/components/GlobalScreenWrapper'
 import { getArticleById } from '../../(tabs)/learn/data'
 import * as Haptics from 'expo-haptics'
 
@@ -34,9 +35,9 @@ export default function LearnArticleScreen() {
 
   if (!article || !topic) {
     return (
-      <ThemedView style={[styles.container, { alignItems: 'center', justifyContent: 'center' }]}> 
+      <GlobalScreenWrapper backgroundColor="#FFFFFF" style={{ alignItems: 'center', justifyContent: 'center' }}> 
         <ThemedText style={{ fontSize: 16 }}>Article not found.</ThemedText>
-      </ThemedView>
+      </GlobalScreenWrapper>
     )
   }
 
@@ -47,7 +48,7 @@ export default function LearnArticleScreen() {
   ] as const
 
   return (
-    <ThemedView style={styles.container}>
+    <GlobalScreenWrapper backgroundColor="#FFFFFF" topPadding={0}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         <Pressable style={styles.backButton} onPress={onBack}>
           <Icon name="arrow-left" size={16} color={palette.text} />
@@ -131,7 +132,7 @@ export default function LearnArticleScreen() {
 
         <View style={{ height: 40 }} />
       </ScrollView>
-    </ThemedView>
+    </GlobalScreenWrapper>
   )
 }
 
