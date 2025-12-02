@@ -14,13 +14,15 @@ from app.models.notification import Notification
 
 class ReportService:
     MOOD_SCORE_MAP: Dict[MoodLevel, int] = {
-        MoodLevel.VERY_SAD: 1,
-        MoodLevel.SAD: 2,
-        MoodLevel.NEUTRAL: 3,
-        MoodLevel.GOOD: 4,
-        MoodLevel.HAPPY: 5,
-        MoodLevel.VERY_HAPPY: 6,
-        MoodLevel.EXCELLENT: 7,
+        MoodLevel.TERRIBLE: 1,
+        MoodLevel.BAD: 2,
+        MoodLevel.UPSET: 3,
+        MoodLevel.ANXIOUS: 4,
+        MoodLevel.MEH: 5,
+        MoodLevel.OKAY: 6,
+        MoodLevel.GREAT: 7,
+        MoodLevel.LOVED: 8,
+        MoodLevel.AWESOME: 9,
     }
 
     STRESS_HIGH_LEVELS = {StressLevel.HIGH_STRESS, StressLevel.VERY_HIGH_STRESS}
@@ -55,12 +57,12 @@ class ReportService:
         critical_alerts = db.scalar(
             select(func.count(Alert.alert_id)).where(
                 Alert.created_at >= window_start,
-                Alert.severity.in_([AlertSeverity.HIGH, AlertSeverity.CRITICAL]),
+                Alert.severity == AlertSeverity.HIGH,
             )
         ) or 0
 
         notifications_sent = db.scalar(
-            select(func.count(Notification.notification_id)).where(
+            select(func.count(Notification.id)).where(
                 Notification.created_at >= window_start
             )
         ) or 0
@@ -107,9 +109,9 @@ class ReportService:
                 func.date(EmotionalCheckin.created_at).label("date"),
                 func.avg(
                     case(
-                        (EmotionalCheckin.energy_level.in_([EnergyLevel.HIGH, EnergyLevel.VERY_HIGH]), 1.0),
-                        (EmotionalCheckin.energy_level == EnergyLevel.MODERATE, 0.7),
-                        else_=0.4,
+                        (EmotionalCheckin.energy_level == EnergyLevel.HIGH, 1.0),
+                        (EmotionalCheckin.energy_level == EnergyLevel.MODERATE, 0.66),
+                        else_=0.33,
                     )
                 ).label("energy_score"),
                 func.avg(

@@ -15,7 +15,6 @@ class AlertSeverity(str, PyEnum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
-    CRITICAL = "critical"
 
 
 class AlertStatus(str, PyEnum):

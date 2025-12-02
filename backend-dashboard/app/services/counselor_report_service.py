@@ -81,21 +81,21 @@ class CounselorReportService:
         # SQLAlchemy 2.x expects each (condition, result) pair as a separate
         # positional argument to case(), not a single tuple of tuples.
         mood_case = case(
-            (EmotionalCheckin.mood_level == MoodLevel.VERY_SAD, 0),
-            (EmotionalCheckin.mood_level == MoodLevel.SAD, 17),
-            (EmotionalCheckin.mood_level == MoodLevel.NEUTRAL, 33),
-            (EmotionalCheckin.mood_level == MoodLevel.GOOD, 50),
-            (EmotionalCheckin.mood_level == MoodLevel.HAPPY, 67),
-            (EmotionalCheckin.mood_level == MoodLevel.VERY_HAPPY, 83),
-            (EmotionalCheckin.mood_level == MoodLevel.EXCELLENT, 100),
+            (EmotionalCheckin.mood_level == MoodLevel.TERRIBLE, 0),
+            (EmotionalCheckin.mood_level == MoodLevel.BAD, 12),
+            (EmotionalCheckin.mood_level == MoodLevel.UPSET, 25),
+            (EmotionalCheckin.mood_level == MoodLevel.ANXIOUS, 37),
+            (EmotionalCheckin.mood_level == MoodLevel.MEH, 50),
+            (EmotionalCheckin.mood_level == MoodLevel.OKAY, 62),
+            (EmotionalCheckin.mood_level == MoodLevel.GREAT, 75),
+            (EmotionalCheckin.mood_level == MoodLevel.LOVED, 87),
+            (EmotionalCheckin.mood_level == MoodLevel.AWESOME, 100),
             else_=None,
         )
         energy_case = case(
-            (EmotionalCheckin.energy_level == EnergyLevel.VERY_LOW, 0),
-            (EmotionalCheckin.energy_level == EnergyLevel.LOW, 25),
+            (EmotionalCheckin.energy_level == EnergyLevel.LOW, 0),
             (EmotionalCheckin.energy_level == EnergyLevel.MODERATE, 50),
-            (EmotionalCheckin.energy_level == EnergyLevel.HIGH, 75),
-            (EmotionalCheckin.energy_level == EnergyLevel.VERY_HIGH, 100),
+            (EmotionalCheckin.energy_level == EnergyLevel.HIGH, 100),
             else_=None,
         )
         stress_case = case(
@@ -129,15 +129,15 @@ class CounselorReportService:
         mood_score = select(
             func.avg(
                 case(
-                    (
-                        (EmotionalCheckin.mood_level == MoodLevel.VERY_SAD, 1),
-                        (EmotionalCheckin.mood_level == MoodLevel.SAD, 2),
-                        (EmotionalCheckin.mood_level == MoodLevel.NEUTRAL, 3),
-                        (EmotionalCheckin.mood_level == MoodLevel.GOOD, 4),
-                        (EmotionalCheckin.mood_level == MoodLevel.HAPPY, 5),
-                        (EmotionalCheckin.mood_level == MoodLevel.VERY_HAPPY, 6),
-                        (EmotionalCheckin.mood_level == MoodLevel.EXCELLENT, 7),
-                    ),
+                    (EmotionalCheckin.mood_level == MoodLevel.TERRIBLE, 1),
+                    (EmotionalCheckin.mood_level == MoodLevel.BAD, 2),
+                    (EmotionalCheckin.mood_level == MoodLevel.UPSET, 3),
+                    (EmotionalCheckin.mood_level == MoodLevel.ANXIOUS, 4),
+                    (EmotionalCheckin.mood_level == MoodLevel.MEH, 5),
+                    (EmotionalCheckin.mood_level == MoodLevel.OKAY, 6),
+                    (EmotionalCheckin.mood_level == MoodLevel.GREAT, 7),
+                    (EmotionalCheckin.mood_level == MoodLevel.LOVED, 8),
+                    (EmotionalCheckin.mood_level == MoodLevel.AWESOME, 9),
                     else_=None,
                 )
             )
@@ -151,13 +151,9 @@ class CounselorReportService:
         energy_score = select(
             func.avg(
                 case(
-                    (
-                        (EmotionalCheckin.energy_level == EnergyLevel.VERY_LOW, 1),
-                        (EmotionalCheckin.energy_level == EnergyLevel.LOW, 2),
-                        (EmotionalCheckin.energy_level == EnergyLevel.MODERATE, 3),
-                        (EmotionalCheckin.energy_level == EnergyLevel.HIGH, 4),
-                        (EmotionalCheckin.energy_level == EnergyLevel.VERY_HIGH, 5),
-                    ),
+                    (EmotionalCheckin.energy_level == EnergyLevel.LOW, 1),
+                    (EmotionalCheckin.energy_level == EnergyLevel.MODERATE, 2),
+                    (EmotionalCheckin.energy_level == EnergyLevel.HIGH, 3),
                     else_=None,
                 )
             )
@@ -192,8 +188,8 @@ class CounselorReportService:
         energy_raw = db.scalar(energy_score)
         stress_raw = db.scalar(stress_score)
         return {
-            "avg_mood": cls._scale(mood_raw, 1, 7),
-            "avg_energy": cls._scale(energy_raw, 1, 5),
+            "avg_mood": cls._scale(mood_raw, 1, 9),
+            "avg_energy": cls._scale(energy_raw, 1, 3),
             "avg_stress": cls._scale(stress_raw, 1, 5),
         }
 
@@ -572,10 +568,10 @@ class CounselorReportService:
         active_this = _active_users(this_start, this_end)
         active_last = _active_users(last_start, last_end)
 
-        # At-risk students: open high/critical alerts in each window.
+        # At-risk students: open high alerts in each window.
         def _at_risk(start_dt: datetime, end_dt: datetime) -> int:
             stmt = select(func.count(Alert.alert_id)).where(
-                Alert.severity.in_([AlertSeverity.HIGH, AlertSeverity.CRITICAL]),
+                Alert.severity == AlertSeverity.HIGH,
                 Alert.status == AlertStatus.OPEN,
                 Alert.created_at >= start_dt,
                 Alert.created_at <= end_dt,
@@ -627,15 +623,15 @@ class CounselorReportService:
                 func.round(
                     func.avg(
                         case(
-                            (
-                                (EmotionalCheckin.mood_level == MoodLevel.VERY_SAD, 1),
-                                (EmotionalCheckin.mood_level == MoodLevel.SAD, 2),
-                                (EmotionalCheckin.mood_level == MoodLevel.NEUTRAL, 3),
-                                (EmotionalCheckin.mood_level == MoodLevel.GOOD, 4),
-                                (EmotionalCheckin.mood_level == MoodLevel.HAPPY, 5),
-                                (EmotionalCheckin.mood_level == MoodLevel.VERY_HAPPY, 6),
-                                (EmotionalCheckin.mood_level == MoodLevel.EXCELLENT, 7),
-                            ),
+                            (EmotionalCheckin.mood_level == MoodLevel.TERRIBLE, 1),
+                            (EmotionalCheckin.mood_level == MoodLevel.BAD, 2),
+                            (EmotionalCheckin.mood_level == MoodLevel.UPSET, 3),
+                            (EmotionalCheckin.mood_level == MoodLevel.ANXIOUS, 4),
+                            (EmotionalCheckin.mood_level == MoodLevel.MEH, 5),
+                            (EmotionalCheckin.mood_level == MoodLevel.OKAY, 6),
+                            (EmotionalCheckin.mood_level == MoodLevel.GREAT, 7),
+                            (EmotionalCheckin.mood_level == MoodLevel.LOVED, 8),
+                            (EmotionalCheckin.mood_level == MoodLevel.AWESOME, 9),
                             else_=None,
                         )
                     ),
@@ -868,7 +864,7 @@ class CounselorReportService:
     def list_alerts(cls, db: Session, *, limit: int = 100) -> List[Dict[str, Any]]:
         stmt = (
             select(func.lower(Alert.severity).label("severity"), Alert.created_at)
-            .where(Alert.severity.in_([AlertSeverity.LOW, AlertSeverity.MEDIUM, AlertSeverity.HIGH, AlertSeverity.CRITICAL]))
+            .where(Alert.severity.in_([AlertSeverity.LOW, AlertSeverity.MEDIUM, AlertSeverity.HIGH]))
             .order_by(Alert.created_at.desc())
             .limit(limit)
         )

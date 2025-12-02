@@ -53,6 +53,7 @@ class User(Base):
         nullable=False,
     )
     password_hash: Mapped[Optional[str]] = mapped_column(String(255))
+    push_token: Mapped[Optional[str]] = mapped_column(String(255))
     nickname: Mapped[Optional[str]] = mapped_column(String(50))
     last_login: Mapped[Optional[datetime]] = mapped_column(DateTime)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="1")
