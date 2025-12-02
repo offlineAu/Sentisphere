@@ -46,11 +46,23 @@ class Notification(Base):
     message: Mapped[str] = mapped_column(Text, nullable=False)
     
     category: Mapped[NotificationCategory] = mapped_column(
-        Enum(NotificationCategory, values_callable=lambda x: [e.value for e in x]),
+        Enum(
+            NotificationCategory,
+            name="notification_category",
+            native_enum=False,
+            values_callable=lambda x: [e.value for e in x],
+            validate_strings=True,
+        ),
         nullable=False
     )
     source: Mapped[NotificationSource] = mapped_column(
-        Enum(NotificationSource, values_callable=lambda x: [e.value for e in x]),
+        Enum(
+            NotificationSource,
+            name="notification_source",
+            native_enum=False,
+            values_callable=lambda x: [e.value for e in x],
+            validate_strings=True,
+        ),
         nullable=False
     )
     
