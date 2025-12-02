@@ -6,6 +6,7 @@ import { Feather } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
+import { GlobalScreenWrapper } from '@/components/GlobalScreenWrapper';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/ui/icon';
@@ -36,6 +37,23 @@ export default function JournalListScreen() {
   // Track currently open swipe row so only one stays open
   const openSwipeRef = useRef<Swipeable | null>(null);
   const fetchEntriesRef = useRef<(() => void) | null>(null);
+  // Scroll ref for auto-scroll to focused input with smooth animation
+  const scrollViewRef = useRef<ScrollView>(null);
+  const scrollAnim = useRef(new Animated.Value(0)).current;
+  const scrollToInput = (yOffset: number = 300) => {
+    // Trigger subtle animation for visual feedback
+    scrollAnim.setValue(0);
+    Animated.timing(scrollAnim, {
+      toValue: 1,
+      duration: 280,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+    // Delay scroll slightly for smoother feel
+    setTimeout(() => {
+      scrollViewRef.current?.scrollTo({ y: yOffset, animated: true });
+    }, 80);
+  };
   const onTabChange = (next: 0 | 1) => {
     setTab(next);
     if (Platform.OS !== 'web') {
@@ -348,11 +366,17 @@ export default function JournalListScreen() {
   };
 
   return (
-    <ThemedView style={styles.container}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+    <GlobalScreenWrapper backgroundColor={scheme === 'dark' ? palette.background : '#FAFBFC'}>
+      <KeyboardAvoidingView 
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined} 
+        style={{ flex: 1, backgroundColor: scheme === 'dark' ? palette.background : '#FAFBFC' }}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 0}
+      >
         <ScrollView
+          ref={scrollViewRef}
           keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
           keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
           contentContainerStyle={{ padding: 24, paddingTop: 20, paddingBottom: 120, backgroundColor: scheme === 'dark' ? palette.background : '#FAFBFC' }}
         >
           <Animated.View style={makeFadeUp(entranceHeader)}>
@@ -413,8 +437,10 @@ export default function JournalListScreen() {
                   value={title}
                   onChangeText={setTitle}
                   selectionColor={focusGreen}
-                  onFocus={() => setTitleFocused(true)}
+                  onFocus={() => { setTitleFocused(true); scrollToInput(280); }}
                   onBlur={() => setTitleFocused(false)}
+                  blurOnSubmit={false}
+                  returnKeyType="next"
                   // @ts-ignore - web outline
                   style={[
                     styles.titleInput,
@@ -433,8 +459,9 @@ export default function JournalListScreen() {
                     value={body}
                     onChangeText={setBody}
                     selectionColor={focusGreen}
-                    onFocus={() => setBodyFocused(true)}
+                    onFocus={() => { setBodyFocused(true); scrollToInput(350); }}
                     onBlur={() => setBodyFocused(false)}
+                    blurOnSubmit={false}
                     // @ts-ignore - web outline
                     style={[styles.textarea, { outlineStyle: 'none' }]}
                   />
@@ -446,14 +473,32 @@ export default function JournalListScreen() {
 
                 {/* Toolbar */}
                 <View style={styles.toolbar}>
-                  <Button 
-                    title="Voice" 
-                    variant="outline" 
-                    onPress={handleVoicePress} 
-                    style={isListening ? { backgroundColor: '#DCFCE7', borderColor: '#0D8C4F' } : {}}
-                  />
+                  <Pressable 
+                    onPress={handleVoicePress}
+                    style={[
+                      styles.voiceButton,
+                      isListening && styles.voiceButtonActive
+                    ]}
+                  >
+                    <Feather name="mic" size={18} color={isListening ? '#DC2626' : '#B91C1C'} />
+                    <ThemedText style={[styles.voiceButtonText, isListening && { color: '#DC2626' }]}>
+                      {isListening ? 'Listening...' : 'Voice'}
+                    </ThemedText>
+                  </Pressable>
                   <View style={{ flex: 1 }} />
-                  <Button title="Record Journal" onPress={handleSave} disabled={!body.trim() || isSaving} loading={isSaving} />
+                  <Pressable 
+                    onPress={handleSave} 
+                    disabled={!body.trim() || isSaving}
+                    style={[
+                      styles.recordButton,
+                      (!body.trim() || isSaving) && styles.recordButtonDisabled
+                    ]}
+                  >
+                    <Feather name="check" size={18} color="#FFFFFF" />
+                    <ThemedText style={styles.recordButtonText}>
+                      {isSaving ? 'Saving...' : 'Record Journal'}
+                    </ThemedText>
+                  </Pressable>
                 </View>
               </CardContent>
             </Card>
@@ -473,8 +518,10 @@ export default function JournalListScreen() {
                     value={title}
                     onChangeText={setTitle}
                     selectionColor={focusGreen}
-                    onFocus={() => setTitleFocused(true)}
+                    onFocus={() => { setTitleFocused(true); scrollToInput(280); }}
                     onBlur={() => setTitleFocused(false)}
+                    blurOnSubmit={false}
+                    returnKeyType="next"
                     // @ts-ignore - web outline
                     style={[
                       styles.titleInput,
@@ -493,8 +540,9 @@ export default function JournalListScreen() {
                       value={body}
                       onChangeText={setBody}
                       selectionColor={focusGreen}
-                      onFocus={() => setBodyFocused(true)}
+                      onFocus={() => { setBodyFocused(true); scrollToInput(350); }}
                       onBlur={() => setBodyFocused(false)}
+                      blurOnSubmit={false}
                       // @ts-ignore - web outline
                       style={[styles.textarea, { outlineStyle: 'none' }]}
                     />
@@ -506,14 +554,32 @@ export default function JournalListScreen() {
 
                   {/* Toolbar */}
                   <View style={styles.toolbar}>
-                    <Button 
-                      title="Voice" 
-                      variant="outline" 
-                      onPress={handleVoicePress} 
-                      style={isListening ? { backgroundColor: '#DCFCE7', borderColor: '#0D8C4F' } : {}}
-                    />
+                    <Pressable 
+                      onPress={handleVoicePress}
+                      style={[
+                        styles.voiceButton,
+                        isListening && styles.voiceButtonActive
+                      ]}
+                    >
+                      <Feather name="mic" size={18} color={isListening ? '#DC2626' : '#B91C1C'} />
+                      <ThemedText style={[styles.voiceButtonText, isListening && { color: '#DC2626' }]}>
+                        {isListening ? 'Listening...' : 'Voice'}
+                      </ThemedText>
+                    </Pressable>
                     <View style={{ flex: 1 }} />
-                    <Button title="Record Journal" onPress={handleSave} disabled={!body.trim() || isSaving} loading={isSaving} />
+                    <Pressable 
+                      onPress={handleSave} 
+                      disabled={!body.trim() || isSaving}
+                      style={[
+                        styles.recordButton,
+                        (!body.trim() || isSaving) && styles.recordButtonDisabled
+                      ]}
+                    >
+                      <Feather name="check" size={18} color="#FFFFFF" />
+                      <ThemedText style={styles.recordButtonText}>
+                        {isSaving ? 'Saving...' : 'Record Journal'}
+                      </ThemedText>
+                    </Pressable>
                   </View>
                 </CardContent>
               </Card>
@@ -638,7 +704,7 @@ export default function JournalListScreen() {
           </Animated.View>
         </View>
       </Modal>
-    </ThemedView>
+    </GlobalScreenWrapper>
   );
 }
 
@@ -930,6 +996,46 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
     gap: 6,
+  },
+  // Voice button styles
+  voiceButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    backgroundColor: 'rgba(254, 226, 226, 0.5)',
+    borderWidth: 1,
+    borderColor: 'rgba(185, 28, 28, 0.2)',
+  },
+  voiceButtonActive: {
+    backgroundColor: 'rgba(254, 226, 226, 0.8)',
+    borderColor: '#DC2626',
+  },
+  voiceButtonText: {
+    fontSize: 14,
+    fontFamily: 'Inter_500Medium',
+    color: '#B91C1C',
+  },
+  // Record button styles
+  recordButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    borderRadius: 12,
+    backgroundColor: '#0D8C4F',
+  },
+  recordButtonDisabled: {
+    backgroundColor: '#9CA3AF',
+    opacity: 0.6,
+  },
+  recordButtonText: {
+    fontSize: 14,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#FFFFFF',
   },
 });
 

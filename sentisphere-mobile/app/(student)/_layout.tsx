@@ -127,10 +127,10 @@ export default function StudentLayout() {
   }
 
   return (
-    <Stack>
+    <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-      <Stack.Screen name="appointments/index" options={{ title: 'Appointments' }} />
-      <Stack.Screen name="analytics/index" options={{ title: 'Analytics' }} />
+      <Stack.Screen name="appointments/index" options={{ headerShown: false }} />
+      <Stack.Screen name="analytics/index" options={{ headerShown: false }} />
     </Stack>
   );
 }

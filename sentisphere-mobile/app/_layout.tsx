@@ -57,10 +57,12 @@ export default function RootLayout() {
         },
       }}
       >
-        <Stack screenOptions={{ contentStyle: { backgroundColor: Colors.light.background } }}>
+        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: Colors.light.background } }}>
           <Stack.Screen name="index" options={{ headerShown: false }} />
           <Stack.Screen name="(student)" options={{ headerShown: false }} />
-          <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
+          <Stack.Screen name="auth" options={{ headerShown: false }} />
+          <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+          <Stack.Screen name="modal" options={{ presentation: 'modal', headerShown: false }} />
         </Stack>
         <StatusBar style="dark" />
       </ThemeProvider>

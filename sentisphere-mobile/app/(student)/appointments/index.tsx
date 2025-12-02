@@ -1,6 +1,7 @@
 import { StyleSheet } from 'react-native';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
+import { GlobalScreenWrapper } from '@/components/GlobalScreenWrapper';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Easing, Platform, Pressable, ScrollView, View, Modal, ActivityIndicator, LayoutAnimation, UIManager, TextInput, KeyboardAvoidingView, Image } from 'react-native';
 import * as Print from 'expo-print';
@@ -16,15 +17,17 @@ import { Colors } from '@/constants/theme';
 import { Icon } from '@/components/ui/icon';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
+import { useCallback } from 'react';
 
-type Counselor = { id: string; name: string; title: string };
-
-const COUNSELORS: Counselor[] = [
-  { id: 'sarah', name: 'Dr. Sarah Johnson', title: 'Licensed Counselor' },
-  { id: 'marco', name: 'Marco Lee', title: 'Mental Health Coach' },
-  { id: 'emma', name: 'Emma Clark', title: 'Therapist, CBT' },
-  { id: 'alex', name: 'Alex Kim', title: 'Wellness Counselor' },
-];
+// Counselor type matching backend response
+type Counselor = { 
+  user_id: number; 
+  name?: string | null; 
+  nickname?: string | null; 
+  email?: string | null;
+  title?: string;
+};
 
 const TIME_SLOTS = ['9:00 AM', '10:00 AM', '11:00 AM', '1:00 PM', '2:00 PM', '3:00 PM'];
 
@@ -60,7 +63,53 @@ export default function AppointmentsScreen() {
   const [focusStudentId, setFocusStudentId] = useState(false);
   const [focusEmail, setFocusEmail] = useState(false);
   const [focusPhone, setFocusPhone] = useState(false);
-  
+
+  // Dynamic counselors from backend
+  const [counselors, setCounselors] = useState<Counselor[]>([]);
+  const [counselorsLoading, setCounselorsLoading] = useState(false);
+
+  // Helper to get auth token
+  const getAuthToken = async (): Promise<string | null> => {
+    if (Platform.OS === 'web') {
+      try { return (window as any)?.localStorage?.getItem('auth_token') || null } catch { return null }
+    }
+    try { return await SecureStore.getItemAsync('auth_token') } catch { return null }
+  };
+
+  // Fetch counselors from backend
+  const loadCounselors = useCallback(async () => {
+    setCounselorsLoading(true);
+    try {
+      const tok = await getAuthToken();
+      if (!tok) return;
+      const res = await fetch(`${API}/api/mobile/counselors`, {
+        headers: { Authorization: `Bearer ${tok}` },
+      });
+      if (res.ok) {
+        const data: Counselor[] = await res.json();
+        // Add default title if not present
+        const counselorsWithTitle = data.map(c => ({
+          ...c,
+          title: c.title || 'Guidance Counselor'
+        }));
+        setCounselors(counselorsWithTitle);
+      } else {
+        console.error('Failed to load counselors:', res.status);
+      }
+    } catch (e) {
+      console.error('Error loading counselors:', e);
+    } finally {
+      setCounselorsLoading(false);
+    }
+  }, [API]);
+
+  // Load counselors when screen focuses
+  useFocusEffect(
+    useCallback(() => {
+      loadCounselors();
+      return () => {};
+    }, [loadCounselors])
+  );
 
   // Scheduler state
   type Step = 0 | 1 | 2; // 0 choose counselor, 1 choose date, 2 choose time
@@ -132,7 +181,23 @@ export default function AppointmentsScreen() {
     });
   };
 
-  // Removed magnet auto-scroll for now
+  // Scroll ref for auto-scroll to focused input with smooth animation
+  const scrollViewRef = useRef<ScrollView>(null);
+  const scrollAnim = useRef(new Animated.Value(0)).current;
+  const scrollToInput = (yOffset: number = 200) => {
+    // Trigger subtle animation for visual feedback
+    scrollAnim.setValue(0);
+    Animated.timing(scrollAnim, {
+      toValue: 1,
+      duration: 280,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+    // Delay scroll slightly for smoother feel
+    setTimeout(() => {
+      scrollViewRef.current?.scrollTo({ y: yOffset, animated: true });
+    }, 80);
+  };
 
   // Dropdown open animations
   const calOpenAnim = useRef(new Animated.Value(0)).current;
@@ -369,11 +434,17 @@ export default function AppointmentsScreen() {
   const frostedWeb = Platform.OS === 'web' ? ({ backdropFilter: 'blur(16px) saturate(140%)' } as any) : {};
 
   return (
-    <ThemedView style={styles.container}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={Platform.OS === 'ios' ? 72 : 0} style={{ flex: 1 }}>
+    <GlobalScreenWrapper backgroundColor="#FFFFFF">
+      <KeyboardAvoidingView 
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined} 
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 0} 
+        style={{ flex: 1, backgroundColor: '#FFFFFF' }}
+      >
       <ScrollView
+        ref={scrollViewRef}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+        showsVerticalScrollIndicator={false}
         contentContainerStyle={{ padding: 24, paddingBottom: 60 }}
       >
         <View style={styles.page}>
@@ -418,7 +489,7 @@ export default function AppointmentsScreen() {
               </View>
               <View style={styles.infoStep}>
                 <View style={styles.stepNumber}><ThemedText style={styles.stepNumberText}>3</ThemedText></View>
-                <ThemedText style={styles.infoItem}>Submit to Guidance Office (Bldg A, 2F)</ThemedText>
+                <ThemedText style={styles.infoItem}>Submit to Guidance Office (CSM Bldg, 1st Floor)</ThemedText>
               </View>
               <View style={styles.infoStep}>
                 <View style={styles.stepNumber}><ThemedText style={styles.stepNumberText}>4</ThemedText></View>
@@ -443,8 +514,10 @@ export default function AppointmentsScreen() {
                 placeholder="Enter your full name"
                 placeholderTextColor="#9CA3AF"
                 selectionColor={focusBlue}
-                onFocus={() => { setFocusFullName(true); doHaptic('selection'); }}
+                onFocus={() => { setFocusFullName(true); doHaptic('selection'); scrollToInput(280); }}
                 onBlur={() => setFocusFullName(false)}
+                blurOnSubmit={false}
+                returnKeyType="next"
                 style={[styles.input, { borderColor: focusFullName ? focusBlue : palette.border }]}
               />
 
@@ -455,8 +528,10 @@ export default function AppointmentsScreen() {
                 placeholder="Enter your student ID"
                 placeholderTextColor="#9CA3AF"
                 selectionColor={focusBlue}
-                onFocus={() => { setFocusStudentId(true); doHaptic('selection'); }}
+                onFocus={() => { setFocusStudentId(true); doHaptic('selection'); scrollToInput(340); }}
                 onBlur={() => setFocusStudentId(false)}
+                blurOnSubmit={false}
+                returnKeyType="next"
                 style={[styles.input, { borderColor: focusStudentId ? focusBlue : palette.border }]}
               />
 
@@ -468,8 +543,10 @@ export default function AppointmentsScreen() {
                 keyboardType="email-address"
                 placeholderTextColor="#9CA3AF"
                 selectionColor={focusBlue}
-                onFocus={() => { setFocusEmail(true); doHaptic('selection'); }}
+                onFocus={() => { setFocusEmail(true); doHaptic('selection'); scrollToInput(400); }}
                 onBlur={() => setFocusEmail(false)}
+                blurOnSubmit={false}
+                returnKeyType="next"
                 style={[styles.input, { borderColor: focusEmail ? focusBlue : palette.border }]}
                 autoCapitalize="none"
               />
@@ -482,8 +559,10 @@ export default function AppointmentsScreen() {
                 keyboardType="phone-pad"
                 placeholderTextColor="#9CA3AF"
                 selectionColor={focusBlue}
-                onFocus={() => { setFocusPhone(true); doHaptic('selection'); }}
+                onFocus={() => { setFocusPhone(true); doHaptic('selection'); scrollToInput(460); }}
                 onBlur={() => setFocusPhone(false)}
+                blurOnSubmit={false}
+                returnKeyType="done"
                 style={[styles.input, { borderColor: focusPhone ? focusBlue : palette.border }]}
               />
 
@@ -556,6 +635,7 @@ export default function AppointmentsScreen() {
                             LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
                             setOpenDatePicker(false);
                             doHaptic('selection');
+                            showToast('Date selected');
                           }}
                           style={({ pressed }) => [
                             styles.day,
@@ -640,16 +720,41 @@ export default function AppointmentsScreen() {
                     },
                   ])}
                 >
-                  {COUNSELORS.map((c) => (
-                    <Pressable
-                      key={c.id}
-                      onPress={() => { setCounselor(c); setPreferredCounselor(c.name); LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); setOpenCounselorList(false); doHaptic('selection'); showToast('Counselor selected'); }}
-                      style={({ pressed }) => [styles.option, { backgroundColor: pressed ? '#F3F4F6' : 'transparent' }]}
-                    >
-                      <ThemedText style={styles.optionText}>{c.name}</ThemedText>
-                      <ThemedText style={styles.optionSubtext}>{c.title}</ThemedText>
-                    </Pressable>
-                  ))}
+                  {counselorsLoading ? (
+                    <View style={{ padding: 20, alignItems: 'center' }}>
+                      <ActivityIndicator size="small" color="#0D8C4F" />
+                      <ThemedText style={{ color: '#6B7280', fontSize: 12, marginTop: 8 }}>Loading counselors...</ThemedText>
+                    </View>
+                  ) : counselors.length === 0 ? (
+                    <View style={{ padding: 20, alignItems: 'center' }}>
+                      <Icon name="user" size={24} color="#9CA3AF" />
+                      <ThemedText style={{ color: '#6B7280', fontSize: 13, marginTop: 8, textAlign: 'center' }}>No counselors available</ThemedText>
+                      <Pressable 
+                        onPress={() => { loadCounselors(); doHaptic('selection'); }}
+                        style={{ marginTop: 12, paddingHorizontal: 16, paddingVertical: 8, backgroundColor: '#F3F4F6', borderRadius: 8 }}
+                      >
+                        <ThemedText style={{ color: '#0D8C4F', fontSize: 13, fontFamily: 'Inter_500Medium' }}>Retry</ThemedText>
+                      </Pressable>
+                    </View>
+                  ) : (
+                    counselors.map((c) => (
+                      <Pressable
+                        key={c.user_id}
+                        onPress={() => { 
+                          setCounselor(c); 
+                          setPreferredCounselor(c.name || c.nickname || c.email || 'Counselor'); 
+                          LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); 
+                          setOpenCounselorList(false); 
+                          doHaptic('selection'); 
+                          showToast('Counselor selected'); 
+                        }}
+                        style={({ pressed }) => [styles.option, { backgroundColor: pressed ? '#F3F4F6' : 'transparent' }]}
+                      >
+                        <ThemedText style={styles.optionText}>{c.name || c.nickname || c.email}</ThemedText>
+                        <ThemedText style={styles.optionSubtext}>{c.title || 'Guidance Counselor'}</ThemedText>
+                      </Pressable>
+                    ))
+                  )}
                 </Animated.View>
               )}
 
@@ -756,7 +861,7 @@ export default function AppointmentsScreen() {
           </View>
         </View>
       </Modal>
-    </ThemedView>
+    </GlobalScreenWrapper>
   );
 }
 

@@ -2,6 +2,7 @@ import { StyleSheet, View, ScrollView, Pressable, Animated, Easing, Platform, Im
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
+import { GlobalScreenWrapper } from '@/components/GlobalScreenWrapper';
 import { Textarea } from '@/components/ui/textarea';
 import { Icon } from '@/components/ui/icon';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -46,8 +47,8 @@ export default function MoodScreen() {
   
   // Responsive font and element sizes
   const titleFontSize = isSmallScreen ? 26 : isMediumScreen ? 28 : 32;
-  const emojiSize = isSmallScreen ? 28 : 32;
-  const emojiCircleSize = isSmallScreen ? 48 : 56;
+  const emojiSize = isSmallScreen ? 26 : 30;
+  const emojiCircleSize = isSmallScreen ? 52 : 60;
   
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const slideAnim = useRef(new Animated.Value(0)).current;
@@ -141,6 +142,12 @@ export default function MoodScreen() {
     'moderate': 'Moderate',
     'high-stress': 'High Stress',
     'very-high': 'Very High',
+  };
+
+  const feelBetterLabelMap: Record<string, string> = {
+    'better': 'Yes',
+    'same': 'Same',
+    'worse': 'No',
   };
 
   type FeelBetterOption = { key: string; emoji: string; label: string; color: string };
@@ -269,12 +276,16 @@ export default function MoodScreen() {
         setSaving(false);
         return;
       }
-      const payload = {
+      const payload: any = {
         mood_level: moodLabelMap[selectedMood] || 'Neutral',
         energy_level: energyLabelMap[selectedEnergy] || 'Moderate',
         stress_level: stressLabelMap[selectedStress] || 'Moderate',
         comment: note && note.trim() ? note.trim() : undefined,
       };
+      // Add feel_better if selected
+      if (selectedFeelBetter) {
+        payload.feel_better = feelBetterLabelMap[selectedFeelBetter] || null;
+      }
       const res = await fetch(`${API}/api/emotional-checkins`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` },
@@ -283,6 +294,10 @@ export default function MoodScreen() {
       if (!res.ok) {
         let detail = '';
         try { const d = await res.json(); detail = d?.detail || d?.message || '' } catch {}
+        // Handle rate limit (429) with friendly message
+        if (res.status === 429) {
+          throw new Error(detail || 'You can check in again in a few hours');
+        }
         throw new Error(detail || `Save failed: ${res.status}`);
       }
       setSubmitted(true);
@@ -321,12 +336,13 @@ export default function MoodScreen() {
     }, [selected]);
 
     return (
-      <Pressable onPress={onPress} onPressIn={handlePressIn} onPressOut={handlePressOut}>
+      <Pressable onPress={onPress} onPressIn={handlePressIn} onPressOut={handlePressOut} style={{ overflow: 'visible' }}>
         <Animated.View style={[
           styles.emojiButton, 
           { 
             width: buttonWidth,
             paddingVertical: isSmallScreen ? 12 : 16,
+            overflow: 'visible',
           }, 
           selected && { backgroundColor: `${color}15`, borderColor: color, borderWidth: 2 }, 
           { transform: [{ scale }] }
@@ -340,7 +356,7 @@ export default function MoodScreen() {
               borderRadius: emojiCircleSize / 2,
             }
           ]}>
-            <ThemedText style={[styles.emojiLarge, { fontSize: emojiSize }]}>{emoji}</ThemedText>
+            <ThemedText style={[styles.emojiLarge, { fontSize: emojiSize, lineHeight: emojiSize * 1.3 }]}>{emoji}</ThemedText>
           </View>
           <ThemedText style={[
             styles.emojiLabel, 
@@ -419,7 +435,7 @@ export default function MoodScreen() {
 
   if (submitted) {
     return (
-      <ThemedView style={[styles.container, { paddingTop: insets.top }]}>
+      <GlobalScreenWrapper backgroundColor="#FFFFFF">
         <View style={styles.successContainer}>
           <Animated.View style={{ alignItems: 'center', gap: 16, opacity: successAnim, transform: [{ scale: successAnim.interpolate({ inputRange: [0, 1], outputRange: [0.8, 1] }) }] }}>
             <View style={styles.successIconWrap}>
@@ -437,12 +453,12 @@ export default function MoodScreen() {
             </View>
           </Animated.View>
         </View>
-      </ThemedView>
+      </GlobalScreenWrapper>
     );
   }
 
   return (
-    <ThemedView style={[styles.container, { paddingTop: insets.top }]}>
+    <GlobalScreenWrapper backgroundColor="#FFFFFF">
       <Animated.View style={[styles.header, makeFadeUp(entrance.header)]}>
         <Pressable onPress={goBack} style={styles.backButton}>
           <Icon name="chevron-left" size={24} color="#111827" />
@@ -451,7 +467,7 @@ export default function MoodScreen() {
         <View style={{ width: 40 }} />
       </Animated.View>
 
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView style={{ flex: 1, backgroundColor: '#FFFFFF' }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <Animated.View style={[styles.stepContainer, makeFadeUp(entrance.content), { opacity: Animated.multiply(entrance.content, fadeAnim), transform: [{ translateX: slideAnim }] }]}>
           {step === 0 && (
             <ScrollView 
@@ -460,7 +476,7 @@ export default function MoodScreen() {
               showsVerticalScrollIndicator={false}
             >
               <View style={[styles.stepHeader, { marginTop: isSmallScreen ? 8 : 12, marginBottom: isSmallScreen ? 8 : 12 }]}>
-                <ThemedText style={[styles.welcomeEmoji, { fontSize: isSmallScreen ? 40 : 48 }]}>👋</ThemedText>
+                <ThemedText style={[styles.welcomeEmoji, { fontSize: isSmallScreen ? 40 : 48, lineHeight: isSmallScreen ? 56 : 64 }]}>👋</ThemedText>
               </View>
               <ThemedText style={[styles.stepTitle, { fontSize: titleFontSize, lineHeight: titleFontSize * 1.25, marginBottom: isSmallScreen ? 20 : 28 }]}>
                 How are you{'\n'}feeling right now?
@@ -488,7 +504,7 @@ export default function MoodScreen() {
               showsVerticalScrollIndicator={false}
             >
               <View style={[styles.stepHeader, { marginTop: isSmallScreen ? 8 : 12, marginBottom: isSmallScreen ? 8 : 12 }]}>
-                <ThemedText style={[styles.selectedEmoji, { fontSize: isSmallScreen ? 40 : 48 }]}>{getSelectedMoodEmoji()}</ThemedText>
+                <ThemedText style={[styles.selectedEmoji, { fontSize: isSmallScreen ? 40 : 48, lineHeight: isSmallScreen ? 56 : 64 }]}>{getSelectedMoodEmoji()}</ThemedText>
               </View>
               <ThemedText style={[styles.stepTitle, { fontSize: titleFontSize, lineHeight: titleFontSize * 1.25, marginBottom: isSmallScreen ? 20 : 28 }]}>
                 What's your{'\n'}energy level?
@@ -515,7 +531,7 @@ export default function MoodScreen() {
               showsVerticalScrollIndicator={false}
             >
               <View style={[styles.stepHeader, { marginTop: isSmallScreen ? 8 : 12, marginBottom: isSmallScreen ? 8 : 12 }]}>
-                <ThemedText style={[styles.selectedEmoji, { fontSize: isSmallScreen ? 40 : 48 }]}>{getSelectedMoodEmoji()}</ThemedText>
+                <ThemedText style={[styles.selectedEmoji, { fontSize: isSmallScreen ? 40 : 48, lineHeight: isSmallScreen ? 56 : 64 }]}>{getSelectedMoodEmoji()}</ThemedText>
               </View>
               <ThemedText style={[styles.stepTitle, { fontSize: titleFontSize, lineHeight: titleFontSize * 1.25, marginBottom: isSmallScreen ? 20 : 28 }]}>
                 How stressed{'\n'}do you feel?
@@ -542,7 +558,7 @@ export default function MoodScreen() {
               showsVerticalScrollIndicator={false}
             >
               <View style={[styles.stepHeader, { marginTop: isSmallScreen ? 8 : 12, marginBottom: isSmallScreen ? 4 : 8 }]}>
-                <ThemedText style={[styles.selectedEmoji, { fontSize: isSmallScreen ? 40 : 48 }]}>{getSelectedMoodEmoji()}</ThemedText>
+                <ThemedText style={[styles.selectedEmoji, { fontSize: isSmallScreen ? 40 : 48, lineHeight: isSmallScreen ? 56 : 64 }]}>{getSelectedMoodEmoji()}</ThemedText>
               </View>
               <ThemedText style={[styles.stepTitleFeelBetter, { fontSize: isSmallScreen ? 24 : 28, lineHeight: isSmallScreen ? 32 : 38 }]}>
                 {displayName ? `${displayName},` : 'Hey,'}{'\n'}do you feel better{'\n'}than yesterday?
@@ -570,7 +586,7 @@ export default function MoodScreen() {
               keyboardShouldPersistTaps="handled"
             >
               <View style={[styles.stepHeader, { marginTop: isSmallScreen ? 8 : 12, marginBottom: isSmallScreen ? 8 : 12 }]}>
-                <ThemedText style={[styles.selectedEmoji, { fontSize: isSmallScreen ? 40 : 48 }]}>{getSelectedMoodEmoji()}</ThemedText>
+                <ThemedText style={[styles.selectedEmoji, { fontSize: isSmallScreen ? 40 : 48, lineHeight: isSmallScreen ? 56 : 64 }]}>{getSelectedMoodEmoji()}</ThemedText>
               </View>
               <ThemedText style={[styles.stepTitle, { fontSize: titleFontSize, lineHeight: titleFontSize * 1.25, marginBottom: isSmallScreen ? 20 : 28 }]}>
                 Anything else{'\n'}on your mind?
@@ -605,7 +621,7 @@ export default function MoodScreen() {
           </Animated.View>
         )}
       </KeyboardAvoidingView>
-    </ThemedView>
+    </GlobalScreenWrapper>
   );
 }
 
@@ -660,12 +676,19 @@ const styles = StyleSheet.create({
   },
   stepHeader: {
     alignItems: 'center',
+    overflow: 'visible',
   },
   selectedEmoji: {
     fontSize: 48,
+    lineHeight: 64,
+    textAlign: 'center',
+    includeFontPadding: false,
   },
   welcomeEmoji: {
     fontSize: 48,
+    lineHeight: 64,
+    textAlign: 'center',
+    includeFontPadding: false,
   },
   checkinBadge: {
     backgroundColor: '#0D8C4F',
@@ -700,6 +723,7 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     justifyContent: 'center',
     alignItems: 'flex-start',
+    overflow: 'visible',
   },
   emojiButton: {
     alignItems: 'center',
@@ -708,14 +732,19 @@ const styles = StyleSheet.create({
     backgroundColor: '#F9FAFB',
     borderWidth: 1,
     borderColor: '#E5E7EB',
+    overflow: 'visible',
   },
   emojiCircle: {
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 6,
+    overflow: 'visible',
   },
   emojiLarge: {
     fontSize: 32,
+    lineHeight: 40,
+    textAlign: 'center',
+    includeFontPadding: false,
   },
   emojiLabel: {
     fontSize: 13,
@@ -741,6 +770,8 @@ const styles = StyleSheet.create({
   },
   chipEmoji: {
     fontSize: 20,
+    lineHeight: 26,
+    includeFontPadding: false,
   },
   chipLabel: {
     fontSize: 15,
@@ -771,7 +802,9 @@ const styles = StyleSheet.create({
   },
   feelBetterEmoji: {
     fontSize: 48,
+    lineHeight: 60,
     marginBottom: 4,
+    includeFontPadding: false,
   },
   feelBetterLabel: {
     fontSize: 16,

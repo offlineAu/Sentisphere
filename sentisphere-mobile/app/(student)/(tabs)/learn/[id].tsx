@@ -6,6 +6,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme'
 import { Colors } from '@/constants/theme'
 import { ThemedView } from '@/components/themed-view'
 import { ThemedText } from '@/components/themed-text'
+import { GlobalScreenWrapper } from '@/components/GlobalScreenWrapper'
 import { Icon } from '@/components/ui/icon'
 import { Image } from 'expo-image'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -47,7 +48,7 @@ export default function LearnTopicScreen() {
   }
 
   return (
-    <ThemedView style={styles.container}>
+    <GlobalScreenWrapper backgroundColor="#FFFFFF">
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         {/* Header */}
         <Animated.View style={makeFadeUp(entranceHeader)}>
@@ -138,7 +139,7 @@ export default function LearnTopicScreen() {
           ))}
         </Animated.View>
       </ScrollView>
-    </ThemedView>
+    </GlobalScreenWrapper>
   )
 }
 

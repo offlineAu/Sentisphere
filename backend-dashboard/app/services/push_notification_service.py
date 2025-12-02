@@ -28,23 +28,23 @@ EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
 # Gentle wellness reminder messages (warm, non-clinical)
 WELLNESS_REMINDER_MESSAGES = [
     {
-        "title": "A Gentle Reminder 💙",
+        "title": "A Gentle Reminder",
         "message": "Hi! If you ever feel like talking to someone, the counselor's office is always open for you."
     },
     {
-        "title": "We're Here For You 🌸",
+        "title": "We're Here For You",
         "message": "Just a friendly reminder that support is always available. The counseling team is happy to chat anytime."
     },
     {
-        "title": "Campus Support 🤝",
+        "title": "Campus Support",
         "message": "Hey there! Remember that the wellness center is always open if you need someone to talk to."
     },
     {
-        "title": "Thinking of You 🌿",
+        "title": "Thinking of You",
         "message": "Hi! The counselor's office door is always open - no appointment needed. Take care!"
     },
     {
-        "title": "You Matter 💜",
+        "title": "You Matter",
         "message": "Just wanted to remind you that support services are available anytime you need them."
     },
 ]
@@ -118,20 +118,33 @@ async def send_expo_push(
             if response.status_code == 200:
                 expo_data = response.json()
                 result["expo_response"] = expo_data
+                logger.info(f"Expo response: {expo_data}")
                 
-                # Check individual ticket status
-                data_list = expo_data.get("data", [])
-                if data_list and len(data_list) > 0:
-                    ticket = data_list[0]
-                    if ticket.get("status") == "ok":
+                # Handle both single response (dict) and batch response (list)
+                data_field = expo_data.get("data")
+                
+                # Normalize to get the ticket - could be dict (single) or list (batch)
+                if isinstance(data_field, dict):
+                    ticket = data_field
+                elif isinstance(data_field, list) and len(data_field) > 0:
+                    ticket = data_field[0]
+                else:
+                    ticket = None
+                
+                if ticket:
+                    ticket_status = ticket.get("status")
+                    logger.info(f"Expo ticket status: {ticket_status}")
+                    if ticket_status == "ok":
                         result["success"] = True
-                        logger.info(f"✓ Push sent successfully to {push_token[:25]}...")
+                        logger.info(f"Push sent successfully to {push_token[:25]}...")
                     else:
-                        result["error"] = ticket.get("message", "Unknown Expo error")
-                        logger.warning(f"Expo ticket error: {result['error']}")
+                        # Error status with details
+                        error_msg = ticket.get("message") or ticket.get("details", {}).get("error") or f"Status: {ticket_status}"
+                        result["error"] = error_msg
+                        logger.warning(f"Expo ticket error: {error_msg}")
                 else:
                     result["success"] = True  # No error reported
-                    logger.info(f"✓ Push sent to {push_token[:25]}...")
+                    logger.info(f"Push sent to {push_token[:25]}...")
             else:
                 result["error"] = f"Expo API returned {response.status_code}: {response.text[:200]}"
                 logger.error(f"Expo API error: {response.status_code}")
@@ -515,15 +528,23 @@ async def send_daily_quote_notifications(mobile_engine) -> Dict[str, Any]:
     
     quote = quote_data["quote"]
     author = quote_data["author"]
-    title = "✨ Daily Inspiration"
+    title = "Daily Inspiration"
     message = f'"{quote}" — {author}'
     
-    # Get all users with push tokens
+    # Get all users with push tokens WHO HAVEN'T received a daily quote in the last 5 minutes
+    # This prevents duplicates when testing with frequent intervals
+    # TODO: Change to INTERVAL 23 HOUR for production (to allow once per day)
     get_users_q = text(
         """
-        SELECT user_id, push_token FROM user
-        WHERE push_token IS NOT NULL AND push_token != ''
-        AND is_active = 1
+        SELECT u.user_id, u.push_token FROM user u
+        WHERE u.push_token IS NOT NULL AND u.push_token != ''
+        AND u.is_active = 1
+        AND NOT EXISTS (
+            SELECT 1 FROM notification n 
+            WHERE n.user_id = u.user_id 
+            AND n.category = 'daily_quote'
+            AND n.created_at > NOW() - INTERVAL 5 MINUTE
+        )
         """
     )
     
@@ -816,3 +837,98 @@ async def send_system_notification(
         category="system",
         source="system"
     )
+
+
+# ============================================================================
+# ALERT MONITORING (Background Job)
+# ============================================================================
+
+async def monitor_alerts_for_wellness_notifications(mobile_engine) -> Dict[str, Any]:
+    """
+    Monitor alerts table for new high-risk alerts that haven't been notified.
+    Sends wellness reminder notifications for any unprocessed alerts.
+    
+    This runs as a scheduled background job every 15 minutes.
+    
+    Returns:
+        Dict with processed count and sent count
+    """
+    # Query for high-risk alerts that haven't been notified yet
+    # Look for alerts created in the last 24 hours that don't have a notification
+    # Note: MariaDB/MySQL uses INTERVAL 24 HOUR syntax (not PostgreSQL's '24 hours')
+    # Alert table uses 'severity' column with values: 'low', 'medium', 'high'
+    query = text("""
+        SELECT a.alert_id, a.user_id, a.created_at, u.push_token, u.nickname
+        FROM alert a
+        JOIN user u ON a.user_id = u.user_id
+        WHERE a.created_at > NOW() - INTERVAL 24 HOUR
+        AND a.severity = 'high'
+        AND u.push_token IS NOT NULL
+        AND u.push_token != ''
+        AND NOT EXISTS (
+            SELECT 1 FROM notification n 
+            WHERE n.category = 'wellness_reminder' 
+            AND n.related_alert_id = a.alert_id 
+            AND n.user_id = a.user_id
+        )
+        ORDER BY a.created_at DESC
+        LIMIT 50
+    """)
+    
+    processed = 0
+    sent = 0
+    errors = []
+    
+    try:
+        with mobile_engine.connect() as conn:
+            # Debug: First check if any high alerts exist at all
+            debug_query = text("SELECT COUNT(*) as cnt FROM alert WHERE severity = 'high'")
+            debug_result = conn.execute(debug_query).fetchone()
+            logger.info(f"[Alert Monitor] Total high-severity alerts in DB: {debug_result[0] if debug_result else 0}")
+            
+            result = conn.execute(query)
+            alerts = result.fetchall()
+            logger.info(f"[Alert Monitor] Found {len(alerts)} unnotified high-risk alerts")
+            
+            for alert in alerts:
+                alert_id = alert[0]
+                user_id = alert[1]
+                push_token = alert[3] if len(alert) > 3 else None
+                nickname = alert[4] if len(alert) > 4 else None
+                processed += 1
+                logger.info(f"[Alert Monitor] Processing alert_id={alert_id} for user {nickname}(id={user_id}), token={push_token[:25] if push_token else 'None'}...")
+                
+                try:
+                    # Send wellness reminder for this alert (skip duplicate check for faster response)
+                    notification_result = await send_wellness_reminder_instantly(
+                        mobile_engine=mobile_engine,
+                        alert_id=alert_id,
+                        user_id=user_id,
+                        skip_duplicate_check=True  # Skip 24h duplicate check for testing
+                    )
+                    
+                    if notification_result.get("success"):
+                        sent += 1
+                        logger.info(f"Sent wellness reminder for alert {alert_id} to user {user_id}")
+                    else:
+                        errors.append(f"Alert {alert_id}: {notification_result.get('error', 'Unknown error')}")
+                        
+                except Exception as e:
+                    errors.append(f"Alert {alert_id}: {str(e)}")
+                    logger.error(f"Failed to send wellness reminder for alert {alert_id}: {e}")
+                    
+    except Exception as e:
+        logger.error(f"Failed to query alerts for monitoring: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "processed": 0,
+            "sent": 0
+        }
+    
+    return {
+        "success": True,
+        "processed": processed,
+        "sent": sent,
+        "errors": errors if errors else None
+    }
