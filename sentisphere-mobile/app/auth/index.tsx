@@ -1,8 +1,9 @@
 import { useEffect, useState, useRef } from 'react'
-import { View, TextInput, StyleSheet, ScrollView, Platform, Animated, Easing, Pressable, LayoutChangeEvent, Image } from 'react-native'
+import { View, TextInput, StyleSheet, ScrollView, Platform, Animated, Easing, Pressable, LayoutChangeEvent, Image, KeyboardAvoidingView, Keyboard } from 'react-native'
 import { LinearGradient } from 'expo-linear-gradient'
 import { ThemedView } from '@/components/themed-view'
 import { ThemedText } from '@/components/themed-text'
+import { GlobalScreenWrapper } from '@/components/GlobalScreenWrapper'
 import { Button } from '@/components/ui/button'
 import { useColorScheme } from '@/hooks/use-color-scheme'
 import { Colors } from '@/constants/theme'
@@ -35,6 +36,8 @@ export default function AuthScreen() {
   const welcomeAnim = useRef(new Animated.Value(0)).current
   const [oopsVisible, setOopsVisible] = useState(false)
   const oopsAnim = useRef(new Animated.Value(0)).current
+  const scrollViewRef = useRef<ScrollView>(null)
+  const nicknameInputRef = useRef<TextInput>(null)
   
 
   const post = async (path: string, body: any) => {
@@ -158,6 +161,8 @@ export default function AuthScreen() {
         showToast('Please enter a nickname (min 3 characters)')
         return
       }
+      // Dismiss keyboard immediately when starting registration
+      Keyboard.dismiss()
       setAttempting(true)
       setStatus('Registering...')
       setSplashPhase('loading')
@@ -183,6 +188,8 @@ export default function AuthScreen() {
         showToast('Please enter your nickname')
         return
       }
+      // Dismiss keyboard immediately when starting login
+      Keyboard.dismiss()
       setAttempting(true)
       setStatus('Signing in...')
       const d = await post('/api/auth/mobile/login', { nickname })
@@ -205,9 +212,33 @@ export default function AuthScreen() {
     }
   }
 
+  // Smooth scroll to input when focused
+  const smoothScrollToInput = (targetY: number) => {
+    Animated.timing(new Animated.Value(0), {
+      toValue: 1,
+      duration: 250,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start()
+    setTimeout(() => {
+      scrollViewRef.current?.scrollTo({ y: targetY, animated: true })
+    }, 50)
+  }
+
   return (
-    <ThemedView style={styles.whiteScreen}>
-      <ScrollView contentContainerStyle={styles.screen} keyboardShouldPersistTaps="handled">
+    <GlobalScreenWrapper backgroundColor="#FFFFFF" topPadding={0}>
+      <KeyboardAvoidingView 
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={{ flex: 1, backgroundColor: '#FFFFFF' }}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 10 : 0}
+      >
+      <ScrollView 
+        ref={scrollViewRef}
+        contentContainerStyle={styles.screen} 
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+      >
         <View style={styles.stack}>
           <View style={{ alignItems: 'center' }}>
             <Image source={require('../../assets/images/Sentisphere Logo Only.png')} style={{ width: 200, height: 200, marginBottom: -20 }} accessibilityLabel="Login" />
@@ -271,11 +302,20 @@ export default function AuthScreen() {
           <View style={styles.field}>
             <ThemedText style={styles.label}>Nickname</ThemedText>
             <TextInput
+              ref={nicknameInputRef}
               placeholder="e.g. Jun"
               placeholderTextColor="#9CA3AF"
               autoCapitalize="none"
+              autoCorrect={false}
               value={nickname}
               onChangeText={setNickname}
+              blurOnSubmit={false}
+              returnKeyType="done"
+              onSubmitEditing={() => {}}
+              onFocus={() => {
+                // Smooth scroll input into view when focused
+                smoothScrollToInput(280)
+              }}
               style={[styles.input, { borderColor: palette.border, color: palette.text }]} />
           </View>
           <View style={styles.colButtons}>
@@ -295,6 +335,7 @@ export default function AuthScreen() {
           </Animated.View>
         </View>
       </ScrollView>
+      </KeyboardAvoidingView>
       
       {/* Animated Toast */}
       {toastMessage && (
@@ -391,7 +432,7 @@ export default function AuthScreen() {
           }
         }}
       />
-    </ThemedView>
+    </GlobalScreenWrapper>
   )
 }
 

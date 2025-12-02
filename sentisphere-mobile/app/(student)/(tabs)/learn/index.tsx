@@ -3,6 +3,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
+import { GlobalScreenWrapper } from '@/components/GlobalScreenWrapper';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -14,7 +15,18 @@ import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Link } from 'expo-router';
 import * as Haptics from 'expo-haptics';
+import * as SecureStore from 'expo-secure-store';
 import { learnTopics } from './data';
+
+const API = process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8010';
+
+// Helper to get auth token
+const getToken = async () => {
+  if (Platform.OS === 'web') {
+    try { return (window as any)?.localStorage?.getItem('auth_token') || null; } catch { return null; }
+  }
+  try { return await SecureStore.getItemAsync('auth_token'); } catch { return null; }
+};
 
 const stats = [
   { key: 'courses', label: 'Courses\nCompleted', value: '12', icon: 'book-open', bg: '#ECFDF5', color: '#10B981' },
@@ -104,43 +116,60 @@ export default function LearnScreen() {
   const hasInProgress = false; // set based on whether the student has any in-progress learning
   const continueProgress = 75; // replace with actual progress value when integrating
 
-  // Saved topics state (per-session for now)
+  // Saved topics state - now persisted to backend
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
+  const [isLoadingSaved, setIsLoadingSaved] = useState(false);
 
-  // Saved dialog state + animations
-  const [savedDialog, setSavedDialog] = useState<{ title?: string; action: 'saved' | 'removed' } | null>(null);
-  const dlgOpacity = useRef(new Animated.Value(0)).current;
-  const dlgScale = useRef(new Animated.Value(0.98)).current;
-  const dlgTranslateY = useRef(new Animated.Value(8)).current;
-  const dlgTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const showSavedDialog = (payload: { title?: string; action: 'saved' | 'removed' }) => {
-    setSavedDialog(payload);
-    dlgOpacity.setValue(0);
-    dlgScale.setValue(0.98);
-    dlgTranslateY.setValue(8);
-    Animated.parallel([
-      Animated.timing(dlgOpacity, { toValue: 1, duration: 200, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-      Animated.timing(dlgScale, { toValue: 1, duration: 200, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-      Animated.timing(dlgTranslateY, { toValue: 0, duration: 200, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-    ]).start();
-    if (dlgTimer.current) clearTimeout(dlgTimer.current);
-    dlgTimer.current = setTimeout(() => hideSavedDialog(), 1600);
-  };
-  const hideSavedDialog = () => {
-    Animated.parallel([
-      Animated.timing(dlgOpacity, { toValue: 0, duration: 160, easing: Easing.in(Easing.quad), useNativeDriver: true }),
-      Animated.timing(dlgScale, { toValue: 0.98, duration: 160, easing: Easing.in(Easing.quad), useNativeDriver: true }),
-      Animated.timing(dlgTranslateY, { toValue: 6, duration: 160, easing: Easing.in(Easing.quad), useNativeDriver: true }),
-    ]).start(() => setSavedDialog(null));
-  };
-  const onViewSaved = () => {
-    hideSavedDialog();
-    const savedIdx = tabs.indexOf('Saved');
-    if (savedIdx >= 0) onTabChange(savedIdx);
+  // Load saved resources from backend on mount
+  const loadSavedResources = useCallback(async () => {
+    try {
+      setIsLoadingSaved(true);
+      const token = await getToken();
+      if (!token) return;
+
+      const res = await fetch(`${API}/api/saved-resources?resource_type=topic`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        const ids = new Set<string>(data.resources?.map((r: any) => r.resource_id) || []);
+        setSavedIds(ids);
+      }
+    } catch (e) {
+      console.error('Failed to load saved resources:', e);
+    } finally {
+      setIsLoadingSaved(false);
+    }
+  }, []);
+
+  // Load saved resources when screen focuses
+  useFocusEffect(
+    useCallback(() => {
+      loadSavedResources();
+      return () => {};
+    }, [loadSavedResources])
+  );
+
+  // Toast state + animation (matching journal/appointments style)
+  const toast = useRef(new Animated.Value(0)).current;
+  const [toastText, setToastText] = useState('');
+  const [toastType, setToastType] = useState<'saved' | 'removed'>('saved');
+  const showToast = (text: string, type: 'saved' | 'removed' = 'saved') => {
+    setToastText(text);
+    setToastType(type);
+    Animated.timing(toast, { toValue: 1, duration: 220, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start(() => {
+      setTimeout(() => {
+        Animated.timing(toast, { toValue: 0, duration: 220, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+      }, 1200);
+    });
   };
 
-  const toggleSave = (id: string) => {
+  const toggleSave = async (id: string) => {
     const wasSaved = savedIds.has(id);
+    const c = courses.find((x) => x.id === id);
+    
+    // Optimistic update
     const next = new Set(savedIds);
     if (wasSaved) {
       next.delete(id);
@@ -148,13 +177,55 @@ export default function LearnScreen() {
       next.add(id);
     }
     setSavedIds(next);
-    const c = courses.find((x) => x.id === id);
+
+    // Show haptic feedback and toast
     if (wasSaved) {
       if (Platform.OS !== 'web') { try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning); } catch {} }
-      showSavedDialog({ title: c?.title, action: 'removed' });
+      showToast('Removed from saved', 'removed');
     } else {
       if (Platform.OS !== 'web') { try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {} }
-      showSavedDialog({ title: c?.title, action: 'saved' });
+      showToast('Saved to collection', 'saved');
+    }
+
+    // Persist to backend
+    try {
+      const token = await getToken();
+      if (!token) return;
+
+      if (wasSaved) {
+        // Remove from saved
+        await fetch(`${API}/api/saved-resources/${id}?resource_type=topic`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      } else {
+        // Add to saved
+        await fetch(`${API}/api/saved-resources`, {
+          method: 'POST',
+          headers: { 
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            resource_type: 'topic',
+            resource_id: id,
+            title: c?.title,
+            metadata: { description: c?.description, tags: c?.tags },
+          }),
+        });
+      }
+    } catch (e) {
+      console.error('Failed to sync saved resource:', e);
+      // Revert optimistic update on error
+      if (wasSaved) {
+        setSavedIds(prev => new Set([...prev, id]));
+      } else {
+        setSavedIds(prev => {
+          const reverted = new Set(prev);
+          reverted.delete(id);
+          return reverted;
+        });
+      }
     }
   };
 
@@ -279,7 +350,7 @@ export default function LearnScreen() {
   };
 
   return (
-    <ThemedView style={styles.container}>
+    <GlobalScreenWrapper backgroundColor="#FFFFFF">
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         {/* Header */}
         <Animated.View style={[styles.headerWrap, makeFadeUp(entrance.header)]}>
@@ -360,62 +431,42 @@ export default function LearnScreen() {
         
       </ScrollView>
 
-      {/* Saved confirmation dialog */}
-      {savedDialog && (
-        <Animated.View
-          pointerEvents="auto"
-          style={[
-            styles.savedDialogWrap,
-            { opacity: dlgOpacity, transform: [{ translateY: dlgTranslateY }, { scale: dlgScale }] },
-          ]}
-        >
-          <Pressable
-            accessibilityLabel={savedDialog.action === 'saved' ? 'View saved topics' : 'Dismiss notification'}
-            onPress={() => {
-              if (Platform.OS !== 'web') { try { Haptics.selectionAsync(); } catch {} }
-              savedDialog.action === 'saved' ? onViewSaved() : hideSavedDialog();
-            }}
-            style={styles.savedDialogCard}
-          >
-            <View
-              style={[
-                styles.savedDialogIcon,
-                savedDialog.action === 'removed'
-                  ? { backgroundColor: '#FEE2E2' }
-                  : { backgroundColor: palette.learningAccent },
-              ]}
-            >
-              <Icon
-                name="bookmark"
-                size={14}
-                color={savedDialog.action === 'removed' ? '#B91C1C' : '#FFFFFF'}
-              />
-            </View>
-            <View style={styles.savedDialogTextWrap}>
-              <ThemedText
-                style={[
-                  styles.savedDialogTitle,
-                  savedDialog.action === 'removed' ? { color: '#B91C1C' } : null,
-                ]}
-              >
-                {savedDialog.action === 'removed' ? 'Removed' : 'Saved'}
-              </ThemedText>
-              {!!savedDialog.title && (
-                <ThemedText style={[styles.savedDialogSubtitle, { color: palette.muted }]} numberOfLines={1}>
-                  {savedDialog.title}
-                </ThemedText>
-              )}
-            </View>
-            {savedDialog.action === 'saved' && (
-              <View style={styles.savedDialogAction}>
-                <ThemedText style={[styles.savedDialogActionText, { color: palette.learningAccent }]}>View</ThemedText>
-                <Icon name="arrow-right" size={14} color={palette.learningAccent} />
-              </View>
-            )}
-          </Pressable>
-        </Animated.View>
-      )}
-    </ThemedView>
+      {/* Toast notification (matching journal/appointments style) */}
+      <Animated.View
+        pointerEvents="none"
+        style={{
+          position: 'absolute',
+          left: 16,
+          right: 16,
+          bottom: 24,
+          transform: [{ translateY: toast.interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }],
+          opacity: toast,
+        }}
+      >
+        <View style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 10,
+          paddingVertical: 10,
+          paddingHorizontal: 14,
+          borderRadius: 12,
+          backgroundColor: '#111827',
+        }}>
+          <Animated.View style={{
+            width: 22,
+            height: 22,
+            borderRadius: 11,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: toastType === 'removed' ? '#DC2626' : '#10B981',
+            transform: [{ scale: toast.interpolate({ inputRange: [0, 1], outputRange: [0.8, 1] }) }],
+          }}>
+            <Icon name={toastType === 'removed' ? 'bookmark' : 'check-circle'} size={14} color="#FFFFFF" />
+          </Animated.View>
+          <ThemedText style={{ color: '#FFFFFF' }}>{toastText || 'Done'}</ThemedText>
+        </View>
+      </Animated.View>
+    </GlobalScreenWrapper>
   );
 }
 
@@ -499,58 +550,5 @@ const styles = StyleSheet.create({
   metaRowWrap: { flexDirection: 'row', alignItems: 'center', gap: 16 },
   emptyText: { fontSize: 13 },
   listWrap: { gap: 12 },
-  // Saved dialog styles
-  savedDialogWrap: {
-    position: 'absolute',
-    left: 16,
-    right: 16,
-    bottom: 24,
-    zIndex: 50,
-  },
-  savedDialogCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    borderRadius: 12,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    // subtle shadow
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 2,
-  },
-  savedDialogIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 10,
-  },
-  savedDialogTextWrap: {
-    flex: 1,
-    gap: 2,
-  },
-  savedDialogTitle: {
-    fontSize: 14,
-    fontFamily: 'Inter_600SemiBold',
-    color: '#111827',
-  },
-  savedDialogSubtitle: {
-    fontSize: 12,
-  },
-  savedDialogAction: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginLeft: 8,
-  },
-  savedDialogActionText: {
-    fontSize: 13,
-    fontFamily: 'Inter_600SemiBold',
-  },
 });
 
