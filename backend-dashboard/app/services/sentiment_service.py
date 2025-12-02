@@ -10,7 +10,7 @@ from app.models.emotional_checkin import EmotionalCheckin
 from app.models.journal import Journal
 from app.models.journal_sentiment import JournalSentiment
 from app.schemas.sentiment import SentimentResult
-from app.utils.nlp_loader import SentimentOutput, analyze_text
+from app.utils.nlp_loader import SentimentOutput, analyze_text, analyze_checkin_text
 from app.utils.text_cleaning import clean_text
 
 
@@ -68,7 +68,37 @@ class SentimentService:
 
     @classmethod
     def _persist_checkin_sentiment(cls, db: Session, checkin: EmotionalCheckin) -> CheckinSentiment:
-        prediction = cls._predict(checkin.comment or "")
+        """
+        Analyze and persist sentiment for an emotional check-in.
+        
+        Uses context-aware analysis that integrates the user's reported
+        mood, energy, stress, and feel_better state to prevent contradictions.
+        """
+        # Extract user context from the check-in
+        mood_level = None
+        energy_level = None
+        stress_level = None
+        feel_better = None
+        
+        # Get enum values as strings
+        if checkin.mood_level:
+            mood_level = checkin.mood_level.value if hasattr(checkin.mood_level, 'value') else str(checkin.mood_level)
+        if checkin.energy_level:
+            energy_level = checkin.energy_level.value if hasattr(checkin.energy_level, 'value') else str(checkin.energy_level)
+        if checkin.stress_level:
+            stress_level = checkin.stress_level.value if hasattr(checkin.stress_level, 'value') else str(checkin.stress_level)
+        if checkin.feel_better:
+            feel_better = checkin.feel_better.value if hasattr(checkin.feel_better, 'value') else str(checkin.feel_better)
+        
+        # Use context-aware analysis
+        prediction = analyze_checkin_text(
+            text=checkin.comment or "",
+            mood_level=mood_level,
+            energy_level=energy_level,
+            stress_level=stress_level,
+            feel_better=feel_better,
+        )
+        
         sentiment = CheckinSentiment(
             checkin_id=checkin.checkin_id,
             sentiment=prediction.sentiment,

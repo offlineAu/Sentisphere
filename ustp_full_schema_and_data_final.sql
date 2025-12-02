@@ -4,7 +4,11 @@
 SET FOREIGN_KEY_CHECKS=0;
 DROP TABLE IF EXISTS saved_resources, appointment_log, messages, conversations, user_activities, resource_log, notification, alert, checkin_sentiment, emotional_checkin, journal_sentiment, journal, counselor_profile, user, ai_insights;
 
--- SCHEMA
+SET FOREIGN_KEY_CHECKS=0;
+
+-- ============================
+-- USER TABLE
+-- ============================
 CREATE TABLE user (
     user_id INT PRIMARY KEY AUTO_INCREMENT,
     email VARCHAR(100) UNIQUE DEFAULT NULL,
@@ -17,6 +21,10 @@ CREATE TABLE user (
     is_active BOOLEAN DEFAULT TRUE,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+-- ============================
+-- COUNSELOR PROFILE
+-- ============================
 CREATE TABLE counselor_profile (
     user_id INT PRIMARY KEY,
     department VARCHAR(100),
@@ -32,6 +40,10 @@ CREATE TABLE counselor_profile (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES user(user_id)
 );
+
+-- ============================
+-- JOURNAL
+-- ============================
 CREATE TABLE journal (
     journal_id INT PRIMARY KEY AUTO_INCREMENT,
     user_id INT,
@@ -40,6 +52,7 @@ CREATE TABLE journal (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES user(user_id)
 );
+
 CREATE TABLE journal_sentiment (
     journal_sentiment_id INT PRIMARY KEY AUTO_INCREMENT,
     journal_id INT,
@@ -50,6 +63,10 @@ CREATE TABLE journal_sentiment (
     analyzed_at DATETIME,
     FOREIGN KEY (journal_id) REFERENCES journal(journal_id)
 );
+
+-- ============================
+-- EMOTIONAL CHECKINS
+-- ============================
 CREATE TABLE emotional_checkin (
     checkin_id INT PRIMARY KEY AUTO_INCREMENT,
     user_id INT,
@@ -61,6 +78,7 @@ CREATE TABLE emotional_checkin (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES user(user_id)
 );
+
 CREATE TABLE checkin_sentiment (
     checkin_sentiment_id INT PRIMARY KEY AUTO_INCREMENT,
     checkin_id INT,
@@ -86,6 +104,41 @@ CREATE TABLE alert (
     FOREIGN KEY (assigned_to) REFERENCES user(user_id)
 );
 
+-- ============================
+-- ALERT TABLE (UPDATED)
+-- ============================
+CREATE TABLE alert (
+    alert_id INT PRIMARY KEY AUTO_INCREMENT,
+
+    user_id INT NOT NULL,                -- student
+    reason VARCHAR(255) NOT NULL,
+
+    severity ENUM('low', 'medium', 'high') NOT NULL,
+
+    assigned_to INT NULL,                -- counselor (also from user table)
+
+    status ENUM('open', 'in_progress', 'resolved') NOT NULL DEFAULT 'open',
+
+    created_at DATETIME NOT NULL,
+    resolved_at DATETIME NULL,
+
+    INDEX idx_user_id (user_id),
+    INDEX idx_assigned_to (assigned_to),
+    INDEX idx_severity (severity),
+    INDEX idx_status (status),
+
+    CONSTRAINT fk_alert_user
+        FOREIGN KEY (user_id) REFERENCES user(user_id)
+        ON DELETE CASCADE ON UPDATE CASCADE,
+
+    CONSTRAINT fk_alert_assigned_to
+        FOREIGN KEY (assigned_to) REFERENCES user(user_id)
+        ON DELETE SET NULL ON UPDATE CASCADE
+);
+
+-- ============================
+-- NOTIFICATIONS
+-- ============================
 CREATE TABLE `notification` (
     `id` INT AUTO_INCREMENT PRIMARY KEY,
     `user_id` INT NOT NULL,
@@ -111,12 +164,19 @@ CREATE TABLE `notification` (
     `is_read` BOOLEAN DEFAULT FALSE,
     `read_at` DATETIME NULL,
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+
     CONSTRAINT `fk_notification_user`
-        FOREIGN KEY (`user_id`) REFERENCES `user`(`user_id`),
+        FOREIGN KEY (`user_id`) REFERENCES `user`(`user_id`)
+        ON DELETE CASCADE,
+
     CONSTRAINT `fk_notification_alert`
         FOREIGN KEY (`related_alert_id`) REFERENCES `alert`(`alert_id`)
+        ON DELETE SET NULL
 );
 
+-- ============================
+-- RESOURCE LOG
+-- ============================
 CREATE TABLE resource_log (
     resource_id INT PRIMARY KEY AUTO_INCREMENT,
     title VARCHAR(100),
@@ -124,6 +184,10 @@ CREATE TABLE resource_log (
     category VARCHAR(50),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+-- ============================
+-- USER ACTIVITIES
+-- ============================
 CREATE TABLE user_activities (
     activity_id INT PRIMARY KEY AUTO_INCREMENT,
     user_id INT,
@@ -136,6 +200,10 @@ CREATE TABLE user_activities (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES user(user_id)
 );
+
+-- ============================
+-- CONVERSATIONS / MESSAGES
+-- ============================
 CREATE TABLE conversations (
     conversation_id INT PRIMARY KEY AUTO_INCREMENT,
     initiator_user_id INT NOT NULL,
@@ -145,9 +213,11 @@ CREATE TABLE conversations (
     status ENUM('open', 'ended') DEFAULT 'open',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     last_activity_at DATETIME,
+
     FOREIGN KEY (initiator_user_id) REFERENCES user(user_id),
     FOREIGN KEY (counselor_id) REFERENCES user(user_id)
 );
+
 CREATE TABLE messages (
     message_id INT PRIMARY KEY AUTO_INCREMENT,
     conversation_id INT NOT NULL,
@@ -158,6 +228,10 @@ CREATE TABLE messages (
     FOREIGN KEY (conversation_id) REFERENCES conversations(conversation_id),
     FOREIGN KEY (sender_id) REFERENCES user(user_id)
 );
+
+-- ============================
+-- APPOINTMENT LOG
+-- ============================
 CREATE TABLE appointment_log (
     log_id INT PRIMARY KEY AUTO_INCREMENT,
     user_id INT,
@@ -167,15 +241,18 @@ CREATE TABLE appointment_log (
     FOREIGN KEY (user_id) REFERENCES user(user_id)
 );
 
+-- ============================
+-- AI INSIGHTS
+-- ============================
 CREATE TABLE ai_insights (
   insight_id INT PRIMARY KEY AUTO_INCREMENT,
-  user_id INT DEFAULT NULL, -- NULL = platform-level insights
+  user_id INT DEFAULT NULL,
   type ENUM('weekly', 'behavioral') NOT NULL,
   timeframe_start DATE NOT NULL,
   timeframe_end DATE NOT NULL,
-  data JSON NOT NULL, -- structured blob: {summary, mood_trends, top_concerns, metrics, metadata}
+  data JSON NOT NULL,
   risk_level ENUM('low','medium','high','critical') DEFAULT 'low',
-  generated_by VARCHAR(100), -- e.g., "fastapi_v1"
+  generated_by VARCHAR(100),
   generated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uniq_insight (user_id, type, timeframe_start, timeframe_end),
   FOREIGN KEY (user_id) REFERENCES user(user_id)
@@ -203,6 +280,7 @@ CREATE INDEX idx_notification_category ON notification(category);
 CREATE INDEX idx_saved_resources_user ON saved_resources(user_id);
 
 SET FOREIGN_KEY_CHECKS=1;
+
 
 -- INSERT USERS
 INSERT INTO user (user_id, email, name, role, password_hash, nickname, last_login, is_active, created_at) VALUES

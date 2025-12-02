@@ -5,13 +5,14 @@ from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.emotional_checkin import EnergyLevel, MoodLevel, StressLevel
+from app.models.emotional_checkin import EnergyLevel, FeelBetter, MoodLevel, StressLevel
 
 
 class EmotionalCheckinBase(BaseModel):
     mood_level: MoodLevel
     energy_level: EnergyLevel
     stress_level: StressLevel
+    feel_better: Optional[FeelBetter] = None
     comment: Optional[str] = None
 
 
@@ -24,6 +25,7 @@ class EmotionalCheckinUpdate(BaseModel):
     mood_level: Optional[MoodLevel] = None
     energy_level: Optional[EnergyLevel] = None
     stress_level: Optional[StressLevel] = None
+    feel_better: Optional[FeelBetter] = None
 
 
 class EmotionalCheckin(EmotionalCheckinBase):

@@ -1,0 +1,48 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv
+venv/
+ENV/
+env/
+.eggs/
+*.egg-info/
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local env files (secrets)
+.env
+.env.local
+.env.*.local
+
+# Docker
+docker-compose*.yml
+Dockerfile.dev
+
+# Misc
+*.log
+*.md
+!README.md
+.DS_Store
+Thumbs.db
+
+# Node (if any)
+node_modules/
+package-lock.json
