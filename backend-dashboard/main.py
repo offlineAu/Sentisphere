@@ -1495,13 +1495,15 @@ def mood_trend(
             WEEK(created_at, 3) - WEEK(DATE_SUB(created_at, INTERVAL DAYOFMONTH(created_at)-1 DAY), 3) + 1 AS week_in_month,
             ROUND(AVG(
                 CASE mood_level
-                    WHEN 'Very Sad' THEN 1
-                    WHEN 'Sad' THEN 2
-                    WHEN 'Neutral' THEN 3
-                    WHEN 'Good' THEN 4
-                    WHEN 'Happy' THEN 5
-                    WHEN 'Very Happy' THEN 6
-                    WHEN 'Excellent' THEN 7
+                    WHEN 'Terrible' THEN 1
+                    WHEN 'Bad' THEN 2
+                    WHEN 'Upset' THEN 3
+                    WHEN 'Anxious' THEN 4
+                    WHEN 'Meh' THEN 5
+                    WHEN 'Okay' THEN 6
+                    WHEN 'Great' THEN 7
+                    WHEN 'Loved' THEN 8
+                    WHEN 'Awesome' THEN 9
                     ELSE NULL
                 END
             ), 2) AS avgMood
@@ -1633,7 +1635,7 @@ def high_risk_flags(
     start_dt, end_dt = parse_global_range(range, start, end)
     alert_count = db.scalar(
         select(func.count(Alert.alert_id)).where(
-            Alert.severity.in_([AlertSeverity.HIGH, AlertSeverity.CRITICAL]),
+            Alert.severity == AlertSeverity.HIGH,
             Alert.status.in_([AlertStatus.OPEN, AlertStatus.IN_PROGRESS]),
             Alert.created_at >= start_dt,
             Alert.created_at <= end_dt,
@@ -3286,20 +3288,20 @@ def _weekly_wellness_index(start_dt: datetime, end_dt: datetime) -> int:
         """
         SELECT ROUND(AVG(
             0.4 * (CASE mood_level
-                WHEN 'Very Sad' THEN 0
-                WHEN 'Sad' THEN 17
-                WHEN 'Neutral' THEN 33
-                WHEN 'Good' THEN 50
-                WHEN 'Happy' THEN 67
-                WHEN 'Very Happy' THEN 83
-                WHEN 'Excellent' THEN 100
+                WHEN 'Terrible' THEN 0
+                WHEN 'Bad' THEN 12
+                WHEN 'Upset' THEN 25
+                WHEN 'Anxious' THEN 37
+                WHEN 'Meh' THEN 50
+                WHEN 'Okay' THEN 62
+                WHEN 'Great' THEN 75
+                WHEN 'Loved' THEN 87
+                WHEN 'Awesome' THEN 100
                 ELSE NULL END)
           + 0.3 * (CASE energy_level
-                WHEN 'Very Low' THEN 0
-                WHEN 'Low' THEN 25
+                WHEN 'Low' THEN 0
                 WHEN 'Moderate' THEN 50
-                WHEN 'High' THEN 75
-                WHEN 'Very High' THEN 100
+                WHEN 'High' THEN 100
                 ELSE NULL END)
           + 0.3 * (100 - (CASE stress_level
                 WHEN 'No Stress' THEN 0
@@ -3330,20 +3332,20 @@ def _trend_detail(start_dt: datetime, end_dt: datetime) -> Dict[str, float]:
         """
         SELECT
             AVG(CASE mood_level
-                WHEN 'Very Sad' THEN 1
-                WHEN 'Sad' THEN 2
-                WHEN 'Neutral' THEN 3
-                WHEN 'Good' THEN 4
-                WHEN 'Happy' THEN 5
-                WHEN 'Very Happy' THEN 6
-                WHEN 'Excellent' THEN 7
+                WHEN 'Terrible' THEN 1
+                WHEN 'Bad' THEN 2
+                WHEN 'Upset' THEN 3
+                WHEN 'Anxious' THEN 4
+                WHEN 'Meh' THEN 5
+                WHEN 'Okay' THEN 6
+                WHEN 'Great' THEN 7
+                WHEN 'Loved' THEN 8
+                WHEN 'Awesome' THEN 9
                 ELSE NULL END) AS avg_mood,
             AVG(CASE energy_level
-                WHEN 'Very Low' THEN 1
-                WHEN 'Low' THEN 2
-                WHEN 'Moderate' THEN 3
-                WHEN 'High' THEN 4
-                WHEN 'Very High' THEN 5
+                WHEN 'Low' THEN 1
+                WHEN 'Moderate' THEN 2
+                WHEN 'High' THEN 3
                 ELSE NULL END) AS avg_energy,
             AVG(CASE stress_level
                 WHEN 'No Stress' THEN 1
@@ -3902,13 +3904,15 @@ def get_top_stats(
         """
         SELECT ROUND(AVG(
             CASE mood_level
-                WHEN 'Very Sad' THEN 1
-                WHEN 'Sad' THEN 2
-                WHEN 'Neutral' THEN 3
-                WHEN 'Good' THEN 4
-                WHEN 'Happy' THEN 5
-                WHEN 'Very Happy' THEN 6
-                WHEN 'Excellent' THEN 7
+                WHEN 'Terrible' THEN 1
+                WHEN 'Bad' THEN 2
+                WHEN 'Upset' THEN 3
+                WHEN 'Anxious' THEN 4
+                WHEN 'Meh' THEN 5
+                WHEN 'Okay' THEN 6
+                WHEN 'Great' THEN 7
+                WHEN 'Loved' THEN 8
+                WHEN 'Awesome' THEN 9
                 ELSE NULL
             END
         ), 2) AS avg_wellness_score
@@ -3954,13 +3958,15 @@ def get_attention_students(
             COALESCE(a.severity, 'low') AS risk,
             ROUND(AVG(
                 CASE e.mood_level
-                    WHEN 'Very Sad' THEN 1
-                    WHEN 'Sad' THEN 2
-                    WHEN 'Neutral' THEN 3
-                    WHEN 'Good' THEN 4
-                    WHEN 'Happy' THEN 5
-                    WHEN 'Very Happy' THEN 6
-                    WHEN 'Excellent' THEN 7
+                    WHEN 'Terrible' THEN 1
+                    WHEN 'Bad' THEN 2
+                    WHEN 'Upset' THEN 3
+                    WHEN 'Anxious' THEN 4
+                    WHEN 'Meh' THEN 5
+                    WHEN 'Okay' THEN 6
+                    WHEN 'Great' THEN 7
+                    WHEN 'Loved' THEN 8
+                    WHEN 'Awesome' THEN 9
                     ELSE NULL
                 END
             ), 1) AS score,
