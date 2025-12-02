@@ -1,7 +1,8 @@
 -- USTP full schema + medium mock data (final)
 -- Generated: 2025-10-27 12:00:00
+-- Updated: 2025-12-02 - Added alert table (before notification), saved_resources table, and indexes
 SET FOREIGN_KEY_CHECKS=0;
-DROP TABLE IF EXISTS appointment_log, messages, conversations, alert, user_activities, resource_log, notification, checkin_sentiment, emotional_checkin, journal_sentiment, journal, counselor_profile, user, ai_insights;
+DROP TABLE IF EXISTS saved_resources, appointment_log, messages, conversations, user_activities, resource_log, notification, alert, checkin_sentiment, emotional_checkin, journal_sentiment, journal, counselor_profile, user, ai_insights;
 
 SET FOREIGN_KEY_CHECKS=0;
 
@@ -87,6 +88,20 @@ CREATE TABLE checkin_sentiment (
     model_version VARCHAR(50),
     analyzed_at DATETIME,
     FOREIGN KEY (checkin_id) REFERENCES emotional_checkin(checkin_id)
+);
+
+-- Alert table (must be created BEFORE notification due to foreign key)
+CREATE TABLE alert (
+    alert_id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT NOT NULL,
+    reason TEXT,
+    severity ENUM('low', 'medium', 'high') DEFAULT 'low',
+    assigned_to INT,
+    status ENUM('open', 'in_progress', 'resolved') DEFAULT 'open',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    resolved_at DATETIME,
+    FOREIGN KEY (user_id) REFERENCES user(user_id),
+    FOREIGN KEY (assigned_to) REFERENCES user(user_id)
 );
 
 -- ============================
@@ -242,6 +257,27 @@ CREATE TABLE ai_insights (
   UNIQUE KEY uniq_insight (user_id, type, timeframe_start, timeframe_end),
   FOREIGN KEY (user_id) REFERENCES user(user_id)
 );
+
+-- Saved resources for user's bookmarked learning materials
+CREATE TABLE saved_resources (
+    saved_id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT NOT NULL,
+    resource_type VARCHAR(50) NOT NULL DEFAULT 'topic',
+    resource_id VARCHAR(100) NOT NULL,
+    title VARCHAR(255),
+    metadata JSON,
+    saved_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_saved_resources_user
+        FOREIGN KEY (user_id) REFERENCES user(user_id) ON DELETE CASCADE,
+    UNIQUE KEY unique_user_resource (user_id, resource_type, resource_id)
+);
+
+-- Indexes for better query performance
+CREATE INDEX idx_alert_user ON alert(user_id);
+CREATE INDEX idx_alert_severity ON alert(severity);
+CREATE INDEX idx_notification_user ON notification(user_id);
+CREATE INDEX idx_notification_category ON notification(category);
+CREATE INDEX idx_saved_resources_user ON saved_resources(user_id);
 
 SET FOREIGN_KEY_CHECKS=1;
 
