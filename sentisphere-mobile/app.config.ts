@@ -6,7 +6,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   slug: "sentisphere-mobile",
   version: "1.0.0",
   orientation: "portrait",
-  icon: "./assets/images/icon.png",
+  icon: "./assets/images/Sentisphere Logo Only.png",
   scheme: "sentispheremobile",
   userInterfaceStyle: "light",
   newArchEnabled: true,
@@ -47,8 +47,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     [
       "expo-splash-screen",
       {
-        image: "./assets/images/splash-icon.png",
-        imageWidth: 200,
+        image: "./assets/images/Sentisphere Logo Only.png",
+        imageWidth: 180,
         resizeMode: "contain",
         backgroundColor: "#ffffff",
         dark: {
@@ -62,7 +62,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     [
       "expo-notifications",
       {
-        icon: "./assets/images/icon.png",
+        icon: "./assets/images/Sentisphere Logo Only.png",
         color: "#10B981",
         sounds: []
       }
