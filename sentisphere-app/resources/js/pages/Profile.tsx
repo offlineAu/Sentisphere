@@ -35,6 +35,17 @@ const PH_LANGS = [
   'Chavacano', 'Kinaray-a', 'Surigaonon'
 ];
 
+// Department options
+const DEPARTMENTS = [
+  'College of Engineering and Architecture',
+  'College of Information Technology and Computing',
+  'College of Science and Mathematics',
+  'College of Science and Technology Education',
+  'College of Technology',
+  'College of Medicine',
+  'Senior High School'
+];
+
 type InfoRowProps = {
   icon: ReactNode;
   label?: string;
@@ -99,6 +110,7 @@ function Profile() {
   });
   const [isDirty, setIsDirty] = useState(false);
   const [otherLanguages, setOtherLanguages] = useState<string[]>([]);
+  const [selectedLanguages, setSelectedLanguages] = useState<string[]>([]);
 
 
   useEffect(() => {
@@ -232,7 +244,12 @@ function Profile() {
 
   const addSlot = () => {
     setAvailabilitySlots((arr) => {
-      const next: AvailabilitySlot[] = [...arr, { day: 'Monday', start: '09:00', end: '17:00' }];
+      // Find first available day from Monday-Saturday that's not already used
+      const usedDays = new Set(arr.map(s => s.day));
+      const availableDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      const nextDay = availableDays.find(d => !usedDays.has(d)) || 'Monday';
+      
+      const next: AvailabilitySlot[] = [...arr, { day: nextDay, start: '09:00', end: '17:00' }];
       const dayOrder: Record<string, number> = {
         Monday: 1,
         Tuesday: 2,
@@ -240,7 +257,6 @@ function Profile() {
         Thursday: 4,
         Friday: 5,
         Saturday: 6,
-        Sunday: 7,
       };
       return next.sort((a, b) => {
         const da = dayOrder[a.day] || 99;
@@ -265,7 +281,6 @@ function Profile() {
         Thursday: 4,
         Friday: 5,
         Saturday: 6,
-        Sunday: 7,
       };
       return next.sort((a, b) => {
         const da = dayOrder[a.day] || 99;
@@ -274,6 +289,7 @@ function Profile() {
         return a.start.localeCompare(b.start);
       });
     });
+    setIsDirty(true);
   };
 
   const save = async () => {
@@ -345,45 +361,44 @@ function Profile() {
 
   return (
     <main
-      className={`transition-all duration-200 min-h-screen space-y-6 pt-6 pr-6 pb-6 pl-3 sm:pl-5`}
-      style={{ backgroundColor: "transparent" }}
+      className={`transition-all duration-200 min-h-screen space-y-6 pt-6 pr-6 pb-6 pl-3 sm:pl-5 dark:bg-neutral-900`}
     >
       <div className="ml-2">
-        <h1 className="text-2xl font-bold text-primary">Profile</h1>
-        <p className="text-sm text-[#6b7280]">Manage your professional profile and settings</p>
+        <h1 className="text-2xl font-bold text-primary dark:text-emerald-400">Profile</h1>
+        <p className="text-sm text-[#6b7280] dark:text-neutral-400">Manage your professional profile and settings</p>
         <div />
-        {error && <div className="text-red-600 text-sm">{error}</div>}
+        {error && <div className="text-red-600 dark:text-red-400 text-sm">{error}</div>}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-4">
           <div>
             <div
-              className={`${styles.profileCard} bg-white rounded-2xl shadow-sm px-6 py-6 flex flex-col gap-6`}
+              className={`${styles.profileCard} bg-white dark:bg-neutral-800 rounded-2xl shadow-sm px-6 py-6 flex flex-col gap-6`}
             >
               <div className="flex flex-col items-center text-center gap-3">
-                <div className="flex h-24 w-24 items-center justify-center rounded-full bg-[#e5e7eb]">
-                  <UserIcon className="h-10 w-10 text-[#6b7280]" />
+                <div className="flex h-24 w-24 items-center justify-center rounded-full bg-[#e5e7eb] dark:bg-neutral-700">
+                  <UserIcon className="h-10 w-10 text-[#6b7280] dark:text-neutral-400" />
                 </div>
                 <div>
-                  <div className="text-lg font-semibold text-[#111827]">
+                  <div className="text-lg font-semibold text-[#111827] dark:text-neutral-100">
                     {data.name || 'Unnamed Counselor'}
                   </div>
-                  <div className="text-sm text-[#6b7280]">
+                  <div className="text-sm text-[#6b7280] dark:text-neutral-400">
                     {data.education || 'Add your education details'}
                   </div>
                 </div>
                 {data.organization && (
-                  <div className="mt-1 inline-flex items-center rounded-full bg-[#f3f4f6] px-3 py-1 text-xs font-medium text-[#374151]">
+                  <div className="mt-1 inline-flex items-center rounded-full bg-[#f3f4f6] dark:bg-neutral-700 px-3 py-1 text-xs font-medium text-[#374151] dark:text-neutral-300">
                     {data.organization}
                   </div>
                 )}
               </div>
 
-              <div className="h-px bg-[#e5e7eb]" />
+              <div className="h-px bg-[#e5e7eb] dark:bg-neutral-700" />
 
               <div className="space-y-6">
                 <InfoSection title="Contact">
                   <InfoRow icon={<Mail className="h-4 w-4 text-[#374151]" />} label="Email" value={data.email || '—'} />
-                  <InfoRow icon={<Phone className="h-4 w-4 text-[#374151]" />} label="Primary Phone" value={data.phone || '—'} />
-                  <InfoRow icon={<PhoneCall className="h-4 w-4 text-[#374151]" />} label="Alternate Contact" value={data.contact_number || undefined} />
+                  <InfoRow icon={<Phone className="h-4 w-4 text-[#374151]" />} label="Primary Contact" value={data.phone || '—'} />
+                  <InfoRow icon={<PhoneCall className="h-4 w-4 text-[#374151]" />} label="Alternate Contact" value={data.contact_number || '—'} />
                 </InfoSection>
 
                 <InfoSection title="Personal Info">
@@ -420,7 +435,7 @@ function Profile() {
               </div>
 
               {data.created_at && (
-                <div className="mt-2 border-t border-[#e5e7eb] pt-3 text-xs text-[#9ca3af] flex items-center gap-2">
+                <div className="mt-2 border-t border-[#e5e7eb] dark:border-neutral-700 pt-3 text-xs text-[#9ca3af] dark:text-neutral-500 flex items-center gap-2">
                   <FileText className="h-4 w-4" />
                   <span>Profile created {data.created_at}</span>
                 </div>
@@ -482,18 +497,22 @@ function Profile() {
                   <div className="mb-3">
                     <div className="text-xs text-[#6b7280] mb-1">Availability</div>
                     <div className="flex flex-col gap-2">
-                      {availabilitySlots.map((s, i) => (
-                        <div key={i} className={styles.inputRow}>
-                          <select className={styles.input} value={s.day} onChange={(e)=>updateSlot(i,'day',e.target.value)}>
-                            {['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'].map((d)=> (
-                              <option key={d} value={d}>{d}</option>
-                            ))}
-                          </select>
-                          <input className={styles.input} type="time" value={s.start} onChange={(e)=>updateSlot(i,'start',e.target.value)} />
-                          <input className={styles.input} type="time" value={s.end} onChange={(e)=>updateSlot(i,'end',e.target.value)} />
-                          <button className="px-3 py-2 rounded-xl border" onClick={()=>removeSlot(i)}>Remove</button>
-                        </div>
-                      ))}
+                      {availabilitySlots.map((s, i) => {
+                        const usedDays = new Set(availabilitySlots.map((slot, idx) => idx !== i ? slot.day : null));
+                        const availableDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                        return (
+                          <div key={i} className={styles.inputRow}>
+                            <select className={styles.input} value={s.day} onChange={(e)=>updateSlot(i,'day',e.target.value)}>
+                              {availableDays.map((d)=> (
+                                <option key={d} value={d} disabled={usedDays.has(d)}>{d}</option>
+                              ))}
+                            </select>
+                            <input className={styles.input} type="time" value={s.start} onChange={(e)=>updateSlot(i,'start',e.target.value)} />
+                            <input className={styles.input} type="time" value={s.end} onChange={(e)=>updateSlot(i,'end',e.target.value)} />
+                            <button className="px-3 py-2 rounded-xl border hover:bg-red-50 hover:border-red-300 transition" onClick={()=>removeSlot(i)}>Remove</button>
+                          </div>
+                        );
+                      })}
                       <div>
                         <button className="px-3 py-2 rounded-xl bg-primary text-primary-foreground" onClick={addSlot}>Add time slot</button>
                       </div>
@@ -509,15 +528,23 @@ function Profile() {
                     >
                       <option value="">Years of Experience</option>
                       {Array.from({ length: 41 }).map((_, i) => (
-                        <option key={i} value={String(i)}>{i}</option>
+                        <option key={i} value={String(i)}>{i} {i === 1 ? 'year' : 'years'}</option>
                       ))}
                     </select>
+                  </div>
+                  <div className="mb-3">
+                    <div className="text-xs text-[#6b7280] mb-1">Languages Spoken (select multiple)</div>
                     <select
                       className={styles.input}
-                      value={data.languages}
-                      onChange={(e) => { setData((d) => ({ ...d, languages: e.target.value })); setIsDirty(true); }}
+                      multiple
+                      size={6}
+                      value={data.languages ? data.languages.split(', ') : []}
+                      onChange={(e) => {
+                        const selected = Array.from(e.target.selectedOptions, option => option.value);
+                        setData((d) => ({ ...d, languages: selected.join(', ') }));
+                        setIsDirty(true);
+                      }}
                     >
-                      <option value="">Select Language</option>
                       <optgroup label="Philippine Languages">
                         {PH_LANGS.map((l) => (
                           <option key={l} value={l}>{l}</option>
@@ -531,6 +558,7 @@ function Profile() {
                         </optgroup>
                       )}
                     </select>
+                    <div className="text-xs text-[#9ca3af] mt-1">Hold Ctrl/Cmd to select multiple languages</div>
                   </div>
                 </>
               )}
@@ -543,11 +571,20 @@ function Profile() {
                     <input className={styles.input} value={data.email} onChange={onChange('email')} placeholder="Email" />
                   </div>
                   <div className={styles.inputRow}>
-                    <input className={styles.input} value={data.phone} onChange={onChange('phone')} placeholder="Phone" />
-                    <input className={styles.input} value={data.contact_number || ''} onChange={onChange('contact_number' as any)} placeholder="Contact Number" />
+                    <input className={styles.input} value={data.phone} onChange={onChange('phone')} placeholder="Primary Contact Number" />
+                    <input className={styles.input} value={data.contact_number || ''} onChange={onChange('contact_number' as any)} placeholder="Alternate Contact Number" />
                   </div>
                   <div className={styles.inputRow}>
-                    <input className={styles.input} value={data.organization} onChange={onChange('organization')} placeholder="Organization / Department" />
+                    <select
+                      className={styles.input}
+                      value={data.organization}
+                      onChange={(e) => { setData((d) => ({ ...d, organization: e.target.value })); setIsDirty(true); }}
+                    >
+                      <option value="">Select Department</option>
+                      {DEPARTMENTS.map((dept) => (
+                        <option key={dept} value={dept}>{dept}</option>
+                      ))}
+                    </select>
                   </div>
                 </>
               )}
