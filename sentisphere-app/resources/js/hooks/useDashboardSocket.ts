@@ -112,7 +112,7 @@ class DashboardSocketManager {
   
   private buildWsUrl(token: string): string {
     if (window.location.hostname.includes('railway.app')) {
-      return `wss://sentisphere.up.railway.app/ws/dashboard?token=${encodeURIComponent(token)}`;
+      return `wss://sentisphere-production.up.railway.app/ws/dashboard?token=${encodeURIComponent(token)}`;
     } else if (import.meta.env.DEV) {
       return `ws://localhost:8010/ws/dashboard?token=${encodeURIComponent(token)}`;
     } else {
