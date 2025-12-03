@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useMemo, ReactElement, useCallback } from "react";
 import axios from "axios";
-import { ChevronLeft, ChevronRight, Info, Users, CalendarCheck, CalendarClock, AlertTriangle, AlertCircle, Bell, Search, Mail, Percent as PercentIcon, Hash as HashIcon, Brain, User, Filter } from "lucide-react";
+import { ChevronLeft, ChevronRight, Info, Users, CalendarCheck, CalendarClock, AlertTriangle, AlertCircle, Bell, Search, Mail, Percent as PercentIcon, Hash as HashIcon, User, Filter, Lightbulb } from "lucide-react";
 import { motion } from "framer-motion";
 import {
   ResponsiveContainer,
@@ -356,10 +356,10 @@ export default function CounselorDashboard() {
     [globalRange, rangeStart, rangeEnd]
   );
 
-  // WebSocket for instant notifications only (doesn't replace REST API loading)
+  // WebSocket for instant notifications - triggers data refresh
   const handleStatsUpdate = useCallback((stats: DashboardStats) => {
-    console.log('[Dashboard] WebSocket notification - new data from mobile');
-    // Only update the specific stats that changed, trigger a refresh
+    console.log('[Dashboard] WebSocket notification - refreshing data');
+    // Trigger a full data refresh when we receive WebSocket updates
     setRefreshKey(prev => prev + 1);
   }, []);
 
@@ -413,11 +413,11 @@ export default function CounselorDashboard() {
   interface NumericResponse extends ApiResponse<number> {}
   interface ArrayResponse<T> extends ApiResponse<T[]> {}
 
-  // Fetch from backend via Laravel proxy (/api) when authenticated
+  // Fetch from backend via Laravel proxy (/api) when authenticated or refreshKey changes
   useEffect(() => {
     if (!authenticated) return;
     
-    setLoading(true);
+    setLoading(refreshKey === 0); // Only show loading spinner on initial load
     const fetchData = async () => {
       try {
         // Helper function to safely get numeric data
@@ -618,7 +618,6 @@ export default function CounselorDashboard() {
         setLoading(false);
       }
     };
-
     fetchData();
   }, [authenticated, globalRange, rangeStart, rangeEnd, refreshKey]);
 
@@ -983,7 +982,12 @@ export default function CounselorDashboard() {
                           (Array.isArray(sentimentBreakdown) ? sentimentBreakdown : []).map((d: any) => [String(d.name).toLowerCase(), Number(d.value) || 0])
                         );
                         const total = order.reduce((s, k) => s + (incoming[k] || 0), 0);
-                        const percent = (k: typeof order[number]) => total > 0 ? Math.round(((incoming[k] || 0) / total) * 100) : 0;
+                        const percent = (k: typeof order[number]) => {
+                          if (total <= 0 || !Number.isFinite(total)) return 0;
+                          const value = incoming[k] || 0;
+                          if (!Number.isFinite(value)) return 0;
+                          return Math.round((value / total) * 100);
+                        };
                         const moodKey = Array.from(order).sort((a: typeof order[number], b: typeof order[number]) => (incoming[b] || 0) - (incoming[a] || 0))[0];
                         const label = moodKey === 'positive' ? 'Positive' : moodKey === 'neutral' ? 'Neutral' : 'Negative';
                         const pct = percent(moodKey);
@@ -1096,7 +1100,7 @@ export default function CounselorDashboard() {
             isLive={wsConnected}
           />
           <StatCard
-            title="Open Appointments"
+            title="Downloaded Appointment Forms"
             value={openAppointments}
             variant="appointments"
             icon={<CalendarClock className="h-4 w-4" />}
@@ -1121,18 +1125,6 @@ export default function CounselorDashboard() {
               <div className={`${styles.cardHeader}`}>
                 <div className="flex items-center gap-2">
                   <h2 className={styles.sectionTitle}>Weekly Mood Analytics</h2>
-                  <button
-                    type="button"
-                    onClick={() => setShowSentimentInfo(true)}
-                    className="inline-flex items-center justify-center p-1 rounded-md hover:bg-gray-50 transition cursor-pointer"
-                    aria-label="Open sentiment analysis"
-                  >
-                    <img
-                      src="https://cdn-icons-png.flaticon.com/512/8763/8763670.png"
-                      alt="summary"
-                      className={styles.summaryIconImg}
-                    />
-                  </button>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
@@ -1213,7 +1205,7 @@ export default function CounselorDashboard() {
                         isAnimationActive={false}
                       />
                       <Line
-                        type="monotone"
+                        type="monotoneX"
                         dataKey="avgMood"
                         stroke="var(--primary)"
                         strokeWidth={3}
@@ -1339,18 +1331,6 @@ export default function CounselorDashboard() {
               <div className={`${styles.cardHeader}`}>
                 <div className="flex items-center gap-2">
                   <h2 className={styles.sectionTitle}>Sentiment Breakdown</h2>
-                  <button
-                    type="button"
-                    onClick={() => setShowSentimentInfo(true)}
-                    className="inline-flex items-center justify-center p-1 rounded-md hover:bg-gray-50 transition cursor-pointer"
-                    aria-label="Open sentiment analysis"
-                  >
-                    <img
-                      src="https://cdn-icons-png.flaticon.com/512/8763/8763670.png"
-                      alt="summary"
-                      className={styles.summaryIconImg}
-                    />
-                  </button>
                 </div>
                 <div className="flex justify-end gap-2">
                   {(["week", "month", "year"] as const).map((p) => (
@@ -1373,11 +1353,18 @@ export default function CounselorDashboard() {
                     sentimentBreakdown.map((d: any) => [String(d.name).toLowerCase(), Number(d.value) || 0])
                   );
                   const total = order.reduce((sum, k) => sum + (incoming[k] || 0), 0);
-                  const data = order.map((k) => ({
-                    name: k,
-                    value: incoming[k] || 0,
-                    percent: total > 0 ? Math.round(((incoming[k] || 0) / total) * 100) : 0,
-                  }));
+                  const data = order.map((k) => {
+                    const value = incoming[k] || 0;
+                    let percent = 0;
+                    if (total > 0 && Number.isFinite(value) && Number.isFinite(total)) {
+                      percent = Math.round((value / total) * 100);
+                    }
+                    return {
+                      name: k,
+                      value,
+                      percent,
+                    };
+                  });
                   if (total === 0) return <span className="text-[#6b7280] text-sm">No sentiment data available for this period.</span>;
                   // Determine dynamic chart height based on tallest bar percent to avoid clipping labels
                   const maxPercent = Math.max(...data.map(d => d.percent));
@@ -1749,7 +1736,7 @@ export default function CounselorDashboard() {
                   className="w-full flex flex-col items-center justify-center gap-3 p-4 bg-white rounded-lg border-2 border-dashed border-gray-300 hover:border-indigo-400 hover:bg-indigo-50 transition-all duration-200"
                   title="Generate AI summary for last week"
                 >
-                  <Brain className="h-10 w-10 text-indigo-500" />
+                  <Lightbulb className="h-10 w-10 text-indigo-500" />
                   <span className="text-indigo-600 font-medium">Generate Last Week Summary</span>
                   <span className="text-xs text-gray-500 text-center max-w-[220px]">Analyzes journals and check-ins for the previous week</span>
                 </button>

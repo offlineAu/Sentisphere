@@ -397,7 +397,7 @@ def create_checkin(
 
     # Notify dashboard WebSocket clients of the new check-in
     try:
-        asyncio.create_task(notify_dashboard_update())
+        asyncio.create_task(notify_dashboard_update("new_checkin"))
     except Exception:
         pass  # Don't fail the request if notification fails
 
@@ -498,7 +498,7 @@ def create_journal(
 
     # Notify dashboard WebSocket clients
     try:
-        asyncio.create_task(notify_dashboard_update())
+        asyncio.create_task(notify_dashboard_update("new_journal"))
     except Exception:
         pass
 
@@ -620,7 +620,7 @@ def create_alert(
     
     # Notify dashboard WebSocket clients
     try:
-        asyncio.create_task(notify_dashboard_update())
+        asyncio.create_task(notify_dashboard_update("new_alert"))
     except Exception:
         pass
     
@@ -643,7 +643,7 @@ def create_alert_api(
     
     # Notify dashboard WebSocket clients
     try:
-        asyncio.create_task(notify_dashboard_update())
+        asyncio.create_task(notify_dashboard_update("new_alert"))
     except Exception:
         pass
     
@@ -1048,22 +1048,119 @@ async def dashboard_ws(websocket: WebSocket, token: Optional[str] = Query(None))
         await dashboard_ws_manager.disconnect(websocket)
 
 
-async def notify_dashboard_update():
-    """Trigger an immediate dashboard stats update for all connected clients.
-    
-    Call this when data changes (new checkin, new alert, etc.)
+# ============================================================================
+# Dashboard Event Dispatcher (Debounced, Non-blocking, Thread-safe)
+# ============================================================================
+
+class DashboardEventDispatcher:
     """
-    if not dashboard_ws_manager.active_connections:
-        return
-    db = SessionLocal()
-    try:
-        stats = _compute_dashboard_stats(db)
-        await dashboard_ws_manager.broadcast({
-            "type": "stats_update",
-            "stats": stats,
-        })
-    finally:
-        db.close()
+    Centralized event dispatcher for dashboard updates.
+    
+    Features:
+    - Debouncing: Batches rapid updates (e.g., 10 check-ins in 1 second)
+    - Non-blocking: Uses background tasks
+    - Thread-safe: Uses asyncio locks
+    - Robust: Handles errors gracefully
+    """
+    
+    def __init__(self, debounce_seconds: float = 0.5):
+        self._debounce_seconds = debounce_seconds
+        self._pending_update = False
+        self._lock = asyncio.Lock()
+        self._task: Optional[asyncio.Task] = None
+    
+    async def trigger(self, reason: str = "unknown"):
+        """
+        Trigger a dashboard update. Multiple rapid calls are debounced.
+        
+        Args:
+            reason: Description of what triggered the update (for logging)
+        """
+        async with self._lock:
+            if self._pending_update:
+                # Already have a pending update, skip
+                logging.debug("[dashboard-dispatch] Update already pending, skipping trigger from: %s", reason)
+                return
+            
+            self._pending_update = True
+            logging.info("[dashboard-dispatch] Update triggered by: %s", reason)
+        
+        # Schedule debounced update
+        if self._task and not self._task.done():
+            self._task.cancel()
+        
+        self._task = asyncio.create_task(self._debounced_broadcast(reason))
+    
+    async def _debounced_broadcast(self, reason: str):
+        """Wait for debounce period, then broadcast."""
+        try:
+            await asyncio.sleep(self._debounce_seconds)
+            await self._do_broadcast(reason)
+        except asyncio.CancelledError:
+            # New update came in, this one was cancelled
+            pass
+        except Exception as e:
+            logging.error("[dashboard-dispatch] Broadcast error: %s", e)
+        finally:
+            async with self._lock:
+                self._pending_update = False
+    
+    async def _do_broadcast(self, reason: str):
+        """Actually compute and broadcast stats."""
+        if not dashboard_ws_manager.active_connections:
+            logging.debug("[dashboard-dispatch] No active connections, skipping broadcast")
+            return
+        
+        db = SessionLocal()
+        try:
+            stats = _compute_dashboard_stats(db)
+            await dashboard_ws_manager.broadcast({
+                "type": "stats_update",
+                "stats": stats,
+                "reason": reason,
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+            })
+            logging.info("[dashboard-dispatch] Broadcast complete to %d clients", len(dashboard_ws_manager.active_connections))
+        except Exception as e:
+            logging.error("[dashboard-dispatch] Failed to broadcast: %s", e)
+        finally:
+            db.close()
+    
+    def trigger_sync(self, reason: str = "unknown"):
+        """
+        Synchronous wrapper for trigger(). Use this from sync endpoints.
+        Creates a background task without blocking.
+        """
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self.trigger(reason))
+        except RuntimeError:
+            # No running loop, create one
+            try:
+                asyncio.run(self.trigger(reason))
+            except Exception as e:
+                logging.warning("[dashboard-dispatch] Sync trigger failed: %s", e)
+
+
+# Global dispatcher instance
+dashboard_dispatcher = DashboardEventDispatcher(debounce_seconds=0.5)
+
+
+async def notify_dashboard_update(reason: str = "data_change"):
+    """
+    Trigger a dashboard update. This is the main entry point.
+    
+    Call this when data changes:
+    - New check-in
+    - New alert
+    - New appointment
+    - Risk flag update
+    - Any mobile app data submission
+    
+    Args:
+        reason: Description of what triggered the update
+    """
+    await dashboard_dispatcher.trigger(reason)
 
 
 @app.get("/api/auth/me")
@@ -2255,6 +2352,12 @@ def create_emotional_checkin(
     except Exception as e:
         logging.error(f"Failed to send checkin notification: {e}")
     
+    # Notify dashboard WebSocket clients of the new mobile check-in
+    try:
+        asyncio.create_task(notify_dashboard_update("mobile_checkin"))
+    except Exception:
+        pass
+    
     return {
         "ok": True, 
         "checkin_id": checkin_id,
@@ -2419,6 +2522,12 @@ def create_journal(
                         
         except Exception as e:
             logging.error(f"Failed to auto-create alert: {e}")
+    
+    # Notify dashboard WebSocket clients of the new mobile journal
+    try:
+        asyncio.create_task(notify_dashboard_update("mobile_journal"))
+    except Exception:
+        pass
     
     return {
         "ok": True, 

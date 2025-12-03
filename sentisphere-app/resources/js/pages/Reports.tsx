@@ -376,15 +376,39 @@ function Reports() {
         const topData = topRes.data || {};
 
         const calcDelta = (current?: number, previous?: number) => {
-          if (previous === undefined || previous === null || previous === 0) {
+          // Handle undefined/null values
+          if (current === undefined || current === null) {
             return { delta: "", deltaColor: "" };
           }
-          const c = Number(current ?? 0);
-          const p = Number(previous ?? 0);
-          if (!Number.isFinite(c) || !Number.isFinite(p) || p === 0) {
+          if (previous === undefined || previous === null) {
             return { delta: "", deltaColor: "" };
           }
-          const change = ((c - p) / p) * 100;
+          
+          // Convert to numbers and validate
+          const c = Number(current);
+          const p = Number(previous);
+          
+          // Check for invalid numbers
+          if (!Number.isFinite(c) || !Number.isFinite(p)) {
+            return { delta: "", deltaColor: "" };
+          }
+          
+          // If previous is 0, show "new" or absolute change
+          if (p === 0) {
+            if (c === 0) {
+              return { delta: "", deltaColor: "" };
+            }
+            return { delta: "New", deltaColor: "text-blue-600" };
+          }
+          
+          // Calculate percentage change
+          const change = ((c - p) / Math.abs(p)) * 100;
+          
+          // Handle very small changes (less than 0.1%)
+          if (Math.abs(change) < 0.1) {
+            return { delta: "~0%", deltaColor: "text-gray-600" };
+          }
+          
           const sign = change >= 0 ? "+" : "";
           const color = change >= 0 ? "text-green-600" : "text-red-600";
           return { delta: `${sign}${change.toFixed(1)}%`, deltaColor: color };
@@ -493,8 +517,16 @@ function Reports() {
   }));
 
   const latestIndex = sortedTrendWeeks[0]?.index ?? 0;
-  const prevIndex = sortedTrendWeeks[1]?.index ?? latestIndex;
-  const changePct = prevIndex !== 0 ? Math.round(((latestIndex - prevIndex) / Math.max(prevIndex, 1e-9)) * 100) : 0;
+  const prevIndex = sortedTrendWeeks[1]?.index ?? 0;
+  
+  // Robust percentage calculation
+  const calculateChangePct = (current: number, previous: number): number => {
+    if (!Number.isFinite(current) || !Number.isFinite(previous)) return 0;
+    if (previous === 0) return current === 0 ? 0 : 100;
+    return Math.round(((current - previous) / Math.abs(previous)) * 100);
+  };
+  
+  const changePct = calculateChangePct(latestIndex, prevIndex);
 
   return (
     <main
