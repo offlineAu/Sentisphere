@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState, useEffect } from 'react';
-import { Animated, Easing, Pressable, StyleSheet, TextInput, View, Keyboard, Alert, TouchableWithoutFeedback, KeyboardAvoidingView, ScrollView, Platform, Modal, useWindowDimensions } from 'react-native';
+import { Animated, Easing, Pressable, StyleSheet, TextInput, View, Keyboard, Alert, TouchableWithoutFeedback, ScrollView, Platform, Modal, useWindowDimensions } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import Swipeable from 'react-native-gesture-handler/Swipeable';
 import { Feather } from '@expo/vector-icons';
@@ -17,8 +17,9 @@ import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as SecureStore from 'expo-secure-store';
 import { getDeletedJournalIds, addDeletedJournalId } from '@/utils/soft-delete';
+import { KeyboardAwareScrollView, KeyboardAwareScrollViewRef } from '@/components/KeyboardAwareScrollView';
 
-const JournalListIcon = require('@/assets/images/journal list.png');
+const JournalListIcon = require('@/assets/images/journal-list.png');
 
 
 type Entry = { id: string; title: string; body: string; date: string };
@@ -38,26 +39,11 @@ export default function JournalListScreen() {
   const openSwipeRef = useRef<Swipeable | null>(null);
   const fetchEntriesRef = useRef<(() => void) | null>(null);
   // Scroll ref for auto-scroll to focused input with smooth animation
-  const scrollViewRef = useRef<ScrollView>(null);
+  const scrollViewRef = useRef<KeyboardAwareScrollViewRef>(null);
   const scrollAnim = useRef(new Animated.Value(0)).current;
   const scrollToInput = (inputY: number = 300) => {
-    // Trigger subtle animation for visual feedback
-    scrollAnim.setValue(0);
-    Animated.timing(scrollAnim, {
-      toValue: 1,
-      duration: Platform.OS === 'android' ? 220 : 280,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
-    // Calculate scroll position: input position minus offset to keep input visible but not at top
-    // Lower offset = input appears lower on screen (more comfortable for typing)
-    const visibleOffset = Platform.OS === 'android' ? 180 : 200;
-    const targetY = Math.max(0, inputY - visibleOffset);
-    // Platform-specific delay: Android needs longer since keyboardDidShow fires after keyboard is visible
-    const delay = Platform.OS === 'android' ? 150 : 80;
-    setTimeout(() => {
-      scrollViewRef.current?.scrollTo({ y: targetY, animated: true });
-    }, delay);
+    // Use KeyboardAwareScrollView's built-in smooth scroll method
+    scrollViewRef.current?.scrollInputIntoView(inputY);
   };
   const onTabChange = (next: 0 | 1) => {
     setTab(next);
@@ -384,19 +370,11 @@ export default function JournalListScreen() {
 
   return (
     <GlobalScreenWrapper backgroundColor={scheme === 'dark' ? palette.background : '#FAFBFC'}>
-      <KeyboardAvoidingView 
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
-        style={{ flex: 1, backgroundColor: scheme === 'dark' ? palette.background : '#FAFBFC' }}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 20}
+      <KeyboardAwareScrollView
+        ref={scrollViewRef}
+        backgroundColor={scheme === 'dark' ? palette.background : '#FAFBFC'}
+        contentContainerStyle={{ padding: 24, paddingTop: 20, paddingBottom: 120 }}
       >
-        <ScrollView
-          ref={scrollViewRef}
-          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-          automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
-          contentContainerStyle={{ padding: 24, paddingTop: 20, paddingBottom: Platform.OS === 'android' ? 200 : 120, backgroundColor: scheme === 'dark' ? palette.background : '#FAFBFC' }}
-        >
           <Animated.View style={makeFadeUp(entranceHeader)}>
             <View style={{ height: 24 }} />
             <ThemedText type="title">Journal</ThemedText>
@@ -638,8 +616,7 @@ export default function JournalListScreen() {
         </Animated.View>
       )}
           </Animated.View>
-        </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardAwareScrollView>
       {/* Saved toast */}
       <Animated.View
         pointerEvents="none"

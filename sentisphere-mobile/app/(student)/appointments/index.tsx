@@ -3,7 +3,7 @@ import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
 import { GlobalScreenWrapper } from '@/components/GlobalScreenWrapper';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Easing, Platform, Pressable, ScrollView, View, Modal, ActivityIndicator, LayoutAnimation, UIManager, TextInput, KeyboardAvoidingView, Image } from 'react-native';
+import { Animated, Easing, Platform, Pressable, ScrollView, View, Modal, ActivityIndicator, LayoutAnimation, UIManager, TextInput, Image } from 'react-native';
 import * as Print from 'expo-print';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
@@ -19,6 +19,7 @@ import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { useCallback } from 'react';
+import { KeyboardAwareScrollView, KeyboardAwareScrollViewRef } from '@/components/KeyboardAwareScrollView';
 
 // Counselor type matching backend response
 type Counselor = { 
@@ -357,8 +358,11 @@ export default function AppointmentsScreen() {
           try { await FileSystem.deleteAsync(desired, { idempotent: true }); } catch {}
           if ((file as any)?.base64) {
             try {
-              let PDFDocumentLocal: any = null;
-              try { PDFDocumentLocal = (await import('pdf-lib/dist/pdf-lib.esm.js')).PDFDocument; } catch {}
+              let PDFDocumentLocal: typeof import('pdf-lib')['PDFDocument'] | null = null;
+              try {
+                const pdfLib = require('pdf-lib') as typeof import('pdf-lib');
+                PDFDocumentLocal = pdfLib.PDFDocument;
+              } catch {}
               if (PDFDocumentLocal) {
                 const src = `data:application/pdf;base64,${(file as any).base64}`;
                 const doc = await PDFDocumentLocal.load(src);
@@ -439,18 +443,10 @@ export default function AppointmentsScreen() {
 
   return (
     <GlobalScreenWrapper backgroundColor="#FFFFFF">
-      <KeyboardAvoidingView 
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 20} 
-        style={{ flex: 1, backgroundColor: '#FFFFFF' }}
-      >
-      <ScrollView
-        ref={scrollViewRef}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
-        showsVerticalScrollIndicator={false}
-        automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
-        contentContainerStyle={{ padding: 24, paddingBottom: Platform.OS === 'android' ? 200 : 60 }}
+      <KeyboardAwareScrollView
+        ref={scrollViewRef as any}
+        backgroundColor="#FFFFFF"
+        contentContainerStyle={{ padding: 24, paddingBottom: 60 }}
       >
         <View style={styles.page}>
           {/* Back Button */}
@@ -462,7 +458,7 @@ export default function AppointmentsScreen() {
           <View style={styles.headerSection}>
             <View style={styles.iconContainer}>
               <Image
-                source={require('../../../assets/images/calendar green.png')}
+                source={require('../../../assets/images/calendar-green.png')}
                 style={styles.headerIcon}
                 resizeMode="contain"
                 accessible
@@ -811,10 +807,7 @@ export default function AppointmentsScreen() {
             </CardContent>
           </Card>
         </View>
-      </ScrollView>
-      </KeyboardAvoidingView>
-
-      
+      </KeyboardAwareScrollView>
 
       {/* Toast */}
       <Animated.View

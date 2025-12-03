@@ -84,7 +84,7 @@ export default function RootLayout() {
       <View style={loadingStyles.container}>
         <Animated.View style={[loadingStyles.logoWrapper, logoAnimatedStyle]}>
           <Image 
-            source={require('@/assets/images/Sentisphere Logo Only.png')} 
+            source={require('@/assets/images/sentisphere-logo.png')} 
             style={loadingStyles.logo}
           />
         </Animated.View>

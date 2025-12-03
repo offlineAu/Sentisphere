@@ -98,7 +98,7 @@ export function LoadingSplash({ visible, nickname, statusText = 'Creating your a
       <View style={styles.logoWrapper}>
         <Animated.View style={[styles.glow, glowStyle]} />
         <Animated.View style={[styles.logoBadge, logoStyle]}>
-          <Image source={require('@/assets/images/Sentisphere Logo Only.png')} style={styles.logo} />
+          <Image source={require('@/assets/images/sentisphere-logo.png')} style={styles.logo} />
         </Animated.View>
         <Animated.View style={[styles.messageBlock, messageStyle]}>
           <ThemedText type="subtitle" style={styles.status}>{statusText}</ThemedText>

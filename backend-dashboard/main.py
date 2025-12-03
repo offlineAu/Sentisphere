@@ -2858,31 +2858,35 @@ def schedule_alert_monitor():
 
 
 # Initialize scheduler with unified notification jobs
-try:
-    scheduler = BackgroundScheduler()
-    
-    # Daily quotes - every minute for testing (normally 9 AM daily)
-    # TODO: Change back to CronTrigger(hour=9, minute=0) for production
-    scheduler.add_job(
-        schedule_daily_quotes,
-        CronTrigger(minute="*"),  # Every minute for testing
-        id="daily_quotes",
-        replace_existing=True
-    )
-    
-    # Alert monitor every 1 minute (for quick response to high-risk alerts)
-    # TODO: Change back to */15 for production
-    scheduler.add_job(
-        schedule_alert_monitor,
-        CronTrigger(minute="*"),
-        id="alert_monitor",
-        replace_existing=True
-    )
-    
-    scheduler.start()
-    logging.info("Notification scheduler initialized (daily quotes every minute [TESTING], alert monitor every 1min)")
-except Exception as e:
-    logging.warning(f"Failed to initialize scheduler: {e}")
+railway_primary = os.getenv("RAILWAY_PRIMARY_INSTANCE")
+if railway_primary and railway_primary.lower() != "true":
+    logging.info("Skipping scheduler initialization (non-primary Railway instance)")
+else:
+    try:
+        scheduler = BackgroundScheduler()
+        
+        # Daily quotes - every minute for testing (normally 9 AM daily)
+        # TODO: Change back to CronTrigger(hour=9, minute=0) for production
+        scheduler.add_job(
+            schedule_daily_quotes,
+            CronTrigger(minute="*"),  # Every minute for testing
+            id="daily_quotes",
+            replace_existing=True
+        )
+        
+        # Alert monitor every 1 minute (for quick response to high-risk alerts)
+        # TODO: Change back to */15 for production
+        scheduler.add_job(
+            schedule_alert_monitor,
+            CronTrigger(minute="*"),
+            id="alert_monitor",
+            replace_existing=True
+        )
+        
+        scheduler.start()
+        logging.info("Notification scheduler initialized (daily quotes every minute [TESTING], alert monitor every 1min)")
+    except Exception as e:
+        logging.warning(f"Failed to initialize scheduler: {e}")
 
 
 @app.get("/reports/top-stats")
