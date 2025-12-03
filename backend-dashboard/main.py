@@ -77,6 +77,7 @@ from app.schemas.counselor_profile import CounselorProfilePayload
 from app.services.embedding_service import EmbeddingService
 from app.schemas.similarity import SimilarJournal
 from app.schemas.sentiment import SentimentResult
+from app.services.auto_insight_service import AutoInsightService
 from app.utils.nlp_loader import analyze_text
 from app.utils.date_utils import (
     parse_global_range,
@@ -294,6 +295,24 @@ def _run_daily_behavioral_job():
     except Exception as exc:  # pragma: no cover
         logging.exception("[scheduler] behavioral job failed: %s", exc)
 
+def _run_auto_insight_generation():
+    """Background job to auto-generate insights when enough data exists."""
+    logging.info("[auto-insight] Starting automatic insight generation...")
+    db = SessionLocal()
+    try:
+        # Generate weekly insights for students with sufficient data
+        generated = AutoInsightService.check_and_generate_weekly_insights(db)
+        logging.info(f"[auto-insight] Generated {generated} new weekly insights")
+        
+        # Cleanup old insights
+        deleted = AutoInsightService.cleanup_old_insights(db, weeks_old=3)
+        if deleted > 0:
+            logging.info(f"[auto-insight] Cleaned up {deleted} old insights")
+    except Exception as e:
+        logging.error(f"[auto-insight] Error in auto-generation: {e}")
+    finally:
+        db.close()
+
 @app.on_event("startup")
 def _start_scheduler():
     global scheduler
@@ -306,8 +325,10 @@ def _start_scheduler():
         scheduler.add_job(_run_weekly_insights_job, CronTrigger(day_of_week='mon', hour=0, minute=5))
         # Daily: 23:59
         scheduler.add_job(_run_daily_behavioral_job, CronTrigger(hour=23, minute=59))
+        # Auto-generate insights: Daily at 2 AM (checks all students for sufficient data)
+        scheduler.add_job(_run_auto_insight_generation, CronTrigger(hour=2, minute=0))
         scheduler.start()
-        logging.info("[scheduler] started (weekly Mon 00:05, daily 23:59)")
+        logging.info("[scheduler] started (weekly Mon 00:05, daily 23:59, auto-insights daily 2 AM)")
     except Exception as exc:  # pragma: no cover
         logging.exception("[scheduler] failed to start: %s", exc)
 
@@ -375,6 +396,12 @@ def create_checkin(
         # Do not fail the check-in creation if sentiment analysis fails
         db.rollback()
         db.refresh(created)
+
+    # Notify dashboard WebSocket clients of the new check-in
+    try:
+        asyncio.create_task(notify_dashboard_update())
+    except Exception:
+        pass  # Don't fail the request if notification fails
 
     return created
 
@@ -470,6 +497,12 @@ def create_journal(
         asyncio.create_task(_rt_manager.publish(event))
     except Exception as exc:  # pragma: no cover - defensive
         logging.warning("[realtime] failed to publish journal event: %s", exc)
+
+    # Notify dashboard WebSocket clients
+    try:
+        asyncio.create_task(notify_dashboard_update())
+    except Exception:
+        pass
 
     return created
 
@@ -586,6 +619,13 @@ def create_alert(
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot report for another user")
         payload_data["user_id"] = current_user.user_id
     alert = AlertService.create_alert(db, AlertCreate(**payload_data))
+    
+    # Notify dashboard WebSocket clients
+    try:
+        asyncio.create_task(notify_dashboard_update())
+    except Exception:
+        pass
+    
     return alert
 
 
@@ -602,6 +642,13 @@ def create_alert_api(
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot report for another user")
         payload_data["user_id"] = current_user.user_id
     alert = AlertService.create_alert(db, AlertCreate(**payload_data))
+    
+    # Notify dashboard WebSocket clients
+    try:
+        asyncio.create_task(notify_dashboard_update())
+    except Exception:
+        pass
+    
     return alert
 
 
@@ -800,6 +847,225 @@ async def notify_insight_generated(insight_type: str, user_id: Optional[int], ti
         "risk_level": risk_level,
         "generated_at": datetime.utcnow().isoformat() + "Z"
     })
+
+
+# --- Dashboard Stats WebSocket for real-time updates ---
+class DashboardWSManager:
+    """Manages WebSocket connections for dashboard stat updates."""
+
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+        self._lock = asyncio.Lock()
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        async with self._lock:
+            self.active_connections.append(websocket)
+            logging.info("[dashboard-ws] Connected, total=%d", len(self.active_connections))
+
+    async def disconnect(self, websocket: WebSocket):
+        async with self._lock:
+            if websocket in self.active_connections:
+                self.active_connections.remove(websocket)
+                logging.info("[dashboard-ws] Disconnected, total=%d", len(self.active_connections))
+
+    async def broadcast(self, message: dict):
+        """Broadcast dashboard stats to all connected clients."""
+        async with self._lock:
+            targets = list(self.active_connections)
+        for connection in targets:
+            try:
+                await connection.send_json(message)
+            except Exception:
+                await self.disconnect(connection)
+
+
+dashboard_ws_manager = DashboardWSManager()
+
+
+def _compute_dashboard_stats(db: Session, range_param: str = "this_week", start: Optional[str] = None, end: Optional[str] = None) -> dict:
+    """Compute all dashboard stats in one go."""
+    from app.utils.date_utils import parse_global_range
+    
+    start_dt, end_dt = parse_global_range(range_param, start, end)
+    
+    # Students monitored (all time)
+    students_monitored = db.scalar(
+        select(func.count(func.distinct(EmotionalCheckin.user_id)))
+        .join(User, EmotionalCheckin.user_id == User.user_id)
+        .where(User.role == UserRole.student, User.is_active.is_(True))
+    ) or 0
+    
+    # This week check-ins
+    this_week_checkins = db.scalar(
+        select(func.count(EmotionalCheckin.checkin_id)).where(
+            EmotionalCheckin.created_at >= start_dt,
+            EmotionalCheckin.created_at <= end_dt
+        )
+    ) or 0
+    
+    # Open appointments
+    open_appointments = db.scalar(
+        select(func.count(func.distinct(UserActivity.user_id))).where(
+            UserActivity.action == "downloaded_form",
+            UserActivity.target_type == "form",
+            UserActivity.created_at >= start_dt,
+            UserActivity.created_at <= end_dt,
+        )
+    ) or 0
+    
+    # High risk flags
+    alert_count = db.scalar(
+        select(func.count(Alert.alert_id)).where(
+            Alert.severity == AlertSeverity.HIGH,
+            Alert.status.in_([AlertStatus.OPEN, AlertStatus.IN_PROGRESS]),
+            Alert.created_at >= start_dt,
+            Alert.created_at <= end_dt,
+        )
+    ) or 0
+    journal_count = db.scalar(
+        select(func.count(JournalSentiment.journal_id)).where(
+            JournalSentiment.sentiment == "negative",
+            JournalSentiment.analyzed_at >= start_dt,
+            JournalSentiment.analyzed_at <= end_dt,
+        )
+    ) or 0
+    checkin_count = db.scalar(
+        select(func.count(CheckinSentiment.checkin_id)).where(
+            CheckinSentiment.sentiment == "negative",
+            CheckinSentiment.analyzed_at >= start_dt,
+            CheckinSentiment.analyzed_at <= end_dt,
+        )
+    ) or 0
+    high_risk_flags = int(alert_count + journal_count + checkin_count)
+    
+    # Recent alerts (last 5)
+    recent_alerts = CounselorReportService.recent_alerts(db, limit=5)
+    recent_alerts_data = [
+        {
+            "id": item["id"],
+            "name": item["name"],
+            "severity": item["severity"],
+            "status": item["status"],
+            "reason": item.get("reason", ""),
+            "created_at": item["created_at"].isoformat() if item["created_at"] else None,
+        }
+        for item in recent_alerts
+    ]
+    
+    return {
+        "students_monitored": int(students_monitored),
+        "this_week_checkins": int(this_week_checkins),
+        "open_appointments": int(open_appointments),
+        "high_risk_flags": high_risk_flags,
+        "recent_alerts": recent_alerts_data,
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+    }
+
+
+@app.websocket("/ws/dashboard")
+async def dashboard_ws(websocket: WebSocket, token: Optional[str] = Query(None)) -> None:
+    """WebSocket endpoint for real-time dashboard stat updates.
+    
+    Events sent:
+    - stats_update: Periodic stats refresh
+    - connected: Initial connection confirmation with current stats
+    
+    Client can send:
+    - {"action": "ping"} -> receives {"type": "pong"}
+    - {"action": "refresh"} -> triggers immediate stats update
+    - {"action": "set_range", "range": "this_week", "start": null, "end": null} -> changes filter
+    """
+    if not token:
+        await websocket.close(code=4401)
+        return
+    try:
+        user_id = _extract_user_id(token)
+    except HTTPException:
+        await websocket.close(code=4401)
+        return
+
+    await dashboard_ws_manager.connect(websocket)
+    
+    # Track filter settings per connection
+    current_range = "this_week"
+    current_start: Optional[str] = None
+    current_end: Optional[str] = None
+    
+    try:
+        # Send connection confirmation (no initial stats to avoid interfering with REST API)
+        await websocket.send_json({
+            "type": "connected",
+            "message": "Connected to dashboard notifications",
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+        })
+        
+        # Listen for client messages
+        while True:
+            msg = await websocket.receive_text()
+            try:
+                data = json.loads(msg)
+                action = data.get("action")
+                
+                if action == "ping":
+                    await websocket.send_json({"type": "pong", "ts": datetime.utcnow().isoformat() + "Z"})
+                
+                elif action == "refresh":
+                    # Manual refresh request
+                    db = SessionLocal()
+                    try:
+                        stats = _compute_dashboard_stats(db, current_range, current_start, current_end)
+                        await websocket.send_json({
+                            "type": "stats_update",
+                            "stats": stats,
+                        })
+                    finally:
+                        db.close()
+                
+                elif action == "set_range":
+                    # Update filter settings
+                    current_range = data.get("range", "this_week")
+                    current_start = data.get("start")
+                    current_end = data.get("end")
+                    # Send updated stats with new filter
+                    db = SessionLocal()
+                    try:
+                        stats = _compute_dashboard_stats(db, current_range, current_start, current_end)
+                        await websocket.send_json({
+                            "type": "stats_update",
+                            "stats": stats,
+                        })
+                    finally:
+                        db.close()
+                        
+            except json.JSONDecodeError:
+                continue
+            except Exception as e:
+                logging.warning("[dashboard-ws] Message handling error: %s", e)
+                continue
+                
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await dashboard_ws_manager.disconnect(websocket)
+
+
+async def notify_dashboard_update():
+    """Trigger an immediate dashboard stats update for all connected clients.
+    
+    Call this when data changes (new checkin, new alert, etc.)
+    """
+    if not dashboard_ws_manager.active_connections:
+        return
+    db = SessionLocal()
+    try:
+        stats = _compute_dashboard_stats(db)
+        await dashboard_ws_manager.broadcast({
+            "type": "stats_update",
+            "stats": stats,
+        })
+    finally:
+        db.close()
 
 
 @app.get("/api/auth/me")
@@ -4145,6 +4411,67 @@ def behavior_insights(
     """Behavioral stress/journaling insights with global date filter support."""
     start_dt, end_dt = parse_global_range(range, start, end)
     return CounselorReportService.behavior_insights(db, start=start_dt, end=end_dt)
+
+
+@app.post("/api/insights/generate-auto")
+def trigger_auto_insight_generation(
+    _user: User = Depends(require_counselor),
+    db: Session = Depends(get_db),
+):
+    """Manually trigger automatic insight generation (for testing/admin use)."""
+    try:
+        generated = AutoInsightService.check_and_generate_weekly_insights(db)
+        deleted = AutoInsightService.cleanup_old_insights(db, weeks_old=3)
+        
+        return {
+            "success": True,
+            "insights_generated": generated,
+            "old_insights_deleted": deleted,
+            "message": f"Generated {generated} new insights, deleted {deleted} old insights"
+        }
+    except Exception as e:
+        logging.error(f"[API] Manual insight generation failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Insight generation failed: {str(e)}"
+        )
+
+
+@app.get("/api/insights/stored")
+def get_stored_insights(
+    user_id: Optional[int] = Query(None),
+    type: Optional[str] = Query(None),
+    limit: int = Query(10, ge=1, le=100),
+    _user: User = Depends(require_counselor),
+    db: Session = Depends(get_db),
+):
+    """Get insights stored in ai_insights table."""
+    from app.models.ai_insight import AIInsight
+    
+    query = db.query(AIInsight)
+    
+    if user_id:
+        query = query.filter(AIInsight.user_id == user_id)
+    
+    if type:
+        query = query.filter(AIInsight.type == type)
+    
+    insights = query.order_by(AIInsight.generated_at.desc()).limit(limit).all()
+    
+    return [
+        {
+            "insight_id": i.insight_id,
+            "user_id": i.user_id,
+            "type": i.type,
+            "timeframe_start": i.timeframe_start.isoformat() if i.timeframe_start else None,
+            "timeframe_end": i.timeframe_end.isoformat() if i.timeframe_end else None,
+            "data": i.data,
+            "risk_level": i.risk_level,
+            "generated_by": i.generated_by,
+            "generated_at": i.generated_at.isoformat() if i.generated_at else None,
+        }
+        for i in insights
+    ]
 
 
 @app.get("/api/ai/sentiment-summary")

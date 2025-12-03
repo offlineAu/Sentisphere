@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { ChevronLeft, ChevronRight, TrendingUp, TrendingDown, AlertTriangle, UserRound, CalendarDays, Activity, Download, Filter, Lightbulb } from "lucide-react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, Legend } from "recharts";
 import { motion, AnimatePresence } from "framer-motion";
@@ -11,6 +11,7 @@ import styles from "./Reports.module.css";
 import Slider from "react-slick";
 import "slick-carousel/slick/slick.css";
 import "slick-carousel/slick/slick-theme.css";
+import { useDashboardSocket } from "@/hooks";
 
 type TopStat = {
   label: string;
@@ -184,6 +185,7 @@ function CustomWeekTick({ x, y, payload }: any) {
 function Reports() {
 
   const [loading, setLoading] = useState(true);
+  const [refreshKey, setRefreshKey] = useState(0);
   const [topStats, setTopStats] = useState<TopStat[]>([]);
   const [riskLevels, setRiskLevels] = useState<RiskLevel[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
@@ -309,12 +311,23 @@ function Reports() {
     customPaging: () => <span className="block h-2 w-2 rounded-full bg-gray-300" />,
   }), [insights.length]);
 
+  // WebSocket for instant notifications when new data arrives
+  const handleDataUpdate = useCallback(() => {
+    console.log('[Reports] New data notification - refreshing...');
+    setRefreshKey(prev => prev + 1);
+  }, []);
+
+  useDashboardSocket({
+    autoConnect: true,
+    onStatsUpdate: handleDataUpdate,
+  });
+
   // --- Fetch participation ---
   useEffect(() => {
     api.get<{ participation: number }>(`/reports/participation`, { params: filterParams })
       .then(({ data }) => setParticipation(Number(data?.participation || 0)))
       .catch(err => console.error(err));
-  }, [globalRange, rangeStart, rangeEnd]);
+  }, [globalRange, rangeStart, rangeEnd, refreshKey]);
 
   // --- Fetch reports (respects global date filter for time-dependent data) ---
   useEffect(() => {
@@ -454,7 +467,7 @@ function Reports() {
     };
 
     fetchReports();
-  }, [globalRange, rangeStart, rangeEnd]);
+  }, [globalRange, rangeStart, rangeEnd, refreshKey]);
 
   if (loading) return (
     <div className="flex h-[80vh] w-full items-center justify-center">
