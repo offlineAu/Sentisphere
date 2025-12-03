@@ -363,7 +363,7 @@ export default function ChatScreen() {
 
   return (
     <GlobalScreenWrapper backgroundColor="#FFFFFF" topPadding={24}>
-      <KeyboardAvoidingView style={{ flex: 1, paddingHorizontal: 16, backgroundColor: '#FFFFFF' }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}> 
+      <KeyboardAvoidingView style={{ flex: 1, paddingHorizontal: 16, backgroundColor: '#FFFFFF' }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}> 
         {/* Header with back and add buttons */}
         <Animated.View style={[styles.headerRow, makeFadeUp(entrance.header)]}>
           <Pressable

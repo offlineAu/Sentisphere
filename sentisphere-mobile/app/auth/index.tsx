@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { View, TextInput, StyleSheet, ScrollView, Platform, Animated, Easing, Pressable, LayoutChangeEvent, Image, KeyboardAvoidingView, Keyboard } from 'react-native'
+import { View, TextInput, StyleSheet, ScrollView, Platform, Animated, Easing, Pressable, LayoutChangeEvent, Image, Keyboard } from 'react-native'
 import { LinearGradient } from 'expo-linear-gradient'
 import { ThemedView } from '@/components/themed-view'
 import { ThemedText } from '@/components/themed-text'
@@ -10,6 +10,7 @@ import { Colors } from '@/constants/theme'
 import { router } from 'expo-router'
 import * as SecureStore from 'expo-secure-store'
 import { LoadingSplash } from '@/components/ui/loading-splash'
+import { KeyboardAwareScrollView, KeyboardAwareScrollViewRef } from '@/components/KeyboardAwareScrollView'
 
 export default function AuthScreen() {
   const scheme = useColorScheme() ?? 'light'
@@ -36,7 +37,7 @@ export default function AuthScreen() {
   const welcomeAnim = useRef(new Animated.Value(0)).current
   const [oopsVisible, setOopsVisible] = useState(false)
   const oopsAnim = useRef(new Animated.Value(0)).current
-  const scrollViewRef = useRef<ScrollView>(null)
+  const scrollViewRef = useRef<KeyboardAwareScrollViewRef>(null)
   const nicknameInputRef = useRef<TextInput>(null)
   
 
@@ -212,42 +213,21 @@ export default function AuthScreen() {
     }
   }
 
-  // Smooth scroll to input when focused
+  // Smooth scroll to input when focused - uses KeyboardAwareScrollView's built-in method
   const smoothScrollToInput = (inputY: number) => {
-    Animated.timing(new Animated.Value(0), {
-      toValue: 1,
-      duration: Platform.OS === 'android' ? 200 : 250,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start()
-    // Calculate scroll position: input position minus offset to keep input visible but not at top
-    const visibleOffset = Platform.OS === 'android' ? 180 : 200
-    const targetY = Math.max(0, inputY - visibleOffset)
-    // Platform-specific delay: Android needs longer since keyboardDidShow fires after keyboard is visible
-    const delay = Platform.OS === 'android' ? 150 : 50
-    setTimeout(() => {
-      scrollViewRef.current?.scrollTo({ y: targetY, animated: true })
-    }, delay)
+    scrollViewRef.current?.scrollInputIntoView(inputY)
   }
 
   return (
     <GlobalScreenWrapper backgroundColor="#FFFFFF" topPadding={0}>
-      <KeyboardAvoidingView 
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={{ flex: 1, backgroundColor: '#FFFFFF' }}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 10 : 20}
-      >
-      <ScrollView 
+      <KeyboardAwareScrollView 
         ref={scrollViewRef}
-        contentContainerStyle={[styles.screen, Platform.OS === 'android' && { paddingBottom: 150 }]} 
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-        keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
-        automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+        backgroundColor="#FFFFFF"
+        contentContainerStyle={styles.screen}
       >
         <View style={styles.stack}>
           <View style={{ alignItems: 'center' }}>
-            <Image source={require('../../assets/images/Sentisphere Logo Only.png')} style={{ width: 200, height: 200, marginBottom: -20 }} accessibilityLabel="Login" />
+            <Image source={require('../../assets/images/sentisphere-logo.png')} style={{ width: 200, height: 200, marginBottom: -20 }} accessibilityLabel="Login" />
           </View>
           <ThemedText type="title" style={[styles.title, { fontSize: 30 }]}>Welcome Student</ThemedText>
 
@@ -340,8 +320,7 @@ export default function AuthScreen() {
           ) : null}
           </Animated.View>
         </View>
-      </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardAwareScrollView>
       
       {/* Animated Toast */}
       {toastMessage && (
@@ -385,7 +364,7 @@ export default function AuthScreen() {
         <View style={styles.successOverlay}>
           <LinearGradient colors={["#FFFFFF", "#ECFDF5"]} style={StyleSheet.absoluteFillObject} />
           <Animated.View style={{ alignItems: 'center', gap: 8, opacity: welcomeAnim, transform: [{ scale: welcomeAnim.interpolate({ inputRange: [0,1], outputRange: [0.96, 1] }) }] }}>
-            <Image source={require('../../assets/images/welcome back.png')} style={{ width: 120, height: 120 }} accessibilityLabel="Welcome back" />
+            <Image source={require('../../assets/images/welcome-back.png')} style={{ width: 120, height: 120 }} accessibilityLabel="Welcome back" />
             <ThemedText style={{ fontSize: 20, fontFamily: 'Inter_700Bold', color: '#111827', marginTop: 6 }}>
               Welcome back to Sentisphere!
             </ThemedText>
