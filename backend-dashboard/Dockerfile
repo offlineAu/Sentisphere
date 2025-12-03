@@ -6,11 +6,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# When Root Directory = backend-dashboard, use local paths
-COPY requirements.txt ./requirements.txt
+# When building on Railway, the build context is the repo root and this
+# Dockerfile is referenced as backend-dashboard/Dockerfile, so we must copy
+# files from the backend-dashboard/ subfolder.
+COPY backend-dashboard/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+COPY backend-dashboard/. .
 
 EXPOSE ${PORT}
 
