@@ -57,7 +57,7 @@ export default function ChatScreen() {
   const { width } = useWindowDimensions();
   const isTablet = width >= 900;
   const insets = useSafeAreaInsets();
-  const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8010';
+  const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://sentisphere-production.up.railway.app';
   const [conversations, setConversations] = useState<ApiConversation[]>([]);
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
   const [loading, setLoading] = useState<boolean>(true);

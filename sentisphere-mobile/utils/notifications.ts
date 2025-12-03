@@ -16,7 +16,7 @@ import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 import * as SecureStore from 'expo-secure-store';
 
-const API = process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8010';
+const API = process.env.EXPO_PUBLIC_API_URL || 'https://sentisphere-production.up.railway.app';
 
 /**
  * Configure notification behavior globally (should be called once at app startup)

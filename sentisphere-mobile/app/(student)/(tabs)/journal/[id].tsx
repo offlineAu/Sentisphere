@@ -17,7 +17,7 @@ export default function JournalDetailScreen() {
   const router = useRouter();
   const scheme = useColorScheme() ?? 'light';
   const palette = Colors[scheme] as any;
-  const API = process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8010';
+  const API = process.env.EXPO_PUBLIC_API_URL || 'https://sentisphere-production.up.railway.app';
   const { width: winW, height: winH } = useWindowDimensions();
 
   const [loading, setLoading] = useState(true);

@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
-import { Platform } from 'react-native';
+import { Platform, BackHandler } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useRouter, useSegments } from 'expo-router';
 import * as Notifications from 'expo-notifications';
 import { 
   initializePushNotifications, 
@@ -12,9 +12,40 @@ import {
 
 export default function StudentLayout() {
   const router = useRouter();
+  const segments = useSegments();
   const [authorized, setAuthorized] = useState<boolean | null>(null);
   const notificationListener = useRef<Notifications.Subscription | null>(null);
   const responseListener = useRef<Notifications.Subscription | null>(null);
+
+  /**
+   * Handle Android hardware back button.
+   * When user is logged in and on the main tabs (dashboard), prevent going back to auth screen.
+   * This keeps the user in the app instead of accidentally logging out.
+   */
+  useEffect(() => {
+    if (Platform.OS !== 'android' || !authorized) return;
+
+    const onBackPress = () => {
+      // Cast segments to string array to avoid TypeScript strict typing issues
+      const segmentStrings = segments as string[];
+      
+      // Check if we're on the main tabs (dashboard area)
+      const isOnMainTabs = segmentStrings.some(s => s.includes('(tabs)') || s.includes('tabs'));
+      const isOnDashboard = segmentStrings.some(s => s.includes('dashboard'));
+      
+      // If on main tabs or dashboard with no deep navigation, prevent back
+      if (isOnMainTabs && !segmentStrings.some(s => s.includes('appointments') || s.includes('analytics'))) {
+        // On main dashboard - prevent back to auth screen
+        return true; // Prevent default back behavior
+      }
+      
+      // Allow normal back navigation for other screens (appointments, chat details, etc.)
+      return false;
+    };
+
+    const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => subscription.remove();
+  }, [authorized, segments]);
 
   // Check authentication - this runs first, BEFORE any push notification logic
   useEffect(() => {
