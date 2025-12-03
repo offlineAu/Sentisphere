@@ -98,7 +98,7 @@ export function LoadingSplash({ visible, nickname, statusText = 'Creating your a
       <View style={styles.logoWrapper}>
         <Animated.View style={[styles.glow, glowStyle]} />
         <Animated.View style={[styles.logoBadge, logoStyle]}>
-          <Image source={require('@/assets/images/emotional-intelligence-brain-heart.png')} style={styles.logo} />
+          <Image source={require('@/assets/images/Sentisphere Logo Only.png')} style={styles.logo} />
         </Animated.View>
         <Animated.View style={[styles.messageBlock, messageStyle]}>
           <ThemedText type="subtitle" style={styles.status}>{statusText}</ThemedText>
@@ -145,8 +145,8 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(13, 140, 79, 0.18)',
   },
   logo: {
-    width: 84,
-    height: 84,
+    width: 100,
+    height: 100,
     resizeMode: 'contain',
   },
   messageBlock: {

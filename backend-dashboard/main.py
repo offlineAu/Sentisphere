@@ -2047,6 +2047,7 @@ def list_emotional_checkins(
 
 
 class JournalIn(BaseModel):
+    title: Optional[str] = None
     content: str
 
 
@@ -2063,6 +2064,7 @@ def create_journal(
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
     content = (payload.content or "").strip()
+    title = (payload.title or "").strip() if payload.title else None
     if not content:
         raise HTTPException(status_code=422, detail="Content required")
 
@@ -2072,11 +2074,11 @@ def create_journal(
             ins = conn.execute(
                 text(
                     """
-                    INSERT INTO journal (user_id, content, created_at)
-                    VALUES (:uid, :content, NOW())
+                    INSERT INTO journal (user_id, title, content, created_at)
+                    VALUES (:uid, :title, :content, NOW())
                     """
                 ),
-                {"uid": uid, "content": content},
+                {"uid": uid, "title": title, "content": content},
             )
             conn.commit()
             journal_id = int(ins.lastrowid)
@@ -2175,7 +2177,7 @@ def list_journals(limit: int = Query(50, ge=1, le=200), token: str = Depends(oau
 
     q = text(
         """
-        SELECT journal_id, content, created_at
+        SELECT journal_id, title, content, created_at
         FROM journal
         WHERE user_id = :uid AND (deleted_at IS NULL)
         ORDER BY created_at DESC
@@ -2187,6 +2189,7 @@ def list_journals(limit: int = Query(50, ge=1, le=200), token: str = Depends(oau
         return [
             {
                 "journal_id": r["journal_id"],
+                "title": r["title"],
                 "content": r["content"],
                 "created_at": r["created_at"].strftime("%Y-%m-%dT%H:%M:%S") if r["created_at"] else None,
             }
@@ -2203,7 +2206,7 @@ def get_journal(journal_id: int, token: str = Depends(oauth2_scheme)):
 
     q = text(
         """
-        SELECT journal_id, content, created_at
+        SELECT journal_id, title, content, created_at
         FROM journal
         WHERE journal_id = :jid AND user_id = :uid AND (deleted_at IS NULL)
         LIMIT 1
@@ -2215,6 +2218,7 @@ def get_journal(journal_id: int, token: str = Depends(oauth2_scheme)):
             raise HTTPException(status_code=404, detail="Journal not found")
         return {
             "journal_id": row["journal_id"],
+            "title": row["title"],
             "content": row["content"],
             "created_at": row["created_at"].strftime("%Y-%m-%dT%H:%M:%S") if row["created_at"] else None,
         }

@@ -5,10 +5,32 @@ import 'react-native-reanimated';
 import './global.css';
 
 import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from '@expo-google-fonts/inter';
-import { View, ActivityIndicator, Platform } from 'react-native';
+import { View, Image, Platform, StyleSheet } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useEffect } from 'react';
 import { Colors } from '@/constants/theme';
+import Animated, { useAnimatedStyle, useSharedValue, withRepeat, withTiming, Easing } from 'react-native-reanimated';
+
+// Define styles BEFORE component to ensure they're available
+const loadingStyles = StyleSheet.create({
+  container: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#ffffff',
+  },
+  logoWrapper: {
+    width: 120,
+    height: 120,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  logo: {
+    width: 100,
+    height: 100,
+    resizeMode: 'contain',
+  },
+});
 
 export const unstable_settings = {
   anchor: '(student)',
@@ -33,10 +55,39 @@ export default function RootLayout() {
     }
   }, []);
 
+  // Smooth pulse animation for loading state
+  const pulseScale = useSharedValue(1);
+  const pulseOpacity = useSharedValue(0.6);
+  
+  useEffect(() => {
+    if (!fontsLoaded) {
+      pulseScale.value = withRepeat(
+        withTiming(1.08, { duration: 1000, easing: Easing.inOut(Easing.ease) }),
+        -1,
+        true
+      );
+      pulseOpacity.value = withRepeat(
+        withTiming(1, { duration: 1000, easing: Easing.inOut(Easing.ease) }),
+        -1,
+        true
+      );
+    }
+  }, [fontsLoaded]);
+
+  const logoAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: pulseScale.value }],
+    opacity: pulseOpacity.value,
+  }));
+
   if (!fontsLoaded) {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-        <ActivityIndicator />
+      <View style={loadingStyles.container}>
+        <Animated.View style={[loadingStyles.logoWrapper, logoAnimatedStyle]}>
+          <Image 
+            source={require('@/assets/images/Sentisphere Logo Only.png')} 
+            style={loadingStyles.logo}
+          />
+        </Animated.View>
       </View>
     );
   }
@@ -60,8 +111,8 @@ export default function RootLayout() {
         <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: Colors.light.background } }}>
           <Stack.Screen name="index" options={{ headerShown: false }} />
           <Stack.Screen name="(student)" options={{ headerShown: false }} />
-          <Stack.Screen name="auth" options={{ headerShown: false }} />
-          <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+          <Stack.Screen name="(auth)/login" options={{ headerShown: false }} />
+          <Stack.Screen name="auth/index" options={{ headerShown: false }} />
           <Stack.Screen name="modal" options={{ presentation: 'modal', headerShown: false }} />
         </Stack>
         <StatusBar style="dark" />
