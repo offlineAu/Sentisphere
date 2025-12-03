@@ -2,11 +2,11 @@ import { ExpoConfig, ConfigContext } from 'expo/config';
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
-  name: "sentisphere-mobile",
+  name: "Sentisphere",
   slug: "sentisphere-mobile",
   version: "1.0.0",
   orientation: "portrait",
-  icon: "./assets/images/Sentisphere Logo Only.png",
+  icon: "./assets/images/sentisphere-logo.png",
   scheme: "sentispheremobile",
   userInterfaceStyle: "light",
   newArchEnabled: true,
@@ -47,7 +47,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     [
       "expo-splash-screen",
       {
-        image: "./assets/images/Sentisphere Logo Only.png",
+        image: "./assets/images/sentisphere-logo.png",
         imageWidth: 180,
         resizeMode: "contain",
         backgroundColor: "#ffffff",
@@ -62,7 +62,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     [
       "expo-notifications",
       {
-        icon: "./assets/images/Sentisphere Logo Only.png",
+        icon: "./assets/images/sentisphere-logo.png",
         color: "#10B981",
         sounds: []
       }

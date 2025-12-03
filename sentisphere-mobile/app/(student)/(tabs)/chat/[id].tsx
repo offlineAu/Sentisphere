@@ -447,7 +447,7 @@ import { useFocusEffect } from '@react-navigation/native';
 
   return (
     <GlobalScreenWrapper backgroundColor={palette.background}>
-      <KeyboardAvoidingView style={{ flex: 1, backgroundColor: palette.background }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView style={{ flex: 1, backgroundColor: palette.background }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <Stack.Screen options={{ title: (name as string) || 'Chat' }} />
         {/* In-app header */}
         <Animated.View style={[styles.chatHeader, { backgroundColor: palette.background, borderBottomColor: palette.border }, makeFadeUp(entrance.header)]}>

@@ -1,0 +1,72 @@
+# =============================================
+# EAS BUILD IGNORE - Optimized for smaller uploads
+# =============================================
+
+# Expo cache (regenerated during build)
+.expo/
+.expo-shared/
+
+# Node modules (EAS installs fresh)
+node_modules/
+
+# Native build folders (EAS generates these)
+android/
+ios/
+build/
+dist/
+web-build/
+
+# OS junk
+.DS_Store
+Thumbs.db
+*.log
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment files (use EAS secrets instead)
+.env
+.env.*
+*.env
+
+# Cache files
+.cache/
+.tmp/
+*.cache
+
+# Build outputs
+*.aab
+*.apk
+*.ipa
+*.tar.gz
+
+# Editor configs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# TypeScript build info
+*.tsbuildinfo
+expo-env.d.ts
+
+# Git
+.git/
+.gitignore
+
+# Documentation (not needed for build)
+*.md
+LICENSE
+
+# Test files
+__tests__/
+*.test.ts
+*.test.tsx
+*.spec.ts
+*.spec.tsx
+coverage/
+
+# Metro
+.metro-health-check*

@@ -467,7 +467,7 @@ export default function MoodScreen() {
         <View style={{ width: 40 }} />
       </Animated.View>
 
-      <KeyboardAvoidingView style={{ flex: 1, backgroundColor: '#FFFFFF' }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView style={{ flex: 1, backgroundColor: '#FFFFFF' }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <Animated.View style={[styles.stepContainer, makeFadeUp(entrance.content), { opacity: Animated.multiply(entrance.content, fadeAnim), transform: [{ translateX: slideAnim }] }]}>
           {step === 0 && (
             <ScrollView 
