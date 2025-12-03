@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
-from typing import Iterable
+from typing import Iterable, Optional
 
 from sqlalchemy.orm import Session
 
@@ -12,6 +13,7 @@ from app.models.journal_sentiment import JournalSentiment
 from app.schemas.sentiment import SentimentResult
 from app.utils.nlp_loader import SentimentOutput, analyze_text, analyze_checkin_text
 from app.utils.text_cleaning import clean_text
+from app.utils.gibberish_detector import GibberishDetector
 
 
 class SentimentService:
@@ -52,8 +54,19 @@ class SentimentService:
         return SentimentResult(**prediction.__dict__)
 
     @classmethod
-    def _persist_journal_sentiment(cls, db: Session, journal: Journal) -> JournalSentiment:
-        prediction = cls._predict(journal.content or "")
+    def _persist_journal_sentiment(cls, db: Session, journal: Journal) -> Optional[JournalSentiment]:
+        """Analyze and persist journal sentiment, skipping gibberish."""
+        content = journal.content or ""
+        
+        # Check for gibberish
+        if GibberishDetector.is_gibberish(content):
+            reason = GibberishDetector.get_reason(content)
+            logging.info(
+                f"[Sentiment] Skipping journal {journal.journal_id} - gibberish detected: {reason}"
+            )
+            return None  # Don't create sentiment record for gibberish
+        
+        prediction = cls._predict(content)
         sentiment = JournalSentiment(
             journal_id=journal.journal_id,
             sentiment=prediction.sentiment,
@@ -67,13 +80,31 @@ class SentimentService:
         return sentiment
 
     @classmethod
-    def _persist_checkin_sentiment(cls, db: Session, checkin: EmotionalCheckin) -> CheckinSentiment:
+    def _persist_checkin_sentiment(cls, db: Session, checkin: EmotionalCheckin) -> Optional[CheckinSentiment]:
         """
         Analyze and persist sentiment for an emotional check-in.
         
         Uses context-aware analysis that integrates the user's reported
         mood, energy, stress, and feel_better state to prevent contradictions.
+        
+        For gibberish comments, we ignore the free-text comment but still
+        compute sentiment purely from the structured fields
+        (mood_level, energy_level, stress_level, feel_better).
         """
+        raw_comment = checkin.comment or ""
+
+        # If the comment looks like gibberish, don't skip the sentiment;
+        # just drop the text and rely on the structured fields.
+        if raw_comment and GibberishDetector.is_gibberish(raw_comment):
+            reason = GibberishDetector.get_reason(raw_comment)
+            logging.info(
+                f"[Sentiment] Check-in {checkin.checkin_id} comment treated as gibberish; "
+                f"using only mood/energy/stress/feel_better. Reason: {reason}"
+            )
+            comment_for_model = ""
+        else:
+            comment_for_model = raw_comment
+
         # Extract user context from the check-in
         mood_level = None
         energy_level = None
@@ -90,9 +121,11 @@ class SentimentService:
         if checkin.feel_better:
             feel_better = checkin.feel_better.value if hasattr(checkin.feel_better, 'value') else str(checkin.feel_better)
         
-        # Use context-aware analysis
+        # Use context-aware analysis. The text may be empty if the
+        # original comment was gibberish, but the model will still
+        # infer sentiment from the structured context.
         prediction = analyze_checkin_text(
-            text=checkin.comment or "",
+            text=comment_for_model,
             mood_level=mood_level,
             energy_level=energy_level,
             stress_level=stress_level,

@@ -59,7 +59,7 @@ export default function Login() {
   return (
     <div className="min-h-screen relative flex items-center justify-center bg-transparent p-4">
       <Head title="Login" />
-      <div className="w-full max-w-5xl bg-white rounded-2xl shadow-xl overflow-hidden grid grid-cols-1 md:grid-cols-2">
+      <div className="w-full max-w-5xl bg-white dark:bg-gray-900 rounded-2xl shadow-xl overflow-hidden grid grid-cols-1 md:grid-cols-2">
         {/* Left panel (Welcome Back) */}
         <div className="hidden md:flex relative flex-col items-center justify-center gap-5 p-10 bg-gradient-to-br from-emerald-600 via-emerald-500 to-teal-500 text-white">
           <div className="flex items-center gap-2">
@@ -77,16 +77,16 @@ export default function Login() {
         {/* Right panel (Auth forms) */}
         <div className="p-8 md:p-10">
           <div className="flex items-center justify-between mb-6">
-            <h2 className="text-2xl font-semibold text-primary">
+            <h2 className="text-2xl font-semibold text-primary dark:text-emerald-400">
               {mode === 'signup' ? 'Create Account' : 'Sign In'}
             </h2>
             <div className="flex gap-2">
               <button
-                className={`text-xs px-3 py-1.5 rounded-full ${mode==='signin' ? 'bg-primary text-primary-foreground' : 'border border-gray-300 text-gray-700 hover:bg-gray-100 active:bg-gray-200'}`}
+                className={`text-xs px-3 py-1.5 rounded-full ${mode==='signin' ? 'bg-primary text-primary-foreground' : 'border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 active:bg-gray-200 dark:active:bg-gray-700'}`}
                 onClick={() => setMode('signin')}
               >Sign In</button>
               <button
-                className={`text-xs px-3 py-1.5 rounded-full ${mode==='signup' ? 'bg-primary text-primary-foreground' : 'border border-gray-300 text-gray-700 hover:bg-gray-100 active:bg-gray-200'}`}
+                className={`text-xs px-3 py-1.5 rounded-full ${mode==='signup' ? 'bg-primary text-primary-foreground' : 'border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 active:bg-gray-200 dark:active:bg-gray-700'}`}
                 onClick={() => setMode('signup')}
               >Sign Up</button>
             </div>
@@ -102,19 +102,19 @@ export default function Login() {
             >
               <div className="w-1/2 pr-4">
                 <form onSubmit={onSignin} className="space-y-3">
-                  <label className="block text-sm text-gray-700">Email</label>
+                  <label className="block text-sm text-gray-700 dark:text-gray-300">Email</label>
                   <input
-                    className="w-full border rounded-xl px-3 py-2 border-border focus:ring-2 focus:ring-[var(--ring)] outline-none"
+                    className="w-full border rounded-xl px-3 py-2 border-border dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-[var(--ring)] outline-none"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     autoComplete="username"
                     type="email"
                     required
                   />
-                  <label className="block text-sm text-gray-700">Password</label>
+                  <label className="block text-sm text-gray-700 dark:text-gray-300">Password</label>
                   <div className="relative">
                     <input
-                      className="w-full border rounded-xl px-3 py-2 border-border focus:ring-2 focus:ring-[var(--ring)] outline-none"
+                      className="w-full border rounded-xl px-3 py-2 border-border dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-[var(--ring)] outline-none"
                       type={showPwd ? 'text' : 'password'}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
@@ -123,7 +123,7 @@ export default function Login() {
                     />
                     <button
                       type="button"
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-600 hover:text-gray-800"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
                       onClick={() => setShowPwd((v) => !v)}
                       aria-label={showPwd ? 'Hide password' : 'Show password'}
                     >
@@ -132,7 +132,7 @@ export default function Login() {
                   </div>
                   <div className="flex items-center gap-2">
                     <input id="remember" type="checkbox" className="h-4 w-4 rounded border-border" checked={remember} onChange={(e)=>setRemember(e.target.checked)} />
-                    <label htmlFor="remember" className="text-sm text-gray-700">Remember me</label>
+                    <label htmlFor="remember" className="text-sm text-gray-700 dark:text-gray-300">Remember me</label>
                   </div>
                   <button
                     type="submit"
@@ -145,19 +145,19 @@ export default function Login() {
               </div>
               <div className="w-1/2 pl-4">
                 <form onSubmit={onSignup} className="space-y-3">
-                  <label className="block text-sm text-gray-700">Email</label>
+                  <label className="block text-sm text-gray-700 dark:text-gray-300">Email</label>
                   <input
-                    className="w-full border rounded-xl px-3 py-2 border-border focus:ring-2 focus:ring-[var(--ring)] outline-none"
+                    className="w-full border rounded-xl px-3 py-2 border-border dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-[var(--ring)] outline-none"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     autoComplete="email"
                     type="email"
                     required
                   />
-                  <label className="block text-sm text-gray-700">Password</label>
+                  <label className="block text-sm text-gray-700 dark:text-gray-300">Password</label>
                   <div className="relative">
                     <input
-                      className="w-full border rounded-xl px-3 py-2 border-border focus:ring-2 focus:ring-[var(--ring)] outline-none"
+                      className="w-full border rounded-xl px-3 py-2 border-border dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-[var(--ring)] outline-none"
                       type={showPwd2 ? 'text' : 'password'}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
@@ -166,16 +166,16 @@ export default function Login() {
                     />
                     <button
                       type="button"
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-600 hover:text-gray-800"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
                       onClick={() => setShowPwd2((v) => !v)}
                       aria-label={showPwd2 ? 'Hide password' : 'Show password'}
                     >
                       {showPwd2 ? 'Hide' : 'Show'}
                     </button>
                   </div>
-                  <label className="block text-sm text-gray-700">Confirm Password</label>
+                  <label className="block text-sm text-gray-700 dark:text-gray-300">Confirm Password</label>
                   <input
-                    className="w-full border rounded-xl px-3 py-2 border-border focus:ring-2 focus:ring-[var(--ring)] outline-none"
+                    className="w-full border rounded-xl px-3 py-2 border-border dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-[var(--ring)] outline-none"
                     type="password"
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}

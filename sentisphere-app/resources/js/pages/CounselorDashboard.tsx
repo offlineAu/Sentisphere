@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useMemo, ReactElement } from "react";
+import { useEffect, useState, useRef, useMemo, ReactElement, useCallback } from "react";
 import axios from "axios";
 import { ChevronLeft, ChevronRight, Info, Users, CalendarCheck, CalendarClock, AlertTriangle, AlertCircle, Bell, Search, Mail, Percent as PercentIcon, Hash as HashIcon, Brain, User, Filter } from "lucide-react";
 import { motion } from "framer-motion";
@@ -23,6 +23,7 @@ import api from "../lib/api";
 import { LoadingSpinner } from "../components/loading-spinner";
 import { sessionStatus } from "../lib/auth";
 import { router } from "@inertiajs/react";
+import { useDashboardSocket, type DashboardStats } from "@/hooks";
 
 // Format date to be more readable (e.g., "October 23, 2023 3:58 PM")
 const formatDate = (dateString: string | Date, includeTime = false) => {
@@ -160,7 +161,8 @@ const StatCard: React.FC<{
   delta?: string;
   variant?: 'default' | 'appointments' | 'risk' | 'checkins';
   customGradient?: string;
-}> = ({ title, value, icon, delta, variant = 'default', customGradient }) => {
+  isLive?: boolean;
+}> = ({ title, value, icon, delta, variant = 'default', customGradient, isLive = false }) => {
   const getGradient = () => {
     if (customGradient) {
       return `bg-gradient-to-br ${customGradient} border border-transparent`;
@@ -205,7 +207,16 @@ const StatCard: React.FC<{
   };
 
   return (
-    <div className={`${getGradient()} rounded-2xl shadow p-5 hover:shadow-md transition-all duration-300 h-full`}>
+    <div className={`${getGradient()} rounded-2xl shadow p-5 hover:shadow-md transition-all duration-300 h-full relative`}>
+      {/* Live indicator */}
+      {isLive && (
+        <div className="absolute top-2 right-2 flex items-center gap-1" title="Real-time updates active">
+          <span className="relative flex h-2 w-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-white"></span>
+          </span>
+        </div>
+      )}
       <div className="flex items-center justify-between mb-2">
         <h3 className="text-sm font-medium text-white">
           {title}
@@ -344,6 +355,24 @@ export default function CounselorDashboard() {
     ),
     [globalRange, rangeStart, rangeEnd]
   );
+
+  // WebSocket for instant notifications only (doesn't replace REST API loading)
+  const handleStatsUpdate = useCallback((stats: DashboardStats) => {
+    console.log('[Dashboard] WebSocket notification - new data from mobile');
+    // Only update the specific stats that changed, trigger a refresh
+    setRefreshKey(prev => prev + 1);
+  }, []);
+
+  const {
+    connected: wsConnected,
+    lastUpdate: wsLastUpdate,
+  } = useDashboardSocket({
+    autoConnect: authenticated,
+    onStatsUpdate: handleStatsUpdate,
+    onConnectionChange: (connected) => {
+      console.log('[Dashboard] WebSocket:', connected ? 'connected' : 'disconnected');
+    },
+  });
 
   const moodScale = [
     { value: 1, label: 'Terrible' },
@@ -1055,25 +1084,32 @@ export default function CounselorDashboard() {
             value={studentsMonitored}
             variant="default"
             icon={<Users className="h-4 w-4" />}
-            delta={`Updated ${formatDate(new Date())}`}
+            delta={wsLastUpdate ? `Live • ${wsLastUpdate.toLocaleTimeString()}` : `Updated ${formatDate(new Date())}`}
+            isLive={wsConnected}
           />
           <StatCard
             title="This Week Check-ins"
             value={thisWeekCheckins}
             variant="checkins"
             icon={<CalendarCheck className="h-4 w-4" />}
+            delta={wsConnected ? "Real-time" : undefined}
+            isLive={wsConnected}
           />
           <StatCard
             title="Open Appointments"
             value={openAppointments}
             variant="appointments"
             icon={<CalendarClock className="h-4 w-4" />}
+            delta={wsConnected ? "Real-time" : undefined}
+            isLive={wsConnected}
           />
           <StatCard
             title="High-Risk Flags"
             value={highRiskFlags}
             variant="risk"
             icon={<AlertTriangle className="h-4 w-4" />}
+            delta={wsConnected ? "Real-time" : undefined}
+            isLive={wsConnected}
           />
         </div>
 
