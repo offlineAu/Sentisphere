@@ -48,7 +48,7 @@ import { useFocusEffect } from '@react-navigation/native';
   const [inputFocused, setInputFocused] = useState(false);
   const [typing, setTyping] = useState(false);
   const [inputHeight, setInputHeight] = useState(40);
-  const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8010';
+  const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://sentisphere-production.up.railway.app';
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [conv, setConv] = useState<ApiConversation | null>(null);

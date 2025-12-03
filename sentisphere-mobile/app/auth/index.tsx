@@ -14,7 +14,7 @@ import { LoadingSplash } from '@/components/ui/loading-splash'
 export default function AuthScreen() {
   const scheme = useColorScheme() ?? 'light'
   const palette = Colors[scheme] as any
-  const API = process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8010'
+  const API = process.env.EXPO_PUBLIC_API_URL || 'https://sentisphere-production.up.railway.app'
 
   const [mode, setMode] = useState<'signup' | 'login'>('signup')
   const [nickname, setNickname] = useState('')
@@ -213,31 +213,37 @@ export default function AuthScreen() {
   }
 
   // Smooth scroll to input when focused
-  const smoothScrollToInput = (targetY: number) => {
+  const smoothScrollToInput = (inputY: number) => {
     Animated.timing(new Animated.Value(0), {
       toValue: 1,
-      duration: 250,
+      duration: Platform.OS === 'android' ? 200 : 250,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start()
+    // Calculate scroll position: input position minus offset to keep input visible but not at top
+    const visibleOffset = Platform.OS === 'android' ? 180 : 200
+    const targetY = Math.max(0, inputY - visibleOffset)
+    // Platform-specific delay: Android needs longer since keyboardDidShow fires after keyboard is visible
+    const delay = Platform.OS === 'android' ? 150 : 50
     setTimeout(() => {
       scrollViewRef.current?.scrollTo({ y: targetY, animated: true })
-    }, 50)
+    }, delay)
   }
 
   return (
     <GlobalScreenWrapper backgroundColor="#FFFFFF" topPadding={0}>
       <KeyboardAvoidingView 
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={{ flex: 1, backgroundColor: '#FFFFFF' }}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 10 : 0}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 10 : 20}
       >
       <ScrollView 
         ref={scrollViewRef}
-        contentContainerStyle={styles.screen} 
+        contentContainerStyle={[styles.screen, Platform.OS === 'android' && { paddingBottom: 150 }]} 
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
         keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+        automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
       >
         <View style={styles.stack}>
           <View style={{ alignItems: 'center' }}>

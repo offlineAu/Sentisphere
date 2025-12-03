@@ -27,7 +27,7 @@ export default function JournalListScreen() {
   const scheme = useColorScheme() ?? 'light';
   const palette = Colors[scheme] as any;
   const { height: winH, width: winW } = useWindowDimensions();
-  const API = process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8010';
+  const API = process.env.EXPO_PUBLIC_API_URL || 'https://sentisphere-production.up.railway.app';
   const router = useRouter();
 
   // Tabs: 0 = Write Entry, 1 = My Entries
@@ -40,19 +40,24 @@ export default function JournalListScreen() {
   // Scroll ref for auto-scroll to focused input with smooth animation
   const scrollViewRef = useRef<ScrollView>(null);
   const scrollAnim = useRef(new Animated.Value(0)).current;
-  const scrollToInput = (yOffset: number = 300) => {
+  const scrollToInput = (inputY: number = 300) => {
     // Trigger subtle animation for visual feedback
     scrollAnim.setValue(0);
     Animated.timing(scrollAnim, {
       toValue: 1,
-      duration: 280,
+      duration: Platform.OS === 'android' ? 220 : 280,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start();
-    // Delay scroll slightly for smoother feel
+    // Calculate scroll position: input position minus offset to keep input visible but not at top
+    // Lower offset = input appears lower on screen (more comfortable for typing)
+    const visibleOffset = Platform.OS === 'android' ? 180 : 200;
+    const targetY = Math.max(0, inputY - visibleOffset);
+    // Platform-specific delay: Android needs longer since keyboardDidShow fires after keyboard is visible
+    const delay = Platform.OS === 'android' ? 150 : 80;
     setTimeout(() => {
-      scrollViewRef.current?.scrollTo({ y: yOffset, animated: true });
-    }, 80);
+      scrollViewRef.current?.scrollTo({ y: targetY, animated: true });
+    }, delay);
   };
   const onTabChange = (next: 0 | 1) => {
     setTab(next);
@@ -368,16 +373,17 @@ export default function JournalListScreen() {
   return (
     <GlobalScreenWrapper backgroundColor={scheme === 'dark' ? palette.background : '#FAFBFC'}>
       <KeyboardAvoidingView 
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined} 
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
         style={{ flex: 1, backgroundColor: scheme === 'dark' ? palette.background : '#FAFBFC' }}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 0}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 20}
       >
         <ScrollView
           ref={scrollViewRef}
           keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ padding: 24, paddingTop: 20, paddingBottom: 120, backgroundColor: scheme === 'dark' ? palette.background : '#FAFBFC' }}
+          automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+          contentContainerStyle={{ padding: 24, paddingTop: 20, paddingBottom: Platform.OS === 'android' ? 200 : 120, backgroundColor: scheme === 'dark' ? palette.background : '#FAFBFC' }}
         >
           <Animated.View style={makeFadeUp(entranceHeader)}>
             <View style={{ height: 24 }} />

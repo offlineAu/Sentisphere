@@ -6,23 +6,43 @@ import { Colors } from '@/constants/theme';
 export function Card({ style, children, ...rest }: ViewProps) {
   const scheme = useColorScheme() ?? 'light';
   const palette = Colors[scheme] as any;
+  const flattened = Array.isArray(style) ? style : [style];
+
+  // On Android, elevation shadows work best when applied directly to the card
+  // with matching borderRadius and backgroundColor
+  if (Platform.OS === 'android') {
+    return (
+      <View
+        {...rest}
+        style={StyleSheet.flatten([
+          {
+            borderRadius: 24,
+            backgroundColor: palette.card ?? Colors.light.background,
+            overflow: 'hidden',
+            elevation: 4,
+            shadowColor: '#000',
+          },
+          ...flattened,
+        ])}
+      >
+        {children}
+      </View>
+    );
+  }
+
+  // iOS and web use shadow wrapper for better shadow rendering
   const baseStyle = {
     borderRadius: 24,
     backgroundColor: palette.card ?? Colors.light.background,
     overflow: 'hidden' as const,
   } as const;
 
-  const flattened = Array.isArray(style) ? style : [style];
   const shadowStyle = Platform.select({
     ios: {
       shadowColor: '#000',
       shadowOpacity: 0.08,
       shadowRadius: 18,
       shadowOffset: { width: 0, height: 8 },
-    },
-    android: {
-      elevation: 6,
-      shadowColor: '#000',
     },
     default: {
       shadowColor: '#000',

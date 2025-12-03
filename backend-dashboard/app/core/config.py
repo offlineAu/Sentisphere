@@ -21,13 +21,22 @@ class Settings(BaseSettings):
             f"@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
         )
 
-    # Dedicated mobile database (falls back to main credentials unless overridden)
-    MOBILE_DB_USER: str = os.getenv("MOBILE_DB_USER") or DB_USER
-    MOBILE_DB_PASS: str = os.getenv("MOBILE_DB_PASS") or DB_PASS
-    MOBILE_DB_HOST: str = os.getenv("MOBILE_DB_HOST") or DB_HOST
-    MOBILE_DB_PORT: str = os.getenv("MOBILE_DB_PORT") or DB_PORT
-    MOBILE_DB_NAME: str = os.getenv("MOBILE_DB_NAME", "sentisphere_app")
-    MOBILE_DB_DRIVER: str = os.getenv("MOBILE_DB_DRIVER") or DB_DRIVER
+    @property
+    def unified_db_url(self) -> str:
+        """Unified database URL for both web and mobile connections."""
+        return self.DATABASE_URL
+
+    # ==========================================================================
+    # DEPRECATED: Mobile database config (kept for backward compatibility)
+    # As of Dec 2024, mobile and web now share a single unified database.
+    # These vars are kept so old code importing them won't break.
+    # ==========================================================================
+    MOBILE_DB_USER: str | None = None
+    MOBILE_DB_PASS: str | None = None
+    MOBILE_DB_HOST: str | None = None
+    MOBILE_DB_PORT: str | None = None
+    MOBILE_DB_NAME: str | None = None
+    MOBILE_DB_DRIVER: str | None = None
 
     # CORS
     CORS_ORIGINS: List[str] = []

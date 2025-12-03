@@ -18,7 +18,7 @@ import * as Haptics from 'expo-haptics';
 import * as SecureStore from 'expo-secure-store';
 import { learnTopics } from './data';
 
-const API = process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8010';
+const API = process.env.EXPO_PUBLIC_API_URL || 'https://sentisphere-production.up.railway.app';
 
 // Helper to get auth token
 const getToken = async () => {

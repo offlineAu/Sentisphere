@@ -1,135 +1,65 @@
+"""
+=============================================================================
+DEPRECATED MODULE: mobile_database.py
+=============================================================================
+As of December 2024, Sentisphere uses a UNIFIED database for both mobile 
+and web applications. This file is kept for backward compatibility only.
+
+All mobile DB operations now use the shared database from app.db.database.
+Schema creation is disabled — Railway uses full SQL schema import.
+
+DO NOT add new code here. Use app.db.database instead.
+=============================================================================
+"""
+
 from typing import Generator
 
-from sqlalchemy import create_engine, text
-from sqlalchemy.engine.url import make_url
-from sqlalchemy.orm import sessionmaker
+# =============================================================================
+# BACKWARD COMPATIBILITY SHIMS
+# These imports ensure existing code that imports from this module won't break.
+# All operations now use the unified/shared database.
+# =============================================================================
 
-from app.core.config import settings
+from app.db.database import engine as mobile_engine
+from app.db.database import SessionLocal as MobileSessionLocal
+from app.db.database import get_db as get_mobile_db
 
-MOBILE_DATABASE_URL = (
-    f"{settings.MOBILE_DB_DRIVER}://{settings.MOBILE_DB_USER}:{settings.MOBILE_DB_PASS}"
-    f"@{settings.MOBILE_DB_HOST}:{settings.MOBILE_DB_PORT}/{settings.MOBILE_DB_NAME}"
-)
-
-
-def _ensure_database_exists(url):
-    database_name = url.database
-    if not database_name:
-        return
-
-    server_url = (
-        f"{url.drivername}://{url.username}:{(url.password or '')}"
-        f"@{url.host}:{url.port}"
-    )
-    server_engine = create_engine(server_url, isolation_level="AUTOCOMMIT", pool_pre_ping=True)
-    try:
-        with server_engine.connect() as conn:
-            conn.execute(
-                text(
-                    f"CREATE DATABASE IF NOT EXISTS `{database_name}` "
-                    "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
-                )
-            )
-    finally:
-        server_engine.dispose()
-
-
-def _create_engine():
-    return create_engine(MOBILE_DATABASE_URL, pool_pre_ping=True)
+# Legacy URL variable (deprecated, kept for any code that references it)
+MOBILE_DATABASE_URL: str | None = None
 
 
 def initialize_mobile_database() -> None:
-    url = make_url(MOBILE_DATABASE_URL)
-    _ensure_database_exists(url)
-    with mobile_engine.connect() as conn:  # type: ignore[name-defined]
-        conn.execute(text("SELECT 1"))
-        conn.execute(text(
-            """
-            CREATE TABLE IF NOT EXISTS `user` (
-              `user_id` INT NOT NULL AUTO_INCREMENT,
-              `email` VARCHAR(100) NULL,
-              `name` VARCHAR(100) NULL,
-              `role` VARCHAR(50) NOT NULL,
-              `password_hash` VARCHAR(255) NULL,
-              `nickname` VARCHAR(50) NULL,
-              `last_login` DATETIME NULL,
-              `is_active` TINYINT(1) NOT NULL DEFAULT 1,
-              `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-              PRIMARY KEY (`user_id`),
-              UNIQUE KEY `uniq_user_nickname` (`nickname`)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """
-        ))
-        conn.execute(text(
-            """
-            CREATE TABLE IF NOT EXISTS `conversations` (
-              `conversation_id` INT NOT NULL AUTO_INCREMENT,
-              `initiator_user_id` INT NOT NULL,
-              `initiator_role` VARCHAR(20) NOT NULL,
-              `subject` VARCHAR(100) NULL,
-              `status` VARCHAR(20) NOT NULL DEFAULT 'open',
-              `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-              `last_activity_at` DATETIME NULL,
-              PRIMARY KEY (`conversation_id`),
-              KEY `idx_conversations_initiator` (`initiator_user_id`),
-              CONSTRAINT `fk_conv_user` FOREIGN KEY (`initiator_user_id`) REFERENCES `user`(`user_id`) ON DELETE CASCADE
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """
-        ))
-        conn.execute(text(
-            """
-            CREATE TABLE IF NOT EXISTS `messages` (
-              `message_id` INT NOT NULL AUTO_INCREMENT,
-              `conversation_id` INT NOT NULL,
-              `sender_id` INT NOT NULL,
-              `content` TEXT NOT NULL,
-              `is_read` TINYINT(1) NOT NULL DEFAULT 0,
-              `timestamp` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-              PRIMARY KEY (`message_id`),
-              KEY `idx_messages_conversation` (`conversation_id`),
-              KEY `idx_messages_sender` (`sender_id`),
-              CONSTRAINT `fk_msg_conv` FOREIGN KEY (`conversation_id`) REFERENCES `conversations`(`conversation_id`) ON DELETE CASCADE,
-              CONSTRAINT `fk_msg_user` FOREIGN KEY (`sender_id`) REFERENCES `user`(`user_id`) ON DELETE CASCADE
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """
-        ))
-        conn.execute(text(
-            """
-            CREATE TABLE IF NOT EXISTS `journal` (
-              `journal_id` INT NOT NULL AUTO_INCREMENT,
-              `user_id` INT NOT NULL,
-              `content` TEXT NOT NULL,
-              `created_at` DATETIME NOT NULL,
-              `deleted_at` DATETIME NULL,
-              PRIMARY KEY (`journal_id`),
-              KEY `idx_journal_user_created` (`user_id`, `created_at`)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """
-        ))
-        conn.execute(text(
-            """
-            CREATE TABLE IF NOT EXISTS `emotional_checkin` (
-              `checkin_id` INT NOT NULL AUTO_INCREMENT,
-              `user_id` INT NOT NULL,
-              `mood_level` VARCHAR(50) NOT NULL,
-              `energy_level` VARCHAR(50) NOT NULL,
-              `stress_level` VARCHAR(50) NOT NULL,
-              `comment` TEXT NULL,
-              `created_at` DATETIME NOT NULL,
-              PRIMARY KEY (`checkin_id`),
-              KEY `idx_checkin_user_created` (`user_id`, `created_at`)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """
-        ))
-
-
-mobile_engine = _create_engine()
-MobileSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=mobile_engine)
-
-
-def get_mobile_db() -> Generator:
-    db = MobileSessionLocal()
+    """
+    DEPRECATED: Schema creation disabled.
+    
+    Railway/production uses the full SQL schema import (ustp_full_schema_and_data_final.sql).
+    This function now only verifies the connection works.
+    """
+    from sqlalchemy import text
+    
+    # Just verify connection works - no schema creation
     try:
-        yield db
-    finally:
-        db.close()
+        with mobile_engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception as e:
+        # Log but don't crash - let health check report the issue
+        import logging
+        logging.warning(f"[mobile_database] Connection check failed: {e}")
+
+
+# =============================================================================
+# DEPRECATED CODE BELOW (kept as comments for reference)
+# =============================================================================
+#
+# The following code has been deprecated and replaced with shims above.
+# Schema creation SQL has been removed - use ustp_full_schema_and_data_final.sql
+#
+# Old code reference:
+# - _ensure_database_exists(url) - Created DB if not exists
+# - _create_engine() - Created separate mobile engine
+# - initialize_mobile_database() - Created tables via SQL
+# - mobile_engine = _create_engine() - Separate engine instance
+# - MobileSessionLocal = sessionmaker(...) - Separate session factory
+#
+# All of these now point to the unified database in app.db.database
+# =============================================================================

@@ -23,6 +23,8 @@ from apscheduler.triggers.cron import CronTrigger
 
 from app.core.config import settings
 from app.db.database import engine, ENGINE_INIT_ERROR_MSG
+# NOTE: mobile_engine and get_mobile_db are now shims pointing to the unified database
+# Kept for backward compatibility - both now use the same engine as web
 from app.db.mobile_database import mobile_engine, get_mobile_db
 from app.db.session import get_db, SessionLocal
 from app.api.routes.auth import router as auth_router
@@ -3448,34 +3450,48 @@ def send_message(conversation_id: int, message: MessageIn, current_user: str = D
 
 @app.get("/health")
 def health():
-    status_map = {"web": "unknown", "mobile": "unknown"}
-
-    def check_db(label: str, db_engine, init_error_msg: str | None = None):
-        if init_error_msg:
-            status_map[label] = f"error: {init_error_msg}"
-            return False
+    """
+    Health check endpoint.
+    
+    NOTE: As of Dec 2024, mobile and web use a UNIFIED database.
+    The response structure is kept for backward compatibility with mobile app.
+    Both 'web' and 'mobile' keys now reflect the same unified database status.
+    """
+    db_status = "unknown"
+    
+    # Check unified database connection
+    if ENGINE_INIT_ERROR_MSG:
+        db_status = f"error: {ENGINE_INIT_ERROR_MSG}"
+        db_ok = False
+    else:
         try:
-            with db_engine.connect() as conn:
+            with engine.connect() as conn:
                 conn.execute(text("SELECT 1"))
-            status_map[label] = "connected"
-            return True
+            db_status = "connected"
+            db_ok = True
         except Exception as exc:
-            status_map[label] = f"error: {exc.__class__.__name__}"
-            return False
+            db_status = f"error: {exc.__class__.__name__}"
+            db_ok = False
 
-    web_ok = check_db("web", engine, ENGINE_INIT_ERROR_MSG)
-    mobile_ok = check_db("mobile", mobile_engine)
+    # Response structure kept for backward compatibility
+    # Both web and mobile now use the same unified database
+    status_map = {
+        "web": db_status,
+        "mobile": db_status,  # Same as web - unified DB
+        "unified": True,  # Flag indicating unified DB mode
+    }
 
-    if web_ok and mobile_ok:
+    if db_ok:
         return {"status": "ok", "databases": status_map}
 
-    problem = []
-    if not web_ok:
-        problem.append("web_db unreachable")
-    if not mobile_ok:
-        problem.append("mobile_db unreachable")
-
-    raise HTTPException(status_code=503, detail={"status": "unhealthy", "databases": status_map, "error": ", ".join(problem)})
+    raise HTTPException(
+        status_code=503, 
+        detail={
+            "status": "unhealthy", 
+            "databases": status_map, 
+            "error": "database unreachable"
+        }
+    )
 
 # --- Mark messages as read in a conversation ---
 @app.post("/api/conversations/{conversation_id}/read")
