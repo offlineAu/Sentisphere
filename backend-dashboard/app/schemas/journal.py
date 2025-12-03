@@ -9,6 +9,7 @@ from app.schemas.user import User
 
 
 class JournalBase(BaseModel):
+    title: Optional[str] = None
     content: Optional[str] = None
     deleted_at: Optional[datetime] = None
 

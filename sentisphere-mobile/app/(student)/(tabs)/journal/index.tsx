@@ -264,8 +264,10 @@ export default function JournalListScreen() {
         .filter((r: any) => !deletedIds.has(String(r?.journal_id)))
         .map((r: any) => {
           const content = String(r?.content || '');
+          // Use API title if available, otherwise fallback to first line of content
+          const apiTitle = r?.title ? String(r.title).trim() : '';
           const firstLine = content.trim().split(/\n+/)[0]?.trim() || '';
-          const title = firstLine.slice(0, 60) || 'Journal Entry';
+          const title = apiTitle || firstLine.slice(0, 60) || 'Journal Entry';
           const body = content.slice(0, 160);
           const date = (r?.created_at || '').slice(0, 10) || '';
           return { id: String(r?.journal_id), title, body, date };
@@ -314,12 +316,22 @@ export default function JournalListScreen() {
   // Save handler (POST to backend)
   const handleSave = async () => {
     if (isSaving) return;
-    const text = body.trim();
-    if (!title.trim()) {
-      Alert.alert('Add a title', 'Please add a title for your journal entry before saving.');
+    const titleText = title.trim();
+    const contentText = body.trim();
+    
+    // Validate both fields are required
+    if (!titleText && !contentText) {
+      Alert.alert('Empty Entry', 'Please add a title and content for your journal entry before saving.');
       return;
     }
-    if (!text) return;
+    if (!titleText) {
+      Alert.alert('Title Required', 'Please add a title for your journal entry before saving.');
+      return;
+    }
+    if (!contentText) {
+      Alert.alert('Content Required', 'Please write some content for your journal entry before saving.');
+      return;
+    }
     if (Platform.OS !== 'web') {
       try { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {}
     }
@@ -334,7 +346,7 @@ export default function JournalListScreen() {
       const res = await fetch(`${API}/api/journals`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` },
-        body: JSON.stringify({ content: text }),
+        body: JSON.stringify({ title: titleText, content: contentText }),
       });
       if (res.status === 401) {
         await clearAuthToken();
@@ -351,8 +363,8 @@ export default function JournalListScreen() {
       const d = await res.json();
       const newEntry: Entry = {
         id: String(d?.journal_id ?? Date.now()),
-        title: title.trim(),
-        body: text,
+        title: titleText,
+        body: contentText,
         date: new Date().toISOString().slice(0, 10),
       };
       setEntries((prev) => [newEntry, ...prev]);
