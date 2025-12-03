@@ -1,15 +1,28 @@
 import { useRef, useCallback, useEffect } from 'react';
-import { Animated, Keyboard, Platform, ScrollView, TextInput, Easing, LayoutAnimation, UIManager } from 'react-native';
+import { Animated, Keyboard, Platform, ScrollView, TextInput, Easing, LayoutAnimation, UIManager, InteractionManager } from 'react-native';
 
 // Enable LayoutAnimation on Android
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
+// Platform-specific delays for keyboard animation timing
+const SCROLL_DELAY = Platform.select({
+  ios: 80,
+  android: 150, // Android needs longer delay since keyboardDidShow fires after keyboard is visible
+  default: 100,
+});
+
+const ANIMATION_DURATION = Platform.select({
+  ios: 280,
+  android: 220, // Slightly faster on Android for snappier feel
+  default: 280,
+});
+
 interface UseKeyboardMagnetOptions {
-  /** Extra offset from the top of keyboard (default: 120) */
+  /** Extra offset from the top of visible area (default: 40) - lower value = input appears lower on screen */
   extraOffset?: number;
-  /** Animation duration in ms (default: 280) */
+  /** Animation duration in ms (default: platform-specific) */
   animationDuration?: number;
   /** Whether to use smooth spring animation (default: true) */
   useSpring?: boolean;
@@ -21,8 +34,8 @@ interface UseKeyboardMagnetOptions {
  */
 export function useKeyboardMagnet(options: UseKeyboardMagnetOptions = {}) {
   const {
-    extraOffset = 120,
-    animationDuration = 280,
+    extraOffset = 40, // Reduced from 120 - keeps input more visible and not too high
+    animationDuration = ANIMATION_DURATION,
     useSpring = true,
   } = options;
 
@@ -31,6 +44,7 @@ export function useKeyboardMagnet(options: UseKeyboardMagnetOptions = {}) {
   const inputRefs = useRef<Map<string, TextInput>>(new Map());
   const focusedInputY = useRef<number>(0);
   const keyboardHeight = useRef<number>(0);
+  const keyboardVisible = useRef<boolean>(false);
 
   // Track keyboard show/hide
   useEffect(() => {
@@ -38,12 +52,14 @@ export function useKeyboardMagnet(options: UseKeyboardMagnetOptions = {}) {
       Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
       (e) => {
         keyboardHeight.current = e.endCoordinates.height;
+        keyboardVisible.current = true;
       }
     );
     const hideSub = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
       () => {
         keyboardHeight.current = 0;
+        keyboardVisible.current = false;
       }
     );
 
@@ -70,14 +86,14 @@ export function useKeyboardMagnet(options: UseKeyboardMagnetOptions = {}) {
   const scrollToInput = useCallback((
     inputY: number,
     inputHeight: number = 50,
-    delay: number = 100
+    delay: number = SCROLL_DELAY
   ) => {
-    // Wait for keyboard to start appearing
-    setTimeout(() => {
+    // Use InteractionManager on Android for smoother transitions
+    const doScroll = () => {
       const targetY = Math.max(0, inputY - extraOffset);
       
-      if (useSpring) {
-        // Use LayoutAnimation for smooth native feel
+      if (useSpring && Platform.OS !== 'android') {
+        // Use LayoutAnimation for smooth native feel (iOS only - can cause issues on some Android devices)
         LayoutAnimation.configureNext({
           duration: animationDuration,
           update: {
@@ -91,6 +107,16 @@ export function useKeyboardMagnet(options: UseKeyboardMagnetOptions = {}) {
         y: targetY,
         animated: true,
       });
+    };
+
+    // Wait for keyboard animation
+    setTimeout(() => {
+      if (Platform.OS === 'android') {
+        // On Android, use InteractionManager to ensure smooth animation
+        InteractionManager.runAfterInteractions(doScroll);
+      } else {
+        doScroll();
+      }
     }, delay);
   }, [extraOffset, animationDuration, useSpring]);
 
@@ -143,6 +169,33 @@ export function useKeyboardMagnet(options: UseKeyboardMagnetOptions = {}) {
     createFocusHandler,
     scrollToInput,
     scrollToInputRef,
+    keyboardVisible,
+  };
+}
+
+/**
+ * Standalone scroll helper for screens not using the full hook
+ * Use this for simple cases where you just need to scroll on focus
+ */
+export function createScrollToInput(
+  scrollRef: React.RefObject<ScrollView>,
+  options: { extraOffset?: number } = {}
+) {
+  const { extraOffset = 40 } = options; // Reduced from 120
+  
+  return (yOffset: number) => {
+    const delay = Platform.OS === 'android' ? 150 : 80;
+    const targetY = Math.max(0, yOffset - extraOffset);
+    
+    setTimeout(() => {
+      if (Platform.OS === 'android') {
+        InteractionManager.runAfterInteractions(() => {
+          scrollRef.current?.scrollTo({ y: targetY, animated: true });
+        });
+      } else {
+        scrollRef.current?.scrollTo({ y: targetY, animated: true });
+      }
+    }, delay);
   };
 }
 

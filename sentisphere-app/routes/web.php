@@ -33,6 +33,11 @@ Route::get('/profile', function () {
 require __DIR__.'/settings.php';
 require __DIR__.'/auth.php';
 
+// Proxy all /api requests to FastAPI (BFF pattern)
+Route::any('/api/{path?}', [ApiProxyController::class, 'proxy'])
+    ->where('path', '.*')
+    ->name('fastapi.proxy');
+
 // FastAPI auth via Laravel (session-managed JWT)
 Route::post('/auth/login-fastapi', [ApiProxyController::class, 'login'])->name('fastapi.login');
 Route::post('/auth/logout-fastapi', [ApiProxyController::class, 'logout'])->name('fastapi.logout');
@@ -43,8 +48,3 @@ Route::post('/auth/signup', [AuthController::class, 'signup'])->name('auth.signu
 Route::get('/login', function () {
     return Inertia::render('Login', [ 'hideSidebar' => true ]);
 })->name('login');
-
-// Proxy all /api requests to FastAPI (BFF pattern)
-Route::any('/api/{path?}', [ApiProxyController::class, 'proxy'])
-    ->where('path', '.*')
-    ->name('fastapi.proxy');

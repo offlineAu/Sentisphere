@@ -34,7 +34,7 @@ export default function MoodScreen() {
   const palette = Colors[scheme] as any;
   const insets = useSafeAreaInsets();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
-  const API = process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8010';
+  const API = process.env.EXPO_PUBLIC_API_URL || 'https://sentisphere-production.up.railway.app';
 
   // Responsive calculations for different screen sizes
   const isSmallScreen = screenWidth < 375;
