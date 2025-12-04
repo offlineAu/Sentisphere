@@ -8,6 +8,7 @@ import styles from "./Chat.module.css";
 import api from "../lib/api";
 import { sessionStatus } from "../lib/auth";
 import { router } from "@inertiajs/react";
+import Pusher from "pusher-js";
 
 // -----------------------------
 // Types
@@ -23,7 +24,27 @@ interface Conversation {
   // Optional nickname; backend conversation payload does not currently include this,
   // so we treat it as a best-effort label and fall back to subject or id.
   initiator_nickname?: string;
+  initiator_email?: string;
 }
+
+// Helper to format time in PHT (Asia/Manila)
+const formatTimePHT = (timestamp: string | null | undefined): string => {
+  if (!timestamp) return '';
+  try {
+    return new Date(timestamp).toLocaleTimeString('en-PH', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+      timeZone: 'Asia/Manila',
+    });
+  } catch {
+    return new Date(timestamp).toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    });
+  }
+};
 
 interface ChatMessage {
   id?: number;
@@ -48,12 +69,18 @@ export default function Chat() {
   const [activeConversation, setActiveConversation] = useState<number | null>(null);
   const [newMessage, setNewMessage] = useState("");
   const [participantNickname, setParticipantNickname] = useState<string>("");
+  const [participantEmail, setParticipantEmail] = useState<string>("");
+  const [isTyping, setIsTyping] = useState<boolean>(false);
+  const [typingUser, setTypingUser] = useState<string>("");
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastTypingSentRef = useRef<number>(0);
   const [unreadCounts, setUnreadCounts] = useState<Record<number, number>>({});
   const [messagesByConversation, setMessagesByConversation] = useState<Record<number, ChatMessage[]>>({});
   const [searchQuery, setSearchQuery] = useState("");
   const [filter, setFilter] = useState<"all" | "unread" | "read">("all");
   const [loading, setLoading] = useState(true);
-  const wsRef = useRef<WebSocket | null>(null);
+  const pusherRef = useRef<Pusher | null>(null);
+  const pusherChannelRef = useRef<any>(null);
   const prevSubRef = useRef<number | null>(null);
 
   const normalizeMessage = (m: any): ChatMessage => ({
@@ -132,12 +159,16 @@ export default function Chat() {
         const res = await api.get<Conversation[]>(`/conversations`);
         const unique = Array.from(new Map(res.data.map(c => [c.conversation_id, c])).values());
 
-        // Enrich with initiator nickname for display in the sidebar list
+        // Enrich with initiator nickname and email for display
         const withNicknames = await Promise.all(
           unique.map(async (c) => {
             try {
-              const { data } = await api.get<{ nickname: string }>(`/users/${c.initiator_user_id}`);
-              return { ...c, initiator_nickname: data.nickname || c.initiator_nickname };
+              const { data } = await api.get<{ nickname: string; email?: string }>(`/users/${c.initiator_user_id}`);
+              return { 
+                ...c, 
+                initiator_nickname: data.nickname || c.initiator_nickname,
+                initiator_email: data.email || undefined,
+              };
             } catch {
               return c;
             }
@@ -181,12 +212,19 @@ export default function Chat() {
   useEffect(() => {
     if (!currentConversation) {
       setParticipantNickname("");
+      setParticipantEmail("");
       return;
     }
     api
-      .get<{ nickname: string }>(`/users/${currentConversation.initiator_user_id}`)
-      .then((res) => setParticipantNickname(res.data.nickname || ""))
-      .catch(() => setParticipantNickname(""));
+      .get<{ nickname: string; email?: string }>(`/users/${currentConversation.initiator_user_id}`)
+      .then((res) => {
+        setParticipantNickname(res.data.nickname || "");
+        setParticipantEmail(res.data.email || "");
+      })
+      .catch(() => {
+        setParticipantNickname("");
+        setParticipantEmail("");
+      });
   }, [currentConversation]);
 
   // Lightweight polling to fetch messages per conversation and compute unread via is_read
@@ -211,8 +249,8 @@ export default function Chat() {
     };
     // initial
     poll();
-    // interval
-    const interval = setInterval(poll, 15000);
+    // interval - poll every 5 seconds for faster updates
+    const interval = setInterval(poll, 5000);
     return () => clearInterval(interval);
   }, [conversations]);
 
@@ -258,54 +296,95 @@ export default function Chat() {
       .catch((err) => console.error("Error sending message:", err));
   };
 
+  // Initialize Pusher for real-time chat
   useEffect(() => {
     if (!authenticated) return;
-    const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
-    if (!token) return;
     
-    // Build WebSocket URL with proper backend connection
-    let wsUrl: string;
+    const pusherKey = (import.meta as any).env?.VITE_PUSHER_APP_KEY;
+    const pusherCluster = (import.meta as any).env?.VITE_PUSHER_APP_CLUSTER || 'ap1';
     
-    if (window.location.hostname.includes('railway.app')) {
-      // Production: Railway deployment
-      wsUrl = `wss://sentisphere.up.railway.app/ws/conversations?token=${encodeURIComponent(token)}`;
-    } else if ((import.meta as any).env.DEV) {
-      // Development: Connect directly to FastAPI backend on port 8010
-      wsUrl = `ws://localhost:8010/ws/conversations?token=${encodeURIComponent(token)}`;
-    } else {
-      // Production build on local server
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const host = window.location.hostname;
-      wsUrl = `${protocol}//${host}:8010/ws/conversations?token=${encodeURIComponent(token)}`;
+    if (!pusherKey) {
+      console.log('[Chat] Pusher not configured, using polling only');
+      return;
     }
     
-    console.log('[Chat] Connecting to:', wsUrl.replace(/token=.*/, 'token=***'));
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
-    ws.onmessage = (ev) => {
-      let evt: any;
-      try { evt = JSON.parse(ev.data); } catch { return; }
-      if (evt?.type === "message.created" && evt?.conversation_id && evt?.message) {
-        upsertMessage(Number(evt.conversation_id), evt.message);
-      }
-    };
-    return () => {
-      try { ws.close(); } catch {}
-      wsRef.current = null;
-    };
+    try {
+      const pusher = new Pusher(pusherKey, {
+        cluster: pusherCluster,
+      });
+      pusherRef.current = pusher;
+      
+      pusher.connection.bind('connected', () => {
+        console.log('[Chat] ✓ Pusher connected');
+      });
+      
+      pusher.connection.bind('error', (err: any) => {
+        console.log('[Chat] Pusher error:', err);
+      });
+      
+      return () => {
+        pusher.disconnect();
+        pusherRef.current = null;
+      };
+    } catch (e) {
+      console.log('[Chat] Pusher init failed:', e);
+    }
   }, [authenticated]);
 
+  // Subscribe to conversation channel via Pusher when active conversation changes
   useEffect(() => {
-    const ws = wsRef.current;
-    if (!ws) return;
-    if (prevSubRef.current && prevSubRef.current !== activeConversation) {
-      ws.send(JSON.stringify({ action: "unsubscribe", conversation_id: prevSubRef.current }));
+    const pusher = pusherRef.current;
+    if (!pusher || !activeConversation) return;
+    
+    // Unsubscribe from previous channel
+    if (pusherChannelRef.current) {
+      pusherChannelRef.current.unbind_all();
+      pusher.unsubscribe(`conversation-${prevSubRef.current}`);
     }
-    if (activeConversation) {
-      ws.send(JSON.stringify({ action: "subscribe", conversation_id: activeConversation }));
-    }
-    prevSubRef.current = activeConversation ?? null;
-  }, [activeConversation]);
+    
+    // Subscribe to new conversation channel
+    const channelName = `conversation-${activeConversation}`;
+    console.log(`[Chat] Subscribing to ${channelName}`);
+    const channel = pusher.subscribe(channelName);
+    pusherChannelRef.current = channel;
+    
+    // Listen for new messages
+    channel.bind('message', (data: any) => {
+      console.log('[Chat] Pusher message received:', data);
+      if (data?.message) {
+        upsertMessage(Number(data.conversation_id), data.message);
+        setIsTyping(false);
+      }
+    });
+    
+    // Listen for typing indicators
+    channel.bind('typing', (data: any) => {
+      if (data?.user_id !== userId) {
+        setIsTyping(true);
+        setTypingUser(data?.nickname || "Someone");
+        // Clear typing after 3 seconds
+        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = setTimeout(() => setIsTyping(false), 3000);
+      }
+    });
+    
+    // Listen for conversation status changes
+    channel.bind('status', (data: any) => {
+      if (data?.status === 'ended') {
+        setConversations(prev => prev.map(c => 
+          c.conversation_id === Number(data.conversation_id) 
+            ? { ...c, status: 'ended' as const } 
+            : c
+        ));
+      }
+    });
+    
+    prevSubRef.current = activeConversation;
+    
+    return () => {
+      channel.unbind_all();
+    };
+  }, [activeConversation, userId]);
 
   // Show loading spinner while data is being fetched
   if (loading) {
@@ -414,16 +493,7 @@ export default function Chat() {
                                 </div>
                                 <div className="flex items-center gap-3 shrink-0">
                                   <span className="text-xs opacity-75">
-                                    {(() => {
-                                      const t = last?.timestamp || c.last_activity_at;
-                                      return t
-                                        ? new Date(t).toLocaleTimeString([], {
-                                            hour: '2-digit',
-                                            minute: '2-digit',
-                                            hour12: true,
-                                          })
-                                        : '';
-                                    })()}
+                                    {formatTimePHT(last?.timestamp || c.last_activity_at)}
                                   </span>
                                   <span
                                     className={`text-[10px] px-2 py-[2px] rounded-full uppercase tracking-wide ${
@@ -465,15 +535,17 @@ export default function Chat() {
                 {currentConversation ? (
                   <>
                     {/* Chat Header (compact) */}
-                    <div className="px-4 py-3 border-b flex items-center justify-between bg-gradient-to-r from-emerald-50 to-transparent flex-none w-full">
+                    <div className="px-4 py-3 border-b flex items-center justify-between bg-gradient-to-r from-emerald-50 to-transparent dark:from-neutral-700 dark:to-transparent flex-none w-full">
                       <div className="min-w-0">
-                        <h2 className="font-semibold text-[15px] text-primary truncate">
+                        <h2 className="font-semibold text-[15px] text-primary dark:text-emerald-400 truncate">
                           {currentConversation.initiator_nickname || participantNickname || `Conversation #${currentConversation.conversation_id}`}
                         </h2>
-                        {currentConversation.subject && (
-                          <div className="text-xs text-gray-500 truncate">{currentConversation.subject}</div>
+                        {(currentConversation.initiator_email || participantEmail) && (
+                          <div className="text-xs text-gray-500 dark:text-neutral-400 truncate">
+                            {currentConversation.initiator_email || participantEmail}
+                          </div>
                         )}
-                        <div className="mt-1">
+                        <div className="mt-1 flex items-center gap-2">
                           <span className={`text-[10px] px-2 py-[2px] rounded-full uppercase tracking-wide ${
                             currentConversation.status === 'open'
                               ? 'bg-green-100 text-green-700 border border-green-200'
@@ -481,11 +553,16 @@ export default function Chat() {
                           }`}>
                             {currentConversation.status === 'open' ? 'OPEN' : 'ENDED'}
                           </span>
+                          {isTyping && (
+                            <span className="text-xs text-emerald-600 dark:text-emerald-400 italic animate-pulse">
+                              {typingUser} is typing...
+                            </span>
+                          )}
                         </div>
                       </div>
                       <div className="flex items-center gap-3">
-                        <button className="text-xs px-2.5 py-1 rounded-full border border-gray-300 text-gray-600 hover:bg-gray-100 active:bg-gray-200">Details</button>
-                        <User className="h-5 w-5 text-gray-500" />
+                        <button className="text-xs px-2.5 py-1 rounded-full border border-gray-300 text-gray-600 hover:bg-gray-100 active:bg-gray-200 dark:border-neutral-600 dark:text-neutral-300 dark:hover:bg-neutral-700">Details</button>
+                        <User className="h-5 w-5 text-gray-500 dark:text-neutral-400" />
                       </div>
                     </div>
 
@@ -502,11 +579,7 @@ export default function Chat() {
                         >
                           <p className="whitespace-pre-wrap break-words" style={{ wordBreak: 'break-word' }}>{m.content}</p>
                           <small className="block text-xs opacity-75 mt-1">
-                            {new Date(m.timestamp).toLocaleTimeString([], {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                              hour12: true,
-                            })}
+                            {formatTimePHT(m.timestamp)}
                           </small>
                         </div>
                       ))}
@@ -517,7 +590,17 @@ export default function Chat() {
                       <input
                         type="text"
                         value={newMessage}
-                        onChange={(e) => setNewMessage(e.target.value)}
+                        onChange={(e) => {
+                          setNewMessage(e.target.value);
+                          // Send typing indicator via API (throttled to once per 2 seconds)
+                          const now = Date.now();
+                          if (now - lastTypingSentRef.current > 2000 && activeConversation) {
+                            lastTypingSentRef.current = now;
+                            // Fire-and-forget API call for typing indicator
+                            api.post(`/counselor/conversations/${activeConversation}/typing`)
+                              .catch(() => { /* ignore errors */ });
+                          }
+                        }}
                         onKeyDown={(e) =>
                           e.key === "Enter" ? handleSend() : null
                         }
@@ -528,8 +611,8 @@ export default function Chat() {
                         }
                         className={`flex-1 h-10 border rounded-xl px-4 py-2 outline-none focus:ring-2 ${
                           currentConversation.status === "open"
-                            ? "focus:ring-[var(--ring)] text-[#222]"
-                            : "bg-gray-100 text-gray-400 cursor-not-allowed"
+                            ? "focus:ring-[var(--ring)] text-[#222] dark:bg-neutral-700 dark:text-neutral-100 dark:border-neutral-600"
+                            : "bg-gray-100 text-gray-400 cursor-not-allowed dark:bg-neutral-800 dark:text-neutral-500"
                         }`}
                         disabled={currentConversation.status !== "open"}
                       />

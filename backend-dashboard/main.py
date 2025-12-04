@@ -87,6 +87,7 @@ from app.utils.date_utils import (
     format_range,
 )
 from app.utils.ws_manager import ConversationWSManager
+from app.services.pusher_service import pusher_service
 
 BASE_DIR = Path(__file__).resolve().parent
 EVENTS_FILE = BASE_DIR / "events.json"
@@ -407,6 +408,12 @@ def create_checkin(
     except Exception:
         pass  # Don't fail the request if notification fails
 
+    # Broadcast via Pusher for instant dashboard updates
+    try:
+        pusher_service.broadcast_new_checkin(current_user.user_id)
+    except Exception:
+        pass
+
     return created
 
 
@@ -505,6 +512,12 @@ def create_journal(
     # Notify dashboard WebSocket clients
     try:
         asyncio.create_task(notify_dashboard_update("new_journal"))
+    except Exception:
+        pass
+
+    # Broadcast via Pusher for instant dashboard updates
+    try:
+        pusher_service.broadcast_new_journal(current_user.user_id, created.journal_id)
     except Exception:
         pass
 
@@ -630,6 +643,12 @@ def create_alert(
     except Exception:
         pass
     
+    # Broadcast via Pusher for instant dashboard updates
+    try:
+        pusher_service.broadcast_new_alert(alert.alert_id, alert.severity.value if hasattr(alert.severity, 'value') else str(alert.severity))
+    except Exception:
+        pass
+    
     return alert
 
 
@@ -650,6 +669,12 @@ def create_alert_api(
     # Notify dashboard WebSocket clients
     try:
         asyncio.create_task(notify_dashboard_update("new_alert"))
+    except Exception:
+        pass
+    
+    # Broadcast via Pusher for instant dashboard updates
+    try:
+        pusher_service.broadcast_new_alert(alert.alert_id, alert.severity.value if hasattr(alert.severity, 'value') else str(alert.severity))
     except Exception:
         pass
     
@@ -738,10 +763,24 @@ async def conversations_ws(websocket: WebSocket, token: Optional[str] = None) ->
         await websocket.close(code=4401)
         return
     try:
-        _ = _extract_user_id(raw_token)
+        user_id = _extract_user_id(raw_token)
     except HTTPException:
         await websocket.close(code=4401)
         return
+    
+    # Get user nickname for typing indicator
+    user_nickname = "Someone"
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT nickname FROM user WHERE user_id = :uid"),
+                {"uid": user_id}
+            ).mappings().first()
+            if row and row["nickname"]:
+                user_nickname = row["nickname"]
+    except Exception:
+        pass
+    
     await ws_conv_manager.connect(websocket)
     try:
         while True:
@@ -763,6 +802,19 @@ async def conversations_ws(websocket: WebSocket, token: Optional[str] = None) ->
                     cid = int(data.get("conversation_id") or 0)
                     if cid:
                         await ws_conv_manager.unsubscribe(websocket, cid)
+                except Exception:
+                    continue
+            elif action == "typing":
+                # Broadcast typing indicator to other users in the conversation
+                try:
+                    cid = int(data.get("conversation_id") or 0)
+                    if cid:
+                        await ws_conv_manager.publish(cid, {
+                            "type": "typing",
+                            "conversation_id": cid,
+                            "user_id": user_id,
+                            "nickname": user_nickname,
+                        })
                 except Exception:
                     continue
             elif action == "ping":
@@ -1151,6 +1203,9 @@ class DashboardEventDispatcher:
 # Global dispatcher instance
 dashboard_dispatcher = DashboardEventDispatcher(debounce_seconds=0.5)
 
+# Toggle between WebSocket (legacy) and Laravel webhook (new Pusher system)
+USE_LARAVEL_WEBHOOK = os.getenv("USE_LARAVEL_WEBHOOK", "false").lower() == "true"
+
 
 async def notify_dashboard_update(reason: str = "data_change"):
     """
@@ -1165,8 +1220,25 @@ async def notify_dashboard_update(reason: str = "data_change"):
     
     Args:
         reason: Description of what triggered the update
+    
+    Mode:
+        - USE_LARAVEL_WEBHOOK=false (default): Uses direct WebSocket broadcast
+        - USE_LARAVEL_WEBHOOK=true: Sends webhook to Laravel for Pusher broadcast
     """
-    await dashboard_dispatcher.trigger(reason)
+    if USE_LARAVEL_WEBHOOK:
+        # New system: Laravel Echo + Pusher
+        try:
+            from app.services.laravel_webhook_service import notify_laravel_dashboard
+            await notify_laravel_dashboard(reason)
+        except ImportError:
+            logging.warning("[dashboard] Laravel webhook service not available, falling back to WebSocket")
+            await dashboard_dispatcher.trigger(reason)
+        except Exception as e:
+            logging.error("[dashboard] Laravel webhook failed: %s, falling back to WebSocket", e)
+            await dashboard_dispatcher.trigger(reason)
+    else:
+        # Legacy system: Direct WebSocket broadcast
+        await dashboard_dispatcher.trigger(reason)
 
 
 @app.get("/api/auth/me")
@@ -1452,7 +1524,55 @@ async def mobile_send_message(
         await ws_conv_manager.broadcast_message_created(conversation_id, payload)
     except Exception:
         pass
+    
+    # Also broadcast via Pusher for instant delivery
+    try:
+        pusher_service.broadcast_message(conversation_id, payload)
+    except Exception:
+        pass
+    
     return payload
+
+
+@app.post("/api/mobile/conversations/{conversation_id}/typing")
+def mobile_typing_indicator(
+    conversation_id: int,
+    token: str = Depends(oauth2_scheme),
+    mdb: Session = Depends(get_mobile_db),
+):
+    """Broadcast typing indicator for a conversation."""
+    uid = _extract_user_id(token)
+    
+    # Get user nickname
+    nickname = "Someone"
+    try:
+        row = mdb.execute(
+            text("SELECT nickname FROM user WHERE user_id = :uid"),
+            {"uid": uid}
+        ).mappings().first()
+        if row and row["nickname"]:
+            nickname = row["nickname"]
+    except Exception:
+        pass
+    
+    # Broadcast via Pusher
+    try:
+        pusher_service.broadcast_typing(conversation_id, uid, nickname)
+    except Exception:
+        pass
+    
+    # Also broadcast via WebSocket for backward compatibility
+    try:
+        asyncio.create_task(ws_conv_manager.publish(conversation_id, {
+            "type": "typing",
+            "conversation_id": conversation_id,
+            "user_id": uid,
+            "nickname": nickname,
+        }))
+    except Exception:
+        pass
+    
+    return {"ok": True}
 
 
 @app.post("/api/mobile/conversations/{conversation_id}/read")
@@ -1505,6 +1625,11 @@ async def mobile_update_conversation(
         # Broadcast status change via WebSocket
         if new_status:
             await broadcast_conversation_status(conversation_id, new_status)
+            # Also broadcast via Pusher for instant delivery
+            try:
+                pusher_service.broadcast_conversation_status(conversation_id, new_status)
+            except Exception:
+                pass
     
     convo = mdb.execute(
         text("SELECT conversation_id, initiator_user_id, initiator_role, subject, counselor_id, status, created_at, last_activity_at FROM conversations WHERE conversation_id = :cid"),
@@ -1796,7 +1921,36 @@ def counselor_send_message(
         ),
         {"mid": mid},
     ).mappings().first()
-    return dict(row) if row else {"message_id": mid, "conversation_id": conversation_id, "sender_id": counselor_id, "content": message_in.content, "is_read": False}
+    payload = dict(row) if row else {"message_id": mid, "conversation_id": conversation_id, "sender_id": counselor_id, "content": message_in.content, "is_read": False}
+    
+    # Broadcast via Pusher for instant delivery to mobile
+    try:
+        pusher_service.broadcast_message(conversation_id, payload)
+    except Exception:
+        pass
+    
+    return payload
+
+
+@app.post("/api/counselor/conversations/{conversation_id}/typing")
+def counselor_typing_indicator(
+    conversation_id: int,
+    current_user: User = Depends(require_counselor),
+    mdb: Session = Depends(get_mobile_db),
+):
+    """Broadcast typing indicator for a conversation."""
+    counselor_id = current_user.user_id
+    
+    # Get counselor nickname/name
+    nickname = current_user.name or current_user.nickname or "Counselor"
+    
+    # Broadcast via Pusher
+    try:
+        pusher_service.broadcast_typing(conversation_id, counselor_id, nickname)
+    except Exception:
+        pass
+    
+    return {"ok": True}
 
 
 @app.post("/api/counselor/conversations/{conversation_id}/read")
@@ -5172,7 +5326,7 @@ def generate_behavioral_patterns(
 @app.get("/api/users/{user_id}")
 def get_user(user_id: int):
     query = """
-        SELECT user_id, name, nickname, role
+        SELECT user_id, name, nickname, email, role
         FROM user
         WHERE user_id = :uid
         LIMIT 1
@@ -5185,6 +5339,7 @@ def get_user(user_id: int):
             "user_id": row["user_id"],
             "name": row["name"],
             "nickname": row["nickname"],
+            "email": row["email"],
             "role": row["role"],
         }
 

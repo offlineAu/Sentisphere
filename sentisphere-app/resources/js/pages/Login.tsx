@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Head, router } from '@inertiajs/react';
+import { Eye, EyeOff } from 'lucide-react';
 import { loginFastApi, signupFastApi } from '../lib/auth';
 
 export default function Login() {
@@ -15,6 +16,15 @@ export default function Login() {
   const [showPwd2, setShowPwd2] = useState(false);
   const [remember, setRemember] = useState(false);
 
+  // Load remembered email on mount
+  useEffect(() => {
+    const savedEmail = localStorage.getItem('remembered_email');
+    if (savedEmail) {
+      setEmail(savedEmail);
+      setRemember(true);
+    }
+  }, []);
+
   const onSignin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -23,6 +33,12 @@ export default function Login() {
     const res = await loginFastApi(email, password);
     setLoading(false);
     if (res.ok) {
+      // Save or clear remembered email
+      if (remember) {
+        localStorage.setItem('remembered_email', email);
+      } else {
+        localStorage.removeItem('remembered_email');
+      }
       router.visit('/');
     } else {
       setError(res.error || 'Login failed');
@@ -123,11 +139,11 @@ export default function Login() {
                     />
                     <button
                       type="button"
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
                       onClick={() => setShowPwd((v) => !v)}
                       aria-label={showPwd ? 'Hide password' : 'Show password'}
                     >
-                      {showPwd ? 'Hide' : 'Show'}
+                      {showPwd ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
                   </div>
                   <div className="flex items-center gap-2">
@@ -166,11 +182,11 @@ export default function Login() {
                     />
                     <button
                       type="button"
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
                       onClick={() => setShowPwd2((v) => !v)}
                       aria-label={showPwd2 ? 'Hide password' : 'Show password'}
                     >
-                      {showPwd2 ? 'Hide' : 'Show'}
+                      {showPwd2 ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
                   </div>
                   <label className="block text-sm text-gray-700 dark:text-gray-300">Confirm Password</label>
