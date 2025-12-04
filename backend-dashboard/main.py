@@ -28,6 +28,7 @@ from app.db.database import engine, ENGINE_INIT_ERROR_MSG
 from app.db.mobile_database import mobile_engine, get_mobile_db
 from app.db.session import get_db, SessionLocal
 from app.api.routes.auth import router as auth_router
+from app.api.pusher import router as pusher_router
 from app.models.alert import Alert, AlertSeverity, AlertStatus
 from app.models.counselor_profile import CounselorProfile
 from app.models.appointment_log import AppointmentLog
@@ -104,6 +105,9 @@ app.add_middleware(
 
 # Optional auth router (not enforced on other routes)
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
+
+# Pusher Beams auth router for Android push notifications
+app.include_router(pusher_router, prefix="/pusher", tags=["pusher"])
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
 
@@ -2801,6 +2805,37 @@ async def create_notification_endpoint(
         **dict(row),
         "push_sent": result.get("push_sent", False),
         "push_result": result.get("push_result")
+    }
+
+
+@app.post("/api/test-push/{user_id}")
+async def test_hybrid_push(user_id: int):
+    """
+    Test hybrid push notification endpoint.
+    
+    Sends a test notification using the platform-appropriate method:
+    - iOS users (with ExponentPushToken): Expo Push API
+    - Android users (no Expo token): Pusher Beams
+    
+    Use this endpoint to verify the hybrid push system is working correctly.
+    """
+    from app.services.push_notification_service import send_hybrid_push
+    
+    result = await send_hybrid_push(
+        mobile_engine=mobile_engine,
+        user_id=user_id,
+        title="Hybrid Push Test",
+        message="Your hybrid push notification system works!",
+        data={"test": True, "timestamp": datetime.utcnow().isoformat()}
+    )
+    
+    return {
+        "status": "sent" if result.get("success") else "failed",
+        "method": result.get("method"),
+        "user_id": user_id,
+        "success": result.get("success"),
+        "error": result.get("error"),
+        "details": result
     }
 
 
