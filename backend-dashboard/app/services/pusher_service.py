@@ -115,11 +115,21 @@ class PusherService:
     
     def broadcast_conversation_status(self, conversation_id: int, status: str) -> bool:
         """Broadcast conversation status change (open/ended)."""
-        return self.trigger(
+        # Broadcast to specific conversation channel
+        self.trigger(
             f"conversation-{conversation_id}",
             "status",
             {
                 "type": "conversation.ended" if status == "ended" else "conversation.opened",
+                "conversation_id": conversation_id,
+                "status": status,
+            }
+        )
+        # Also broadcast to global conversations channel for counselor dashboard
+        return self.trigger(
+            "conversations",
+            "status_changed",
+            {
                 "conversation_id": conversation_id,
                 "status": status,
             }

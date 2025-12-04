@@ -440,6 +440,13 @@ def update_checkin(
     if not checkin or checkin.user_id != current_user.user_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Check-in not found")
     updated = CheckinService.update_checkin(db, checkin, checkin_in)
+    
+    # Broadcast via Pusher for instant dashboard updates
+    try:
+        pusher_service.broadcast_new_checkin(current_user.user_id)
+    except Exception:
+        pass
+    
     return updated
 
 
@@ -453,6 +460,13 @@ def delete_checkin(
     if not checkin or checkin.user_id != current_user.user_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Check-in not found")
     CheckinService.delete_checkin(db, checkin)
+    
+    # Broadcast via Pusher for instant dashboard updates
+    try:
+        pusher_service.broadcast_new_checkin(current_user.user_id)
+    except Exception:
+        pass
+    
     return None
 
 
@@ -547,6 +561,13 @@ def update_journal(
     if not journal or journal.user_id != current_user.user_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Journal not found")
     updated = JournalService.update_journal(db, journal, journal_in)
+    
+    # Broadcast via Pusher for instant dashboard updates
+    try:
+        pusher_service.broadcast_new_journal(current_user.user_id, journal_id)
+    except Exception:
+        pass
+    
     return updated
 
 
@@ -560,6 +581,13 @@ def delete_journal(
     if not journal or journal.user_id != current_user.user_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Journal not found")
     JournalService.delete_journal(db, journal)
+    
+    # Broadcast via Pusher for instant dashboard updates
+    try:
+        pusher_service.broadcast_new_journal(current_user.user_id, journal_id)
+    except Exception:
+        pass
+    
     return None
 
 
@@ -1406,6 +1434,22 @@ async def mobile_start_conversation(
     
     result = dict(convo) if convo else {"conversation_id": cid, "initiator_user_id": uid, "initiator_role": "student", "subject": subject, "counselor_id": counselor_id, "status": "open"}
     print(f"[mobile_start_conversation] Returning: {result}")
+    
+    # Broadcast new conversation via Pusher for instant chat list updates
+    try:
+        pusher_service.trigger(
+            "conversations",
+            "new_conversation",
+            {
+                "conversation_id": cid,
+                "counselor_id": counselor_id,
+                "subject": subject,
+                "status": "open",
+            }
+        )
+    except Exception:
+        pass
+    
     return result
 
 
@@ -1991,12 +2035,21 @@ def counselor_update_conversation(
     if not owner or owner["counselor_id"] != counselor_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found or not assigned to you")
     updates = {}
+    new_status = None
     if conversation_in.status is not None:
-        updates["status"] = conversation_in.status.value if hasattr(conversation_in.status, "value") else conversation_in.status
+        new_status = conversation_in.status.value if hasattr(conversation_in.status, "value") else conversation_in.status
+        updates["status"] = new_status
     if updates:
         set_clause = ", ".join(f"{k} = :{k}" for k in updates.keys())
         mdb.execute(text(f"UPDATE conversations SET {set_clause} WHERE conversation_id = :cid"), {**updates, "cid": conversation_id})
         mdb.commit()
+        
+        # Broadcast status change via Pusher for instant delivery
+        if new_status:
+            try:
+                pusher_service.broadcast_conversation_status(conversation_id, new_status)
+            except Exception:
+                pass
     convo = mdb.execute(
         text("SELECT conversation_id, initiator_user_id, initiator_role, subject, counselor_id, status, created_at, last_activity_at FROM conversations WHERE conversation_id = :cid"),
         {"cid": conversation_id},
@@ -5159,6 +5212,175 @@ def get_concerns(
             }
             for r in rows
         ]
+
+
+@app.get("/api/reports/top-concerns")
+def get_top_concerns_ai(
+    range: Optional[str] = Query(None),
+    start: Optional[str] = Query(None),
+    end: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """Analyze student concerns from journal content and check-in comments using AI.
+    
+    This endpoint scrapes all journal content and check-in comments within the date range,
+    then uses AI to identify and categorize the top concerns students are expressing.
+    """
+    import json
+    
+    start_dt, end_dt = parse_global_range(range or "this_week", start, end)
+    logging.info("/api/reports/top-concerns range=%s start=%s end=%s", range, start_dt, end_dt)
+    
+    # Fetch journal content within the date range
+    journals_sql = text("""
+        SELECT j.user_id, j.content, j.created_at
+        FROM journal j
+        WHERE j.created_at BETWEEN :start AND :end
+          AND j.deleted_at IS NULL
+          AND j.content IS NOT NULL AND j.content <> ''
+        ORDER BY j.created_at DESC
+        LIMIT 200
+    """)
+    
+    # Fetch check-in comments within the date range
+    checkins_sql = text("""
+        SELECT ec.user_id, ec.comment, ec.mood_level, ec.stress_level, ec.created_at
+        FROM emotional_checkin ec
+        WHERE ec.created_at BETWEEN :start AND :end
+          AND ec.comment IS NOT NULL AND ec.comment <> ''
+        ORDER BY ec.created_at DESC
+        LIMIT 200
+    """)
+    
+    params = {
+        "start": start_dt.strftime('%Y-%m-%d %H:%M:%S'),
+        "end": end_dt.strftime('%Y-%m-%d %H:%M:%S'),
+    }
+    
+    with engine.connect() as conn:
+        journal_rows = list(conn.execute(journals_sql, params).mappings())
+        checkin_rows = list(conn.execute(checkins_sql, params).mappings())
+    
+    # Combine all text content for analysis
+    all_content = []
+    for row in journal_rows:
+        all_content.append(f"Journal: {row['content'][:500]}")  # Limit each entry
+    for row in checkin_rows:
+        mood = row.get('mood_level', '')
+        stress = row.get('stress_level', '')
+        all_content.append(f"Check-in (mood: {mood}, stress: {stress}): {row['comment'][:300]}")
+    
+    if not all_content:
+        # Return default concerns if no content available
+        return [
+            {"label": "Academic Stress", "students": 0, "percent": 0, "barColor": "bg-blue-500"},
+            {"label": "Anxiety", "students": 0, "percent": 0, "barColor": "bg-purple-500"},
+            {"label": "Social Pressure", "students": 0, "percent": 0, "barColor": "bg-green-500"},
+        ]
+    
+    # Use OpenAI to analyze concerns if available
+    try:
+        import openai
+        openai_key = os.getenv("OPENAI_API_KEY")
+        if openai_key:
+            client = openai.OpenAI(api_key=openai_key)
+            
+            # Prepare a sample of content for analysis (limit to avoid token limits)
+            sample_content = "\n".join(all_content[:50])
+            
+            response = client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": """You are analyzing student mental health data. Based on the journal entries and check-in comments provided, identify the TOP 5 concerns students are expressing.
+                        
+Return a JSON array with exactly 5 items, each with:
+- "label": A short concern category (2-3 words max, e.g., "Academic Stress", "Anxiety", "Relationship Issues")
+- "count": Estimated number of students mentioning this concern (integer)
+
+Focus on mental health and wellness concerns. Be specific but concise.
+Return ONLY the JSON array, no other text."""
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Analyze these student entries and identify top concerns:\n\n{sample_content}"
+                    }
+                ],
+                max_tokens=300,
+                temperature=0.3,
+            )
+            
+            result_text = response.choices[0].message.content.strip()
+            # Parse JSON response
+            try:
+                concerns = json.loads(result_text)
+                total = sum(c.get("count", 0) for c in concerns) or 1
+                colors = ["bg-blue-500", "bg-purple-500", "bg-green-500", "bg-orange-500", "bg-red-500"]
+                return [
+                    {
+                        "label": c.get("label", "Unknown"),
+                        "students": c.get("count", 0),
+                        "percent": round((c.get("count", 0) / total) * 100, 1),
+                        "barColor": colors[i % len(colors)],
+                    }
+                    for i, c in enumerate(concerns[:5])
+                ]
+            except json.JSONDecodeError:
+                logging.warning("Failed to parse AI response: %s", result_text)
+    except Exception as e:
+        logging.warning("AI analysis failed: %s", e)
+    
+    # Fallback: Use keyword-based analysis
+    concern_keywords = {
+        "Academic Stress": ["exam", "test", "grade", "study", "homework", "assignment", "deadline", "fail", "school", "class", "professor", "project"],
+        "Anxiety": ["anxious", "anxiety", "worried", "worry", "nervous", "panic", "fear", "scared", "overwhelmed"],
+        "Depression": ["sad", "depressed", "depression", "hopeless", "empty", "lonely", "alone", "cry", "crying", "worthless"],
+        "Sleep Issues": ["sleep", "insomnia", "tired", "exhausted", "fatigue", "rest", "awake", "nightmare"],
+        "Relationship Issues": ["friend", "family", "relationship", "boyfriend", "girlfriend", "breakup", "fight", "argument", "conflict"],
+        "Financial Stress": ["money", "financial", "afford", "pay", "debt", "job", "work", "income"],
+        "Social Pressure": ["pressure", "expectation", "compare", "social", "peer", "judge", "embarrass"],
+        "Time Management": ["time", "busy", "schedule", "balance", "manage", "procrastinate"],
+    }
+    
+    concern_counts: dict[str, set] = {k: set() for k in concern_keywords}
+    combined_text = " ".join(all_content).lower()
+    
+    for row in journal_rows:
+        content = (row.get("content") or "").lower()
+        user_id = row.get("user_id")
+        for concern, keywords in concern_keywords.items():
+            if any(kw in content for kw in keywords):
+                concern_counts[concern].add(user_id)
+    
+    for row in checkin_rows:
+        comment = (row.get("comment") or "").lower()
+        user_id = row.get("user_id")
+        for concern, keywords in concern_keywords.items():
+            if any(kw in comment for kw in keywords):
+                concern_counts[concern].add(user_id)
+    
+    # Sort by count and take top 5
+    sorted_concerns = sorted(
+        [(k, len(v)) for k, v in concern_counts.items()],
+        key=lambda x: x[1],
+        reverse=True
+    )[:5]
+    
+    total = sum(c[1] for c in sorted_concerns) or 1
+    colors = ["bg-blue-500", "bg-purple-500", "bg-green-500", "bg-orange-500", "bg-red-500"]
+    
+    return [
+        {
+            "label": concern,
+            "students": count,
+            "percent": round((count / total) * 100, 1),
+            "barColor": colors[i % len(colors)],
+        }
+        for i, (concern, count) in enumerate(sorted_concerns)
+    ]
+
+
 @app.get("/api/reports/interventions")
 def get_interventions(period: str = Query("month", enum=["week", "month"])):
     now = datetime.now()

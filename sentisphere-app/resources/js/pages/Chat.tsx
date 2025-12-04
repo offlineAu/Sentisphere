@@ -296,7 +296,7 @@ export default function Chat() {
       .catch((err) => console.error("Error sending message:", err));
   };
 
-  // Initialize Pusher for real-time chat
+  // Initialize Pusher for real-time chat and subscribe to global conversations channel
   useEffect(() => {
     if (!authenticated) return;
     
@@ -322,7 +322,38 @@ export default function Chat() {
         console.log('[Chat] Pusher error:', err);
       });
       
+      // Subscribe to global conversations channel for updates on ALL conversations
+      const globalChannel = pusher.subscribe('conversations');
+      
+      // Listen for status changes (e.g., student ends chat)
+      globalChannel.bind('status_changed', (data: any) => {
+        console.log('[Chat] Conversation status changed:', data);
+        if (data?.conversation_id && data?.status) {
+          setConversations(prev => prev.map(c => 
+            c.conversation_id === Number(data.conversation_id) 
+              ? { ...c, status: data.status as 'open' | 'ended' } 
+              : c
+          ));
+        }
+      });
+      
+      // Listen for new conversations (e.g., student starts new chat)
+      globalChannel.bind('new_conversation', (data: any) => {
+        console.log('[Chat] New conversation received:', data);
+        // Refresh conversation list to get the new conversation
+        if (data?.conversation_id) {
+          api.get("/counselor/conversations")
+            .then((res) => {
+              const list = Array.isArray(res.data) ? res.data : [];
+              setConversations(list);
+            })
+            .catch((err) => console.error("Error refreshing conversations:", err));
+        }
+      });
+      
       return () => {
+        globalChannel.unbind_all();
+        pusher.unsubscribe('conversations');
         pusher.disconnect();
         pusherRef.current = null;
       };
@@ -331,7 +362,7 @@ export default function Chat() {
     }
   }, [authenticated]);
 
-  // Subscribe to conversation channel via Pusher when active conversation changes
+  // Subscribe to active conversation channel for messages and typing
   useEffect(() => {
     const pusher = pusherRef.current;
     if (!pusher || !activeConversation) return;
@@ -365,17 +396,6 @@ export default function Chat() {
         // Clear typing after 3 seconds
         if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
         typingTimeoutRef.current = setTimeout(() => setIsTyping(false), 3000);
-      }
-    });
-    
-    // Listen for conversation status changes
-    channel.bind('status', (data: any) => {
-      if (data?.status === 'ended') {
-        setConversations(prev => prev.map(c => 
-          c.conversation_id === Number(data.conversation_id) 
-            ? { ...c, status: 'ended' as const } 
-            : c
-        ));
       }
     });
     

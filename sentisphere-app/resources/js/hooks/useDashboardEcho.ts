@@ -1,12 +1,13 @@
 /**
  * useDashboardEcho - React hook for real-time dashboard updates via Pusher
  * 
- * This provides instant updates for dashboard stats when data changes.
+ * This hook subscribes to Pusher events and triggers the onStatsUpdate callback
+ * when new data arrives, allowing the parent component to refresh its data.
  * 
  * Usage:
  * ```tsx
- * const { stats, connected, lastUpdate, refresh } = useDashboardEcho({
- *   onStatsUpdate: (stats) => console.log('Got update:', stats),
+ * const { connected, lastUpdate } = useDashboardEcho({
+ *   onStatsUpdate: () => refetchDashboardData(),
  * });
  * ```
  */
@@ -35,19 +36,12 @@ export interface DashboardStats {
   range?: string;
 }
 
-interface DashboardEvent {
-  type: string;
-  stats?: DashboardStats;
-  reason?: string;
-  timestamp?: string;
-}
-
 interface UseDashboardEchoOptions {
   /** Auto-connect on mount (default: true) */
   autoConnect?: boolean;
   /** Initial date range filter */
   initialRange?: string;
-  /** Callback when stats are updated */
+  /** Callback when stats are updated - triggers parent to refresh */
   onStatsUpdate?: (stats: DashboardStats) => void;
   /** Callback on connection state change */
   onConnectionChange?: (connected: boolean) => void;
@@ -66,7 +60,6 @@ export function useDashboardEcho(options: UseDashboardEchoOptions = {}) {
   } = options;
 
   const [connected, setConnected] = useState(false);
-  const [stats, setStats] = useState<DashboardStats | null>(null);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [range, setRange] = useState(initialRange);
   const pusherRef = useRef<Pusher | null>(null);
@@ -81,26 +74,12 @@ export function useDashboardEcho(options: UseDashboardEchoOptions = {}) {
     onConnectionChangeRef.current = onConnectionChange;
   }, [onStatsUpdate, onConnectionChange]);
 
-  // Fetch initial stats from API
-  const fetchInitialStats = useCallback(async () => {
-    try {
-      const response = await fetch(`/api/dashboard/current?range=${range}`);
-      if (response.ok) {
-        const data = await response.json();
-        setStats(data);
-        setLastUpdate(new Date());
-        onStatsUpdateRef.current?.(data);
-        console.log('[Dashboard] Stats loaded');
-      }
-    } catch (error) {
-      console.error('[Dashboard] Failed to fetch stats:', error);
-    }
-  }, [range]);
-
-  // Refresh stats manually
-  const refresh = useCallback(() => {
-    fetchInitialStats();
-  }, [fetchInitialStats]);
+  // Trigger refresh - calls the parent's callback
+  const triggerRefresh = useCallback(() => {
+    setLastUpdate(new Date());
+    // Call with empty stats to signal refresh needed
+    onStatsUpdateRef.current?.({} as DashboardStats);
+  }, []);
 
   // Change date range
   const changeRange = useCallback((newRange: string) => {
@@ -111,19 +90,13 @@ export function useDashboardEcho(options: UseDashboardEchoOptions = {}) {
   useEffect(() => {
     if (!autoConnect) return;
 
-    // Always fetch initial stats
-    fetchInitialStats();
-
     const pusherKey = (import.meta as any).env?.VITE_PUSHER_APP_KEY;
     const pusherCluster = (import.meta as any).env?.VITE_PUSHER_APP_CLUSTER || 'ap1';
 
-    // If Pusher is not configured, use polling fallback
+    // If Pusher is not configured, no real-time updates (parent handles its own polling)
     if (!pusherKey) {
-      console.log('[Dashboard] Pusher not configured, using 5s polling');
-      const pollInterval = setInterval(() => {
-        fetchInitialStats();
-      }, 5000);
-      return () => clearInterval(pollInterval);
+      console.log('[Dashboard] Pusher not configured');
+      return;
     }
 
     try {
@@ -153,35 +126,28 @@ export function useDashboardEcho(options: UseDashboardEchoOptions = {}) {
       const channel = pusher.subscribe('dashboard');
       channelRef.current = channel;
 
-      // Listen for dashboard update events
-      channel.bind('stats_update', (data: DashboardEvent) => {
-        console.log('[Dashboard] Pusher update received:', data.reason);
-        if (data.stats) {
-          setStats(data.stats);
-          setLastUpdate(new Date());
-          onStatsUpdateRef.current?.(data.stats);
-        } else {
-          // If no stats in event, refresh from API
-          fetchInitialStats();
-        }
-      });
-
-      // Listen for new checkin events
+      // Listen for new checkin events - trigger parent refresh
       channel.bind('new_checkin', () => {
-        console.log('[Dashboard] New checkin - refreshing');
-        fetchInitialStats();
+        console.log('[Dashboard] New checkin - triggering refresh');
+        triggerRefresh();
       });
 
       // Listen for new journal events
       channel.bind('new_journal', () => {
-        console.log('[Dashboard] New journal - refreshing');
-        fetchInitialStats();
+        console.log('[Dashboard] New journal - triggering refresh');
+        triggerRefresh();
       });
 
       // Listen for new alert events
       channel.bind('new_alert', () => {
-        console.log('[Dashboard] New alert - refreshing');
-        fetchInitialStats();
+        console.log('[Dashboard] New alert - triggering refresh');
+        triggerRefresh();
+      });
+
+      // Listen for general stats update
+      channel.bind('stats_update', () => {
+        console.log('[Dashboard] Stats update - triggering refresh');
+        triggerRefresh();
       });
 
       return () => {
@@ -193,27 +159,14 @@ export function useDashboardEcho(options: UseDashboardEchoOptions = {}) {
       };
     } catch (e) {
       console.error('[Dashboard] Pusher init failed:', e);
-      // Fallback to polling
-      const pollInterval = setInterval(() => {
-        fetchInitialStats();
-      }, 5000);
-      return () => clearInterval(pollInterval);
     }
-  }, [autoConnect, fetchInitialStats]);
-
-  // Refetch when range changes
-  useEffect(() => {
-    if (autoConnect) {
-      fetchInitialStats();
-    }
-  }, [range, autoConnect, fetchInitialStats]);
+  }, [autoConnect, triggerRefresh]);
 
   return {
     connected,
-    stats,
     lastUpdate,
     range,
-    refresh,
+    refresh: triggerRefresh,
     setRange: changeRange,
   };
 }
