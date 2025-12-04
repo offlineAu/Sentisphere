@@ -211,8 +211,8 @@ export default function Chat() {
     };
     // initial
     poll();
-    // interval
-    const interval = setInterval(poll, 15000);
+    // interval - poll every 5 seconds for faster updates
+    const interval = setInterval(poll, 5000);
     return () => clearInterval(interval);
   }, [conversations]);
 
@@ -258,51 +258,69 @@ export default function Chat() {
       .catch((err) => console.error("Error sending message:", err));
   };
 
+  // Chat WebSocket connection with fallback to polling
+  // Note: This is separate from dashboard - it's for real-time chat messages
   useEffect(() => {
     if (!authenticated) return;
     const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
-    if (!token) return;
+    if (!token) {
+      console.log('[Chat] No token, using polling only');
+      return;
+    }
     
-    // Build WebSocket URL with proper backend connection
+    // Build WebSocket URL
     let wsUrl: string;
+    const isRailway = window.location.hostname.includes('railway.app');
+    const isDev = (import.meta as any).env?.DEV;
     
-    if (window.location.hostname.includes('railway.app')) {
-      // Production: Railway deployment
-      wsUrl = `wss://sentisphere.up.railway.app/ws/conversations?token=${encodeURIComponent(token)}`;
-    } else if ((import.meta as any).env.DEV) {
-      // Development: Connect directly to FastAPI backend on port 8010
+    if (isRailway) {
+      wsUrl = `wss://sentisphere-production.up.railway.app/ws/conversations?token=${encodeURIComponent(token)}`;
+    } else if (isDev) {
       wsUrl = `ws://localhost:8010/ws/conversations?token=${encodeURIComponent(token)}`;
     } else {
-      // Production build on local server
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const host = window.location.hostname;
-      wsUrl = `${protocol}//${host}:8010/ws/conversations?token=${encodeURIComponent(token)}`;
+      wsUrl = `${protocol}//${window.location.hostname}:8010/ws/conversations?token=${encodeURIComponent(token)}`;
     }
     
-    console.log('[Chat] Connecting to:', wsUrl.replace(/token=.*/, 'token=***'));
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
-    ws.onmessage = (ev) => {
-      let evt: any;
-      try { evt = JSON.parse(ev.data); } catch { return; }
-      if (evt?.type === "message.created" && evt?.conversation_id && evt?.message) {
-        upsertMessage(Number(evt.conversation_id), evt.message);
-      }
-    };
-    return () => {
-      try { ws.close(); } catch {}
-      wsRef.current = null;
-    };
+    console.log('[Chat] Connecting WebSocket...');
+    
+    try {
+      const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+      
+      ws.onopen = () => console.log('[Chat] ✓ WebSocket connected');
+      
+      ws.onmessage = (ev) => {
+        try {
+          const evt = JSON.parse(ev.data);
+          if (evt?.type === "message.created" && evt?.conversation_id && evt?.message) {
+            upsertMessage(Number(evt.conversation_id), evt.message);
+          }
+        } catch { /* ignore parse errors */ }
+      };
+      
+      ws.onerror = () => console.log('[Chat] WebSocket error, falling back to polling');
+      ws.onclose = () => console.log('[Chat] WebSocket closed');
+      
+      return () => {
+        try { ws.close(); } catch {}
+        wsRef.current = null;
+      };
+    } catch (e) {
+      console.log('[Chat] WebSocket failed, using polling');
+    }
   }, [authenticated]);
 
+  // Subscribe/unsubscribe to conversation channels
   useEffect(() => {
     const ws = wsRef.current;
-    if (!ws) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    
     if (prevSubRef.current && prevSubRef.current !== activeConversation) {
-      ws.send(JSON.stringify({ action: "unsubscribe", conversation_id: prevSubRef.current }));
+      try { ws.send(JSON.stringify({ action: "unsubscribe", conversation_id: prevSubRef.current })); } catch {}
     }
     if (activeConversation) {
-      ws.send(JSON.stringify({ action: "subscribe", conversation_id: activeConversation }));
+      try { ws.send(JSON.stringify({ action: "subscribe", conversation_id: activeConversation })); } catch {}
     }
     prevSubRef.current = activeConversation ?? null;
   }, [activeConversation]);
