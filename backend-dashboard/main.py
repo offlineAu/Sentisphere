@@ -734,10 +734,24 @@ async def conversations_ws(websocket: WebSocket, token: Optional[str] = None) ->
         await websocket.close(code=4401)
         return
     try:
-        _ = _extract_user_id(raw_token)
+        user_id = _extract_user_id(raw_token)
     except HTTPException:
         await websocket.close(code=4401)
         return
+    
+    # Get user nickname for typing indicator
+    user_nickname = "Someone"
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT nickname FROM user WHERE user_id = :uid"),
+                {"uid": user_id}
+            ).mappings().first()
+            if row and row["nickname"]:
+                user_nickname = row["nickname"]
+    except Exception:
+        pass
+    
     await ws_conv_manager.connect(websocket)
     try:
         while True:
@@ -759,6 +773,19 @@ async def conversations_ws(websocket: WebSocket, token: Optional[str] = None) ->
                     cid = int(data.get("conversation_id") or 0)
                     if cid:
                         await ws_conv_manager.unsubscribe(websocket, cid)
+                except Exception:
+                    continue
+            elif action == "typing":
+                # Broadcast typing indicator to other users in the conversation
+                try:
+                    cid = int(data.get("conversation_id") or 0)
+                    if cid:
+                        await ws_conv_manager.publish(cid, {
+                            "type": "typing",
+                            "conversation_id": cid,
+                            "user_id": user_id,
+                            "nickname": user_nickname,
+                        })
                 except Exception:
                     continue
             elif action == "ping":
@@ -5157,7 +5184,7 @@ def generate_behavioral_patterns(
 @app.get("/api/users/{user_id}")
 def get_user(user_id: int):
     query = """
-        SELECT user_id, name, nickname, role
+        SELECT user_id, name, nickname, email, role
         FROM user
         WHERE user_id = :uid
         LIMIT 1
@@ -5170,6 +5197,7 @@ def get_user(user_id: int):
             "user_id": row["user_id"],
             "name": row["name"],
             "nickname": row["nickname"],
+            "email": row["email"],
             "role": row["role"],
         }
 
