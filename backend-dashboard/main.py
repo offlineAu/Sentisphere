@@ -86,6 +86,7 @@ from app.utils.date_utils import (
     format_range,
 )
 from app.utils.ws_manager import ConversationWSManager
+from app.services.pusher_service import pusher_service
 
 BASE_DIR = Path(__file__).resolve().parent
 EVENTS_FILE = BASE_DIR / "events.json"
@@ -403,6 +404,12 @@ def create_checkin(
     except Exception:
         pass  # Don't fail the request if notification fails
 
+    # Broadcast via Pusher for instant dashboard updates
+    try:
+        pusher_service.broadcast_new_checkin(current_user.user_id)
+    except Exception:
+        pass
+
     return created
 
 
@@ -501,6 +508,12 @@ def create_journal(
     # Notify dashboard WebSocket clients
     try:
         asyncio.create_task(notify_dashboard_update("new_journal"))
+    except Exception:
+        pass
+
+    # Broadcast via Pusher for instant dashboard updates
+    try:
+        pusher_service.broadcast_new_journal(current_user.user_id, created.journal_id)
     except Exception:
         pass
 
@@ -626,6 +639,12 @@ def create_alert(
     except Exception:
         pass
     
+    # Broadcast via Pusher for instant dashboard updates
+    try:
+        pusher_service.broadcast_new_alert(alert.alert_id, alert.severity.value if hasattr(alert.severity, 'value') else str(alert.severity))
+    except Exception:
+        pass
+    
     return alert
 
 
@@ -646,6 +665,12 @@ def create_alert_api(
     # Notify dashboard WebSocket clients
     try:
         asyncio.create_task(notify_dashboard_update("new_alert"))
+    except Exception:
+        pass
+    
+    # Broadcast via Pusher for instant dashboard updates
+    try:
+        pusher_service.broadcast_new_alert(alert.alert_id, alert.severity.value if hasattr(alert.severity, 'value') else str(alert.severity))
     except Exception:
         pass
     
@@ -1495,7 +1520,55 @@ async def mobile_send_message(
         await ws_conv_manager.broadcast_message_created(conversation_id, payload)
     except Exception:
         pass
+    
+    # Also broadcast via Pusher for instant delivery
+    try:
+        pusher_service.broadcast_message(conversation_id, payload)
+    except Exception:
+        pass
+    
     return payload
+
+
+@app.post("/api/mobile/conversations/{conversation_id}/typing")
+def mobile_typing_indicator(
+    conversation_id: int,
+    token: str = Depends(oauth2_scheme),
+    mdb: Session = Depends(get_mobile_db),
+):
+    """Broadcast typing indicator for a conversation."""
+    uid = _extract_user_id(token)
+    
+    # Get user nickname
+    nickname = "Someone"
+    try:
+        row = mdb.execute(
+            text("SELECT nickname FROM user WHERE user_id = :uid"),
+            {"uid": uid}
+        ).mappings().first()
+        if row and row["nickname"]:
+            nickname = row["nickname"]
+    except Exception:
+        pass
+    
+    # Broadcast via Pusher
+    try:
+        pusher_service.broadcast_typing(conversation_id, uid, nickname)
+    except Exception:
+        pass
+    
+    # Also broadcast via WebSocket for backward compatibility
+    try:
+        asyncio.create_task(ws_conv_manager.publish(conversation_id, {
+            "type": "typing",
+            "conversation_id": conversation_id,
+            "user_id": uid,
+            "nickname": nickname,
+        }))
+    except Exception:
+        pass
+    
+    return {"ok": True}
 
 
 @app.post("/api/mobile/conversations/{conversation_id}/read")
@@ -1548,6 +1621,11 @@ async def mobile_update_conversation(
         # Broadcast status change via WebSocket
         if new_status:
             await broadcast_conversation_status(conversation_id, new_status)
+            # Also broadcast via Pusher for instant delivery
+            try:
+                pusher_service.broadcast_conversation_status(conversation_id, new_status)
+            except Exception:
+                pass
     
     convo = mdb.execute(
         text("SELECT conversation_id, initiator_user_id, initiator_role, subject, counselor_id, status, created_at, last_activity_at FROM conversations WHERE conversation_id = :cid"),
@@ -1839,7 +1917,36 @@ def counselor_send_message(
         ),
         {"mid": mid},
     ).mappings().first()
-    return dict(row) if row else {"message_id": mid, "conversation_id": conversation_id, "sender_id": counselor_id, "content": message_in.content, "is_read": False}
+    payload = dict(row) if row else {"message_id": mid, "conversation_id": conversation_id, "sender_id": counselor_id, "content": message_in.content, "is_read": False}
+    
+    # Broadcast via Pusher for instant delivery to mobile
+    try:
+        pusher_service.broadcast_message(conversation_id, payload)
+    except Exception:
+        pass
+    
+    return payload
+
+
+@app.post("/api/counselor/conversations/{conversation_id}/typing")
+def counselor_typing_indicator(
+    conversation_id: int,
+    current_user: User = Depends(require_counselor),
+    mdb: Session = Depends(get_mobile_db),
+):
+    """Broadcast typing indicator for a conversation."""
+    counselor_id = current_user.user_id
+    
+    # Get counselor nickname/name
+    nickname = current_user.name or current_user.nickname or "Counselor"
+    
+    # Broadcast via Pusher
+    try:
+        pusher_service.broadcast_typing(conversation_id, counselor_id, nickname)
+    except Exception:
+        pass
+    
+    return {"ok": True}
 
 
 @app.post("/api/counselor/conversations/{conversation_id}/read")

@@ -8,6 +8,7 @@ import styles from "./Chat.module.css";
 import api from "../lib/api";
 import { sessionStatus } from "../lib/auth";
 import { router } from "@inertiajs/react";
+import Pusher from "pusher-js";
 
 // -----------------------------
 // Types
@@ -78,7 +79,8 @@ export default function Chat() {
   const [searchQuery, setSearchQuery] = useState("");
   const [filter, setFilter] = useState<"all" | "unread" | "read">("all");
   const [loading, setLoading] = useState(true);
-  const wsRef = useRef<WebSocket | null>(null);
+  const pusherRef = useRef<Pusher | null>(null);
+  const pusherChannelRef = useRef<any>(null);
   const prevSubRef = useRef<number | null>(null);
 
   const normalizeMessage = (m: any): ChatMessage => ({
@@ -294,92 +296,95 @@ export default function Chat() {
       .catch((err) => console.error("Error sending message:", err));
   };
 
-  // Chat WebSocket connection with fallback to polling
-  // Note: This is separate from dashboard - it's for real-time chat messages
+  // Initialize Pusher for real-time chat
   useEffect(() => {
     if (!authenticated) return;
-    const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
-    if (!token) {
-      console.log('[Chat] No token, using polling only');
+    
+    const pusherKey = (import.meta as any).env?.VITE_PUSHER_APP_KEY;
+    const pusherCluster = (import.meta as any).env?.VITE_PUSHER_APP_CLUSTER || 'ap1';
+    
+    if (!pusherKey) {
+      console.log('[Chat] Pusher not configured, using polling only');
       return;
     }
     
-    // Build WebSocket URL
-    let wsUrl: string;
-    const isRailway = window.location.hostname.includes('railway.app');
-    const isDev = (import.meta as any).env?.DEV;
-    
-    if (isRailway) {
-      wsUrl = `wss://sentisphere-production.up.railway.app/ws/conversations?token=${encodeURIComponent(token)}`;
-    } else if (isDev) {
-      wsUrl = `ws://localhost:8010/ws/conversations?token=${encodeURIComponent(token)}`;
-    } else {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      wsUrl = `${protocol}//${window.location.hostname}:8010/ws/conversations?token=${encodeURIComponent(token)}`;
-    }
-    
-    console.log('[Chat] Connecting WebSocket...');
-    
     try {
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
+      const pusher = new Pusher(pusherKey, {
+        cluster: pusherCluster,
+      });
+      pusherRef.current = pusher;
       
-      ws.onopen = () => console.log('[Chat] ✓ WebSocket connected');
+      pusher.connection.bind('connected', () => {
+        console.log('[Chat] ✓ Pusher connected');
+      });
       
-      ws.onmessage = (ev) => {
-        try {
-          const evt = JSON.parse(ev.data);
-          if (evt?.type === "message.created" && evt?.conversation_id && evt?.message) {
-            upsertMessage(Number(evt.conversation_id), evt.message);
-            // Clear typing indicator when message received
-            if (Number(evt.conversation_id) === activeConversation) {
-              setIsTyping(false);
-            }
-          } else if (evt?.type === "typing" && evt?.conversation_id) {
-            // Show typing indicator
-            if (Number(evt.conversation_id) === activeConversation && evt?.user_id !== userId) {
-              setIsTyping(true);
-              setTypingUser(evt?.nickname || "Someone");
-              // Clear typing after 3 seconds
-              if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-              typingTimeoutRef.current = setTimeout(() => setIsTyping(false), 3000);
-            }
-          } else if (evt?.type === "conversation.ended" && evt?.conversation_id) {
-            // Update conversation status
-            setConversations(prev => prev.map(c => 
-              c.conversation_id === Number(evt.conversation_id) 
-                ? { ...c, status: 'ended' as const } 
-                : c
-            ));
-          }
-        } catch { /* ignore parse errors */ }
-      };
-      
-      ws.onerror = () => console.log('[Chat] WebSocket error, falling back to polling');
-      ws.onclose = () => console.log('[Chat] WebSocket closed');
+      pusher.connection.bind('error', (err: any) => {
+        console.log('[Chat] Pusher error:', err);
+      });
       
       return () => {
-        try { ws.close(); } catch {}
-        wsRef.current = null;
+        pusher.disconnect();
+        pusherRef.current = null;
       };
     } catch (e) {
-      console.log('[Chat] WebSocket failed, using polling');
+      console.log('[Chat] Pusher init failed:', e);
     }
   }, [authenticated]);
 
-  // Subscribe/unsubscribe to conversation channels
+  // Subscribe to conversation channel via Pusher when active conversation changes
   useEffect(() => {
-    const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const pusher = pusherRef.current;
+    if (!pusher || !activeConversation) return;
     
-    if (prevSubRef.current && prevSubRef.current !== activeConversation) {
-      try { ws.send(JSON.stringify({ action: "unsubscribe", conversation_id: prevSubRef.current })); } catch {}
+    // Unsubscribe from previous channel
+    if (pusherChannelRef.current) {
+      pusherChannelRef.current.unbind_all();
+      pusher.unsubscribe(`conversation-${prevSubRef.current}`);
     }
-    if (activeConversation) {
-      try { ws.send(JSON.stringify({ action: "subscribe", conversation_id: activeConversation })); } catch {}
-    }
-    prevSubRef.current = activeConversation ?? null;
-  }, [activeConversation]);
+    
+    // Subscribe to new conversation channel
+    const channelName = `conversation-${activeConversation}`;
+    console.log(`[Chat] Subscribing to ${channelName}`);
+    const channel = pusher.subscribe(channelName);
+    pusherChannelRef.current = channel;
+    
+    // Listen for new messages
+    channel.bind('message', (data: any) => {
+      console.log('[Chat] Pusher message received:', data);
+      if (data?.message) {
+        upsertMessage(Number(data.conversation_id), data.message);
+        setIsTyping(false);
+      }
+    });
+    
+    // Listen for typing indicators
+    channel.bind('typing', (data: any) => {
+      if (data?.user_id !== userId) {
+        setIsTyping(true);
+        setTypingUser(data?.nickname || "Someone");
+        // Clear typing after 3 seconds
+        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = setTimeout(() => setIsTyping(false), 3000);
+      }
+    });
+    
+    // Listen for conversation status changes
+    channel.bind('status', (data: any) => {
+      if (data?.status === 'ended') {
+        setConversations(prev => prev.map(c => 
+          c.conversation_id === Number(data.conversation_id) 
+            ? { ...c, status: 'ended' as const } 
+            : c
+        ));
+      }
+    });
+    
+    prevSubRef.current = activeConversation;
+    
+    return () => {
+      channel.unbind_all();
+    };
+  }, [activeConversation, userId]);
 
   // Show loading spinner while data is being fetched
   if (loading) {
@@ -587,19 +592,13 @@ export default function Chat() {
                         value={newMessage}
                         onChange={(e) => {
                           setNewMessage(e.target.value);
-                          // Send typing indicator via WebSocket (throttled to once per 2 seconds)
+                          // Send typing indicator via API (throttled to once per 2 seconds)
                           const now = Date.now();
-                          if (now - lastTypingSentRef.current > 2000) {
+                          if (now - lastTypingSentRef.current > 2000 && activeConversation) {
                             lastTypingSentRef.current = now;
-                            const ws = wsRef.current;
-                            if (ws && ws.readyState === WebSocket.OPEN && activeConversation) {
-                              try {
-                                ws.send(JSON.stringify({ 
-                                  action: "typing", 
-                                  conversation_id: activeConversation 
-                                }));
-                              } catch { /* ignore */ }
-                            }
+                            // Fire-and-forget API call for typing indicator
+                            api.post(`/counselor/conversations/${activeConversation}/typing`)
+                              .catch(() => { /* ignore errors */ });
                           }
                         }}
                         onKeyDown={(e) =>
