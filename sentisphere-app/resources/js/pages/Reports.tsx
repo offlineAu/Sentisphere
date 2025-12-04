@@ -459,9 +459,13 @@ function Reports() {
           setAlertsLoading(false);
         }
 
-        const concernsRes = await api.get<any[]>(`/reports/concerns`, { params: { ...filterParams } });
+        // Use AI-powered top concerns endpoint that analyzes journal content and check-in comments
+        const concernsRes = await api.get<any[]>(`/reports/top-concerns`, { params: { ...filterParams } });
         const concernsData = Array.isArray(concernsRes.data) ? concernsRes.data : [];
-        setConcerns(concernsData.map((c: any) => ({ ...c, barColor: "#2563eb" })));
+        setConcerns(concernsData.map((c: any) => ({ 
+          ...c, 
+          barColor: c.barColor || "#2563eb" 
+        })));
 
         const interventionsRes = await api.get<any>(`/reports/interventions`, { params: { ...filterParams } });
         const interventionsData = interventionsRes.data || {};
