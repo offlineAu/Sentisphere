@@ -121,6 +121,11 @@ async function getExpoPushToken(): Promise<string | null> {
     return null;
   }
 
+  if (Constants.appOwnership === 'expo') {
+    console.log('[Push] Expo Go detected - build with dev client or standalone APK for push tokens');
+    return null;
+  }
+
   if (Platform.OS === 'web') {
     console.log('[Push] Web platform - push tokens not supported');
     return null;
@@ -144,7 +149,7 @@ async function getExpoPushToken(): Promise<string | null> {
     // Get project ID
     const projectId = Constants.expoConfig?.extra?.eas?.projectId;
     if (!projectId) {
-      console.error('[Push] Missing EAS projectId in app config');
+      console.error('[Push] Missing EAS projectId in app config - ensure build uses EAS project ID and updated google-services.json');
       return null;
     }
 
@@ -154,6 +159,9 @@ async function getExpoPushToken(): Promise<string | null> {
     return tokenData.data;
   } catch (error) {
     console.error('[Push] Failed to get token:', error);
+    if (error instanceof Error && error.message.includes('FIS_AUTH_ERROR')) {
+      console.error('[Push] Detected FIS_AUTH_ERROR - update Firebase SHA-1/SHA-256 fingerprints for release, download new google-services.json, and rebuild the Android binary');
+    }
     return null;
   }
 }
