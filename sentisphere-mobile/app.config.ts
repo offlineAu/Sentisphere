@@ -66,6 +66,18 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         color: "#10B981",
         sounds: []
       }
+    ],
+    [
+      "expo-build-properties",
+      {
+        android: {
+          compileSdkVersion: 34,
+          targetSdkVersion: 34
+        },
+        ios: {
+          deploymentTarget: "13.0"
+        }
+      }
     ]
   ],
   experiments: {
@@ -78,7 +90,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     },
     router: {},
     // Expose API URL from environment variable
-    apiUrl: process.env.EXPO_PUBLIC_API_URL || "https://sentisphere-production.up.railway.app"
+    apiUrl: process.env.EXPO_PUBLIC_API_URL || "https://sentisphere-production.up.railway.app",
+    // Pusher Beams instance ID for Android push notifications
+    pusherInstanceId: process.env.EXPO_PUBLIC_PUSHER_INSTANCE_ID || ""
   },
   owner: "hyun00"
 });

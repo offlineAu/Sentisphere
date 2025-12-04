@@ -25,6 +25,37 @@ logger = logging.getLogger(__name__)
 
 EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
 
+# Lazy-loaded Pusher Beams client
+_beams_client = None
+
+
+def get_beams_client():
+    """Get or initialize the Pusher Beams client for Android push notifications."""
+    global _beams_client
+    
+    if _beams_client is not None:
+        return _beams_client
+    
+    try:
+        from app.core.config import settings
+        if not settings.PUSHER_INSTANCE_ID or not settings.PUSHER_SECRET_KEY:
+            logger.debug("Pusher Beams not configured - skipping")
+            return None
+        
+        from pusher_push_notifications import PushNotifications
+        _beams_client = PushNotifications(
+            instance_id=settings.PUSHER_INSTANCE_ID,
+            secret_key=settings.PUSHER_SECRET_KEY
+        )
+        logger.info("Pusher Beams client initialized for push notifications")
+        return _beams_client
+    except ImportError:
+        logger.warning("pusher_push_notifications package not installed - Android Pusher Beams disabled")
+        return None
+    except Exception as e:
+        logger.error(f"Failed to initialize Pusher Beams client: {e}")
+        return None
+
 # Gentle wellness reminder messages (warm, non-clinical)
 WELLNESS_REMINDER_MESSAGES = [
     {
@@ -228,6 +259,125 @@ async def send_expo_push_batch(
     
     logger.info(f"Batch push complete: {success_count} sent, {failed_count} failed")
     return {"success_count": success_count, "failed_count": failed_count, "errors": errors}
+
+
+# ============================================================================
+# PUSHER BEAMS (ANDROID) PUSH NOTIFICATIONS
+# ============================================================================
+
+def send_pusher_android(
+    user_id: int,
+    title: str,
+    message: str,
+    data: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """
+    Send a push notification to an Android user via Pusher Beams.
+    
+    This is a synchronous function (Pusher Beams SDK is sync).
+    
+    Args:
+        user_id: Target user ID (must be registered with Pusher Beams)
+        title: Notification title
+        message: Notification body
+        data: Optional extra data to include
+        
+    Returns:
+        Dict with success status and details
+    """
+    result = {
+        "success": False,
+        "error": None,
+        "user_id": user_id
+    }
+    
+    beams_client = get_beams_client()
+    if beams_client is None:
+        result["error"] = "Pusher Beams not configured"
+        logger.warning(f"Cannot send Pusher notification to user {user_id}: Beams not configured")
+        return result
+    
+    try:
+        publish_body = {
+            "fcm": {
+                "notification": {
+                    "title": title,
+                    "body": message
+                },
+                "data": data or {}
+            }
+        }
+        
+        response = beams_client.publish_to_users(
+            user_ids=[str(user_id)],
+            publish_body=publish_body
+        )
+        
+        result["success"] = True
+        result["publish_id"] = response.get("publishId")
+        logger.info(f"✓ Pusher Beams notification sent to Android user {user_id}")
+        
+    except Exception as e:
+        result["error"] = str(e)
+        logger.error(f"Failed to send Pusher Beams notification to user {user_id}: {e}")
+    
+    return result
+
+
+async def send_hybrid_push(
+    mobile_engine,
+    user_id: int,
+    title: str,
+    message: str,
+    data: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """
+    HYBRID PUSH: Send notification using platform-appropriate method.
+    
+    - iOS users (have ExponentPushToken): Use Expo Push API
+    - Android users (no Expo token): Use Pusher Beams
+    
+    Args:
+        mobile_engine: Database engine for token lookup
+        user_id: Target user ID
+        title: Notification title
+        message: Notification body
+        data: Optional extra data
+        
+    Returns:
+        Dict with success status, method used, and details
+    """
+    result = {
+        "success": False,
+        "method": None,
+        "user_id": user_id,
+        "error": None
+    }
+    
+    # Get user's push token from database
+    push_token = get_user_push_token(mobile_engine, user_id)
+    
+    # Determine platform based on token
+    if push_token and push_token.startswith("ExponentPushToken"):
+        # iOS user - use Expo Push API
+        result["method"] = "expo"
+        expo_result = await send_expo_push(push_token, title, message, data)
+        result["success"] = expo_result.get("success", False)
+        result["expo_response"] = expo_result.get("expo_response")
+        if not result["success"]:
+            result["error"] = expo_result.get("error")
+        logger.info(f"Hybrid push to user {user_id} via Expo (iOS): success={result['success']}")
+    else:
+        # Android user - use Pusher Beams
+        result["method"] = "pusher_beams"
+        beams_result = send_pusher_android(user_id, title, message, data)
+        result["success"] = beams_result.get("success", False)
+        result["publish_id"] = beams_result.get("publish_id")
+        if not result["success"]:
+            result["error"] = beams_result.get("error")
+        logger.info(f"Hybrid push to user {user_id} via Pusher Beams (Android): success={result['success']}")
+    
+    return result
 
 
 # ============================================================================

@@ -2,15 +2,18 @@
  * Push Notification Manager for Expo SDK 51+
  * 
  * ARCHITECTURE:
- * - Single source of truth for all push notification logic
- * - Idempotent initialization (safe to call multiple times)
+ * - Single source of truth for notification handlers and listeners
  * - Module-level singleton listeners (exactly ONE set)
  * - SecureStore-based caching to prevent duplicate backend POSTs
  * 
+ * HYBRID PUSH SYSTEM:
+ * - Android: Uses Pusher Beams (handled by push-hybrid.ts)
+ * - iOS: Uses Expo Push Notifications (handled here and in push-hybrid.ts)
+ * 
  * USAGE:
- * - Call initializePushNotifications(userId) after auth
  * - Call setupGlobalNotificationListeners() to attach listeners
  * - Call cleanupGlobalNotificationListeners() on logout
+ * - For push token registration, use push-hybrid.ts instead
  */
 
 import { Platform } from 'react-native';
@@ -99,9 +102,12 @@ async function deleteStoredValue(key: string): Promise<void> {
 /**
  * Request notification permissions and get the Expo push token.
  * Internal function - handles all platform-specific logic.
+ * 
+ * NOTE: For iOS remote push registration, use push-hybrid.ts instead.
+ * This function is kept for backward compatibility and local notification setup.
  */
 async function getExpoPushToken(): Promise<string | null> {
-  // Setup Android notification channel
+  // Setup Android notification channel (still needed for Pusher Beams notifications)
   if (Platform.OS === 'android') {
     try {
       await Notifications.setNotificationChannelAsync('default', {
@@ -113,14 +119,12 @@ async function getExpoPushToken(): Promise<string | null> {
     } catch (error) {
       console.warn('[Push] Failed to setup Android channel:', error);
     }
-  }
-
-  // Check device compatibility
-  if (!Device.isDevice && Platform.OS === 'android') {
-    console.log('[Push] Android emulator - push tokens not available');
+    // Android uses Pusher Beams - skip Expo token generation
+    console.log('[Push] Android uses Pusher Beams - skipping Expo token generation');
     return null;
   }
 
+  // Check device compatibility
   if (Constants.appOwnership === 'expo') {
     console.log('[Push] Expo Go detected - build with dev client or standalone APK for push tokens');
     return null;
@@ -131,6 +135,7 @@ async function getExpoPushToken(): Promise<string | null> {
     return null;
   }
 
+  // iOS only from here
   try {
     // Check/request permissions
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
@@ -149,19 +154,16 @@ async function getExpoPushToken(): Promise<string | null> {
     // Get project ID
     const projectId = Constants.expoConfig?.extra?.eas?.projectId;
     if (!projectId) {
-      console.error('[Push] Missing EAS projectId in app config - ensure build uses EAS project ID and updated google-services.json');
+      console.error('[Push] Missing EAS projectId in app config');
       return null;
     }
 
     // Get token
     const tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
-    console.log('[Push] ✓ Token obtained:', tokenData.data.substring(0, 30) + '...');
+    console.log('[Push] ✓ iOS Token obtained:', tokenData.data.substring(0, 30) + '...');
     return tokenData.data;
   } catch (error) {
-    console.error('[Push] Failed to get token:', error);
-    if (error instanceof Error && error.message.includes('FIS_AUTH_ERROR')) {
-      console.error('[Push] Detected FIS_AUTH_ERROR - update Firebase SHA-1/SHA-256 fingerprints for release, download new google-services.json, and rebuild the Android binary');
-    }
+    console.error('[Push] Failed to get iOS token:', error);
     return null;
   }
 }
@@ -208,51 +210,55 @@ async function postTokenToBackend(pushToken: string): Promise<boolean> {
 /**
  * Initialize push notifications for a user.
  * 
- * IDEMPOTENT: Safe to call multiple times.
- * - Checks cached token/userId in SecureStore
- * - Only POSTs to backend if token is new OR userId changed
- * - Stores current token/userId after successful POST
+ * DEPRECATED: Use initializePush from push-hybrid.ts instead.
+ * This function is kept for backward compatibility.
+ * 
+ * For the hybrid push system:
+ * - Android: Pusher Beams (handled by push-hybrid.ts)
+ * - iOS: Expo Push (handled by push-hybrid.ts)
  * 
  * @param userId - The authenticated user's ID (string)
  */
 export async function initializePushNotifications(userId: string): Promise<void> {
   console.log('[Push] initializePushNotifications called for userId:', userId);
+  console.log('[Push] ⚠️ DEPRECATED: Use initializePush from push-hybrid.ts instead');
 
   if (Platform.OS === 'web') {
     console.log('[Push] Skipping - web platform');
     return;
   }
 
+  // Android now uses Pusher Beams - skip Expo token registration
+  if (Platform.OS === 'android') {
+    console.log('[Push] Android uses Pusher Beams - skipping Expo token registration');
+    // Still setup notification channel for receiving Pusher notifications
+    await getExpoPushToken();
+    return;
+  }
+
+  // iOS: Continue with Expo push token registration (backward compatibility)
+  // Note: push-hybrid.ts is the preferred method for iOS as well
   try {
-    // 1. Get push token
     const currentToken = await getExpoPushToken();
     if (!currentToken) {
       console.log('[Push] No token obtained - skipping registration');
       return;
     }
 
-    // 2. Check cached values
     const lastToken = await getStoredValue(STORAGE_KEYS.LAST_PUSH_TOKEN);
     const lastUserId = await getStoredValue(STORAGE_KEYS.LAST_PUSH_USER_ID);
 
-    // 3. Determine if we need to POST
     const tokenChanged = lastToken !== currentToken;
     const userChanged = lastUserId !== userId;
 
     if (!tokenChanged && !userChanged) {
       console.log('[Push] ⏭️ Cached match found - skipping backend POST');
-      console.log('[Push]    Token unchanged, userId unchanged');
       return;
     }
 
-    console.log('[Push] 🔄 Change detected:');
-    if (tokenChanged) console.log('[Push]    Token: changed');
-    if (userChanged) console.log('[Push]    UserId:', lastUserId, '→', userId);
-
-    // 4. POST to backend
+    console.log('[Push] 🔄 Change detected, POSTing to backend');
     const success = await postTokenToBackend(currentToken);
 
-    // 5. Cache on success
     if (success) {
       await setStoredValue(STORAGE_KEYS.LAST_PUSH_TOKEN, currentToken);
       await setStoredValue(STORAGE_KEYS.LAST_PUSH_USER_ID, userId);

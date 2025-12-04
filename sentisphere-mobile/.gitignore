@@ -22,10 +22,6 @@ expo-env.d.ts
 # FIREBASE / GOOGLE (SENSITIVE FILES)
 ########################################
 
-# Firebase configs
-google-services.json
-GoogleService-Info.plist
-
 # FCM / Firebase Admin keys (NEVER COMMIT)
 fcm-key.json
 firebase-admin*.json
