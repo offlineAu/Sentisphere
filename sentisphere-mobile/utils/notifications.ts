@@ -1,13 +1,16 @@
 /**
- * Push Notification utilities for Expo SDK 51+
+ * Push Notification Manager for Expo SDK 51+
  * 
- * IMPORTANT: Push notifications require:
- * - Physical device (not simulator/emulator for full functionality)
- * - EAS Dev Build (not Expo Go) for production-like testing
- * - Proper EAS projectId in app.json/app.config.js
+ * ARCHITECTURE:
+ * - Single source of truth for all push notification logic
+ * - Idempotent initialization (safe to call multiple times)
+ * - Module-level singleton listeners (exactly ONE set)
+ * - SecureStore-based caching to prevent duplicate backend POSTs
  * 
- * Handles permission requests, token registration, and notification handling.
- * Login/signup flows are NOT blocked by push token - it's registered AFTER auth.
+ * USAGE:
+ * - Call initializePushNotifications(userId) after auth
+ * - Call setupGlobalNotificationListeners() to attach listeners
+ * - Call cleanupGlobalNotificationListeners() on logout
  */
 
 import { Platform } from 'react-native';
@@ -18,10 +21,25 @@ import * as SecureStore from 'expo-secure-store';
 
 const API = process.env.EXPO_PUBLIC_API_URL || 'https://sentisphere-production.up.railway.app';
 
-/**
- * Configure notification behavior globally (should be called once at app startup)
- * This determines how notifications are displayed when the app is in foreground.
- */
+// ============================================================================
+// STORAGE KEYS
+// ============================================================================
+const STORAGE_KEYS = {
+  LAST_PUSH_TOKEN: 'push_last_token',
+  LAST_PUSH_USER_ID: 'push_last_user_id',
+  AUTH_TOKEN: 'auth_token',
+};
+
+// ============================================================================
+// MODULE-LEVEL STATE (Singleton pattern for listeners)
+// ============================================================================
+let notificationReceivedSubscription: Notifications.Subscription | null = null;
+let notificationResponseSubscription: Notifications.Subscription | null = null;
+let listenersActive = false;
+
+// ============================================================================
+// NOTIFICATION HANDLER (Configure once at module load)
+// ============================================================================
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
@@ -32,38 +50,58 @@ Notifications.setNotificationHandler({
   }),
 });
 
-/**
- * Get auth token from storage
- */
-async function getAuthToken(): Promise<string | null> {
+// ============================================================================
+// STORAGE HELPERS
+// ============================================================================
+async function getStoredValue(key: string): Promise<string | null> {
   if (Platform.OS === 'web') {
     try {
-      return (window as any)?.localStorage?.getItem('auth_token') || null;
+      return window.localStorage?.getItem(key) || null;
     } catch {
       return null;
     }
   }
   try {
-    return await SecureStore.getItemAsync('auth_token');
+    return await SecureStore.getItemAsync(key);
   } catch {
     return null;
   }
 }
 
+async function setStoredValue(key: string, value: string): Promise<void> {
+  if (Platform.OS === 'web') {
+    try {
+      window.localStorage?.setItem(key, value);
+    } catch {}
+    return;
+  }
+  try {
+    await SecureStore.setItemAsync(key, value);
+  } catch {}
+}
+
+async function deleteStoredValue(key: string): Promise<void> {
+  if (Platform.OS === 'web') {
+    try {
+      window.localStorage?.removeItem(key);
+    } catch {}
+    return;
+  }
+  try {
+    await SecureStore.deleteItemAsync(key);
+  } catch {}
+}
+
+// ============================================================================
+// CORE FUNCTIONS
+// ============================================================================
+
 /**
  * Request notification permissions and get the Expo push token.
- * 
- * Expo SDK 51+ requirements:
- * - Must provide projectId from EAS config
- * - Android requires notification channel setup
- * - Only works on physical devices (or simulators with limitations)
- * 
- * @returns Expo push token string or null if unavailable
+ * Internal function - handles all platform-specific logic.
  */
-export async function registerForPushNotificationsAsync(): Promise<string | null> {
-  let token: string | null = null;
-
-  // Setup Android notification channel FIRST (SDK 51+ requirement)
+async function getExpoPushToken(): Promise<string | null> {
+  // Setup Android notification channel
   if (Platform.OS === 'android') {
     try {
       await Notifications.setNotificationChannelAsync('default', {
@@ -72,111 +110,67 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
         vibrationPattern: [0, 250, 250, 250],
         lightColor: '#FF231F7C',
       });
-      console.log('[Push] Android notification channel configured');
     } catch (error) {
-      console.warn('[Push] Failed to setup Android notification channel:', error);
+      console.warn('[Push] Failed to setup Android channel:', error);
     }
   }
 
-  // Check if running on physical device
-  if (!Device.isDevice) {
-    console.log('[Push] Push notifications require a physical device. Running on simulator/emulator.');
-    // Note: On iOS simulator, push tokens may still work for testing in some cases
-    // On Android emulator, push notifications typically don't work
-    if (Platform.OS === 'android') {
-      return null;
-    }
-    // Continue for iOS simulator (limited functionality)
+  // Check device compatibility
+  if (!Device.isDevice && Platform.OS === 'android') {
+    console.log('[Push] Android emulator - push tokens not available');
+    return null;
   }
 
-  // Web doesn't support Expo push notifications
   if (Platform.OS === 'web') {
-    console.log('[Push] Push notifications not supported on web platform');
+    console.log('[Push] Web platform - push tokens not supported');
     return null;
   }
 
   try {
-    // Check existing permissions
+    // Check/request permissions
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
-    console.log('[Push] Existing permission status:', existingStatus);
 
-    // Request permission if not granted
     if (existingStatus !== 'granted') {
-      console.log('[Push] Requesting notification permissions...');
       const { status } = await Notifications.requestPermissionsAsync();
       finalStatus = status;
     }
 
     if (finalStatus !== 'granted') {
-      console.warn('[Push] Push notification permission not granted. User declined or restricted.');
+      console.log('[Push] Permission not granted');
       return null;
     }
 
-    // Get EAS projectId from config
+    // Get project ID
     const projectId = Constants.expoConfig?.extra?.eas?.projectId;
-    
     if (!projectId) {
-      console.error('[Push] Missing EAS projectId in app config (app.json/app.config.js)');
-      console.error('[Push] Please add: "extra": { "eas": { "projectId": "YOUR_PROJECT_ID" } }');
-      console.error('[Push] Get your projectId from: https://expo.dev/accounts/[account]/projects/[project]');
+      console.error('[Push] Missing EAS projectId in app config');
       return null;
     }
 
-    console.log('[Push] Using EAS projectId:', projectId);
-
-    // Get the Expo push token
+    // Get token
     const tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
-    token = tokenData.data;
-
-    // Log the token prominently for testing
-    console.log('========================================');
-    console.log('🔔 Expo Push Token:', token);
-    console.log('📱 Platform:', Platform.OS);
-    console.log('📱 Device:', Device.isDevice ? 'Physical' : 'Simulator');
-    console.log('🧪 Test at: https://expo.dev/notifications');
-    console.log('========================================');
-
-    return token;
+    console.log('[Push] ✓ Token obtained:', tokenData.data.substring(0, 30) + '...');
+    return tokenData.data;
   } catch (error) {
-    console.error('[Push] Failed to get push token:', error);
-    // Don't crash the app - push notifications are optional
+    console.error('[Push] Failed to get token:', error);
     return null;
   }
 }
 
 /**
- * Register the push token with the backend.
- * 
- * This is called AFTER successful login/signup - it's optional and won't block auth.
- * Accepts { push_token: string } and stores it for the authenticated user.
- * 
- * @param pushToken - The Expo push token to register
- * @returns true if successful, false otherwise
+ * Register push token with backend.
+ * Internal function - posts token to API.
  */
-export async function registerPushTokenWithBackend(pushToken: string | null): Promise<boolean> {
-  // Don't attempt if no token provided
-  if (!pushToken) {
-    console.log('[Push] No push token provided, skipping backend registration');
-    return false;
-  }
-
+async function postTokenToBackend(pushToken: string): Promise<boolean> {
   try {
-    const authToken = await getAuthToken();
+    const authToken = await getStoredValue(STORAGE_KEYS.AUTH_TOKEN);
     if (!authToken) {
-      console.log('[Push] No auth token available, skipping push token registration');
-      console.log('[Push] This is expected if called before login');
+      console.log('[Push] No auth token - cannot register push token');
       return false;
     }
 
-    // Log token details for debugging
-    console.log('========================================');
-    console.log('[Push] 🔍 REGISTERING PUSH TOKEN');
-    console.log('[Push] Platform:', Platform.OS);
-    console.log('[Push] Token (first 40 chars):', pushToken.substring(0, 40));
-    console.log('[Push] Auth token (first 20 chars):', authToken.substring(0, 20));
-    console.log('========================================');
-    
+    console.log('[Push] 📤 POST /api/push-token');
     const response = await fetch(`${API}/api/push-token`, {
       method: 'POST',
       headers: {
@@ -187,114 +181,181 @@ export async function registerPushTokenWithBackend(pushToken: string | null): Pr
     });
 
     if (response.ok) {
-      const result = await response.json();
-      console.log('[Push] ✓ Push token registered with backend successfully');
-      console.log('[Push] Response:', result);
+      console.log('[Push] ✓ Token registered with backend');
       return true;
     } else {
-      const errorText = await response.text().catch(() => '');
-      console.error('[Push] ❌ Failed to register push token:', response.status, errorText);
-      // Don't crash - push registration is optional
+      console.error('[Push] ✗ Backend registration failed:', response.status);
       return false;
     }
   } catch (error) {
-    console.error('[Push] ❌ Failed to register push token with backend:', error);
-    // Don't crash - push registration is optional
+    console.error('[Push] ✗ Backend registration error:', error);
     return false;
   }
 }
 
+// ============================================================================
+// PUBLIC API
+// ============================================================================
+
 /**
- * Unregister push token from backend (call on logout)
+ * Initialize push notifications for a user.
  * 
- * This removes the user's push token so they won't receive notifications
- * after logging out.
+ * IDEMPOTENT: Safe to call multiple times.
+ * - Checks cached token/userId in SecureStore
+ * - Only POSTs to backend if token is new OR userId changed
+ * - Stores current token/userId after successful POST
+ * 
+ * @param userId - The authenticated user's ID (string)
  */
-export async function unregisterPushToken(): Promise<boolean> {
-  try {
-    const authToken = await getAuthToken();
-    if (!authToken) {
-      console.log('[Push] No auth token, nothing to unregister');
-      return true;
-    }
+export async function initializePushNotifications(userId: string): Promise<void> {
+  console.log('[Push] initializePushNotifications called for userId:', userId);
 
-    console.log('[Push] Unregistering push token from backend...');
-    
-    const response = await fetch(`${API}/api/push-token`, {
-      method: 'DELETE',
-      headers: {
-        Authorization: `Bearer ${authToken}`,
-      },
-    });
-
-    if (response.ok) {
-      console.log('[Push] ✓ Push token unregistered successfully');
-    }
-
-    return response.ok;
-  } catch (error) {
-    console.error('[Push] Failed to unregister push token:', error);
-    // Don't block logout on push token errors
-    return false;
+  if (Platform.OS === 'web') {
+    console.log('[Push] Skipping - web platform');
+    return;
   }
-}
 
-/**
- * Initialize push notifications - call this AFTER successful login/signup.
- * 
- * This function:
- * 1. Requests notification permissions (if not granted)
- * 2. Gets the Expo push token
- * 3. Registers the token with the backend
- * 
- * IMPORTANT: This is entirely optional and will NOT block the app or crash
- * if push notifications are unavailable or fail.
- */
-export async function initializePushNotifications(): Promise<void> {
-  console.log('[Push] Initializing push notifications...');
-  
   try {
-    // Get push token (handles permissions, device checks, etc.)
-    const pushToken = await registerForPushNotificationsAsync();
-    
-    if (pushToken) {
-      // Register with backend
-      await registerPushTokenWithBackend(pushToken);
-    } else {
-      console.log('[Push] No push token obtained - notifications will not be available');
-      console.log('[Push] This is normal on web, simulators, or if permissions denied');
+    // 1. Get push token
+    const currentToken = await getExpoPushToken();
+    if (!currentToken) {
+      console.log('[Push] No token obtained - skipping registration');
+      return;
+    }
+
+    // 2. Check cached values
+    const lastToken = await getStoredValue(STORAGE_KEYS.LAST_PUSH_TOKEN);
+    const lastUserId = await getStoredValue(STORAGE_KEYS.LAST_PUSH_USER_ID);
+
+    // 3. Determine if we need to POST
+    const tokenChanged = lastToken !== currentToken;
+    const userChanged = lastUserId !== userId;
+
+    if (!tokenChanged && !userChanged) {
+      console.log('[Push] ⏭️ Cached match found - skipping backend POST');
+      console.log('[Push]    Token unchanged, userId unchanged');
+      return;
+    }
+
+    console.log('[Push] 🔄 Change detected:');
+    if (tokenChanged) console.log('[Push]    Token: changed');
+    if (userChanged) console.log('[Push]    UserId:', lastUserId, '→', userId);
+
+    // 4. POST to backend
+    const success = await postTokenToBackend(currentToken);
+
+    // 5. Cache on success
+    if (success) {
+      await setStoredValue(STORAGE_KEYS.LAST_PUSH_TOKEN, currentToken);
+      await setStoredValue(STORAGE_KEYS.LAST_PUSH_USER_ID, userId);
+      console.log('[Push] ✓ Cached token and userId for future deduplication');
     }
   } catch (error) {
-    // Catch any unexpected errors - don't crash the app
-    console.error('[Push] Failed to initialize push notifications:', error);
-    console.log('[Push] App will continue without push notifications');
+    console.error('[Push] initializePushNotifications error:', error);
   }
 }
 
 /**
- * Add a listener for received notifications (when app is in foreground)
+ * Setup global notification listeners.
+ * 
+ * SINGLETON: Only ONE set of listeners will ever be active.
+ * - If already active, returns immediately
+ * - Stores subscriptions in module-level variables
+ * 
+ * Call this ONCE after initializePushNotifications.
  */
-export function addNotificationReceivedListener(
-  callback: (notification: Notifications.Notification) => void
-): Notifications.Subscription {
-  return Notifications.addNotificationReceivedListener(callback);
-}
-
-/**
- * Add a listener for notification responses (when user taps notification)
- */
-export function addNotificationResponseListener(
-  callback: (response: Notifications.NotificationResponse) => void
-): Notifications.Subscription {
-  return Notifications.addNotificationResponseReceivedListener(callback);
-}
-
-/**
- * Remove a notification listener
- * In newer Expo SDK versions, use subscription.remove() directly
- */
-export function removeNotificationListener(subscription: Notifications.Subscription): void {
-  if (subscription && typeof subscription.remove === 'function') {
-    subscription.remove();
+export function setupGlobalNotificationListeners(): void {
+  // Guard: Only one set of listeners ever
+  if (listenersActive) {
+    console.log('[Push] Global notification listeners already active - skipping');
+    return;
   }
+
+  console.log('[Push] Setting up global notification listeners...');
+
+  // Listener for notifications received while app is in foreground
+  notificationReceivedSubscription = Notifications.addNotificationReceivedListener(
+    (notification) => {
+      console.log('[Notification] Received:', notification.request.content.title);
+    }
+  );
+
+  // Listener for when user taps on a notification
+  notificationResponseSubscription = Notifications.addNotificationResponseReceivedListener(
+    (response) => {
+      console.log('[Notification] Tapped:', response.notification.request.content.title);
+      const data = response.notification.request.content.data;
+      if (data?.category) {
+        console.log('[Notification] Category:', data.category);
+      }
+    }
+  );
+
+  listenersActive = true;
+  console.log('[Push] ✓ Global notification listeners initialized');
+}
+
+/**
+ * Cleanup global notification listeners.
+ * 
+ * Call this on logout to remove all listeners.
+ * Safe to call multiple times.
+ */
+export function cleanupGlobalNotificationListeners(): void {
+  console.log('[Push] Cleaning up global notification listeners...');
+
+  if (notificationReceivedSubscription) {
+    notificationReceivedSubscription.remove();
+    notificationReceivedSubscription = null;
+  }
+
+  if (notificationResponseSubscription) {
+    notificationResponseSubscription.remove();
+    notificationResponseSubscription = null;
+  }
+
+  listenersActive = false;
+  console.log('[Push] ✓ Global notification listeners cleaned up');
+}
+
+/**
+ * Unregister push token from backend and clear cached state.
+ * 
+ * Call this on logout BEFORE clearing auth token.
+ */
+export async function unregisterPushToken(): Promise<void> {
+  console.log('[Push] Unregistering push token...');
+
+  try {
+    const authToken = await getStoredValue(STORAGE_KEYS.AUTH_TOKEN);
+    if (authToken) {
+      await fetch(`${API}/api/push-token`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      console.log('[Push] ✓ Token unregistered from backend');
+    }
+  } catch (error) {
+    console.error('[Push] Unregister error:', error);
+  }
+
+  // Clear cached state
+  await deleteStoredValue(STORAGE_KEYS.LAST_PUSH_TOKEN);
+  await deleteStoredValue(STORAGE_KEYS.LAST_PUSH_USER_ID);
+  console.log('[Push] ✓ Cached push state cleared');
+}
+
+/**
+ * Full cleanup for logout.
+ * 
+ * Convenience function that:
+ * 1. Unregisters token from backend
+ * 2. Clears cached state
+ * 3. Removes notification listeners
+ */
+export async function cleanupOnLogout(): Promise<void> {
+  console.log('[Push] === LOGOUT CLEANUP START ===');
+  await unregisterPushToken();
+  cleanupGlobalNotificationListeners();
+  console.log('[Push] === LOGOUT CLEANUP COMPLETE ===');
 }

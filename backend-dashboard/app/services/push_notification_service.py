@@ -512,13 +512,19 @@ async def send_alert_notification_instantly(
 
 async def send_daily_quote_notifications(mobile_engine) -> Dict[str, Any]:
     """
-    Send daily motivational quote notifications to all users with push tokens.
-    Sends INSTANTLY - no delays.
+    Send daily motivational quote notifications to all eligible users.
+    
+    ⚠️ CORRECT PER-USER DELIVERY:
+    - Creates ONE notification per user (with that user's user_id)
+    - Sends push to ONLY that user's push_token
+    - NO BROADCAST to all users
     
     Returns:
         Dict with stats: created, sent, failed
     """
     from app.services.quote_service import fetch_daily_quote, get_random_fallback_quote
+    
+    logger.info("[Daily Quote] Starting daily quote notification job...")
     
     # Fetch a quote
     try:
@@ -536,8 +542,9 @@ async def send_daily_quote_notifications(mobile_engine) -> Dict[str, Any]:
     # TODO: Change to INTERVAL 23 HOUR for production (to allow once per day)
     get_users_q = text(
         """
-        SELECT u.user_id, u.push_token FROM user u
+        SELECT u.user_id, u.push_token, u.nickname FROM user u
         WHERE u.push_token IS NOT NULL AND u.push_token != ''
+        AND u.push_token LIKE 'ExponentPushToken%'
         AND u.is_active = 1
         AND NOT EXISTS (
             SELECT 1 FROM notification n 
@@ -552,55 +559,66 @@ async def send_daily_quote_notifications(mobile_engine) -> Dict[str, Any]:
         with mobile_engine.connect() as conn:
             users = conn.execute(get_users_q).mappings().all()
     except Exception as e:
-        logger.error(f"Failed to fetch users for daily quotes: {e}")
+        logger.error(f"[Daily Quote] Failed to fetch users: {e}")
         return {"created": 0, "sent": 0, "failed": 0, "error": str(e)}
     
+    logger.info(f"[Daily Quote] Found {len(users)} eligible users for daily quote")
+    
     if not users:
-        return {"created": 0, "sent": 0, "failed": 0, "message": "No users with push tokens"}
+        return {"created": 0, "sent": 0, "failed": 0, "message": "No eligible users"}
     
     created_count = 0
     sent_count = 0
     failed_count = 0
     
-    # Send to each user INSTANTLY
+    # CORRECT: For each user, create ONE notification and send to ONLY that user
     for user in users:
         user_id = user["user_id"]
         push_token = user["push_token"]
+        nickname = user.get("nickname", "Unknown")
         
-        # Create notification record with is_sent=TRUE
+        logger.info(f"[Daily Quote] Processing user {user_id} ({nickname})")
+        
+        # Create notification record for THIS user (user_id in record)
         notif_id = create_notification_record(
             mobile_engine=mobile_engine,
-            user_id=user_id,
+            user_id=user_id,  # CRITICAL: notification belongs to this specific user
             title=title,
             message=message,
             category="daily_quote",
             source="scheduler",
-            is_sent=True,
-            sent_at=True
+            is_sent=False,  # Will mark as sent after successful push
+            sent_at=False
         )
         
         if notif_id:
             created_count += 1
+            logger.info(f"[Daily Quote] Created notification {notif_id} for user {user_id}")
             
-            # Send push immediately
-            if push_token and push_token.startswith("ExponentPushToken"):
+            # Send push to ONLY this user's token (1 notification → 1 user)
+            if push_token:
+                logger.info(f"[Daily Quote] Sending notification {notif_id} to user {user_id}'s token")
                 push_result = await send_expo_push(
                     push_token, title, message,
                     {"notification_id": notif_id, "category": "daily_quote"}
                 )
                 if push_result.get("success"):
-                    sent_count += 1
-                else:
-                    failed_count += 1
-                    # Mark as not sent
-                    update_q = text("UPDATE notification SET is_sent = FALSE, sent_at = NULL WHERE id = :nid")
+                    # Mark as sent
+                    update_q = text("UPDATE notification SET is_sent = TRUE, sent_at = NOW() WHERE id = :nid")
                     try:
                         with mobile_engine.begin() as conn:
                             conn.execute(update_q, {"nid": notif_id})
                     except:
                         pass
+                    sent_count += 1
+                    logger.info(f"[Daily Quote] ✓ Notification {notif_id} sent to user {user_id}")
+                else:
+                    failed_count += 1
+                    logger.error(f"[Daily Quote] ✗ Failed to send notification {notif_id} to user {user_id}: {push_result.get('error')}")
+            else:
+                logger.warning(f"[Daily Quote] Skipping user {user_id}: no valid push token")
     
-    logger.info(f"Daily quotes: created={created_count}, sent={sent_count}, failed={failed_count}")
+    logger.info(f"[Daily Quote] Complete: created={created_count}, sent={sent_count}, failed={failed_count}")
     
     return {
         "created": created_count,
@@ -837,6 +855,119 @@ async def send_system_notification(
         category="system",
         source="system"
     )
+
+
+# ============================================================================
+# PROCESS UNSENT NOTIFICATIONS (Per-User Delivery - NO BROADCAST)
+# ============================================================================
+
+async def process_unsent_notifications(mobile_engine) -> Dict[str, Any]:
+    """
+    Process all unsent notifications and deliver them to their SPECIFIC users.
+    
+    ⚠️ CRITICAL: This function sends each notification ONLY to its associated user_id.
+    There is NO broadcast - each notification row is delivered to exactly ONE user.
+    
+    Logic:
+    1. Query unsent notifications JOINed with user table to get push_token
+    2. For each notification: send to ONLY that notification's user_id's push_token
+    3. Mark notification as sent after successful delivery
+    
+    Returns:
+        Dict with processed, sent, skipped, failed counts
+    """
+    logger.info("[Process Unsent] Starting per-user notification delivery...")
+    
+    # Query unsent notifications with their owner's push token
+    # CRITICAL: We JOIN to get ONLY the notification owner's token, not all users
+    query = text("""
+        SELECT 
+            n.id as notification_id,
+            n.user_id,
+            n.title,
+            n.message,
+            n.category,
+            n.source,
+            u.push_token,
+            u.nickname
+        FROM notification n
+        JOIN user u ON u.user_id = n.user_id
+        WHERE n.is_sent = FALSE
+        AND u.push_token IS NOT NULL
+        AND u.push_token != ''
+        AND u.push_token LIKE 'ExponentPushToken%'
+        ORDER BY n.created_at ASC
+        LIMIT 100
+    """)
+    
+    processed = 0
+    sent = 0
+    skipped = 0
+    failed = 0
+    
+    try:
+        with mobile_engine.connect() as conn:
+            notifications = conn.execute(query).mappings().all()
+            logger.info(f"[Process Unsent] Found {len(notifications)} unsent notifications to process")
+            
+            for notif in notifications:
+                notif_id = notif["notification_id"]
+                user_id = notif["user_id"]
+                push_token = notif["push_token"]
+                nickname = notif.get("nickname", "Unknown")
+                title = notif.get("title") or "Notification"
+                message = notif.get("message") or ""
+                category = notif.get("category") or "system"
+                
+                processed += 1
+                
+                # Log the 1-to-1 mapping
+                logger.info(f"[Process Unsent] Sending notification {notif_id} to user {user_id} ({nickname})")
+                
+                if not push_token:
+                    logger.warning(f"[Process Unsent] Skipping notification {notif_id}: user {user_id} has no push token")
+                    skipped += 1
+                    continue
+                
+                # Send to ONLY this user's push token
+                push_result = await send_expo_push(
+                    push_token=push_token,
+                    title=title,
+                    message=message,
+                    data={"notification_id": notif_id, "category": category}
+                )
+                
+                if push_result.get("success"):
+                    # Mark as sent
+                    update_q = text("UPDATE notification SET is_sent = TRUE, sent_at = NOW() WHERE id = :nid")
+                    with mobile_engine.begin() as update_conn:
+                        update_conn.execute(update_q, {"nid": notif_id})
+                    logger.info(f"[Process Unsent] ✓ Marked notification {notif_id} as sent to user {user_id}")
+                    sent += 1
+                else:
+                    logger.error(f"[Process Unsent] ✗ Failed to send notification {notif_id} to user {user_id}: {push_result.get('error')}")
+                    failed += 1
+                    
+    except Exception as e:
+        logger.error(f"[Process Unsent] Error processing notifications: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "processed": processed,
+            "sent": sent,
+            "skipped": skipped,
+            "failed": failed
+        }
+    
+    logger.info(f"[Process Unsent] Complete: processed={processed}, sent={sent}, skipped={skipped}, failed={failed}")
+    
+    return {
+        "success": True,
+        "processed": processed,
+        "sent": sent,
+        "skipped": skipped,
+        "failed": failed
+    }
 
 
 # ============================================================================
