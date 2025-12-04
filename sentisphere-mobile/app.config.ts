@@ -25,6 +25,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     edgeToEdgeEnabled: true,
     predictiveBackGestureEnabled: false,
     package: "com.sentisphere.mobile",
+    // NOTE: Release SHA-1/SHA-256 must be added to Firebase and a fresh google-services.json downloaded
+    // Run `eas credentials --platform android --profile releaseApk` to retrieve fingerprints before shipping
     googleServicesFile: process.env.GOOGLE_SERVICES_JSON ?? "./google-services.json",
     softwareKeyboardLayoutMode: "pan"
   },
