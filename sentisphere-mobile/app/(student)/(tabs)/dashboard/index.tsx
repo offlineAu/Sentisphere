@@ -48,8 +48,9 @@ export default function EnhancedDashboardScreen() {
   const [weeklyMoodAverage] = useState(7.2)
   const [currentStreak] = useState(5)
   const { width: screenWidth } = useWindowDimensions()
-  const API = process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8010'
+  const API = process.env.EXPO_PUBLIC_API_URL || 'https://sentisphere-production.up.railway.app'
   const [displayName, setDisplayName] = useState<string>("")
+  const [backendConnected, setBackendConnected] = useState<boolean | null>(null)
   const getAuthToken = useCallback(async (): Promise<string | null> => {
     if (Platform.OS === 'web') {
       try { return (window as any)?.localStorage?.getItem('auth_token') || null } catch { return null }
@@ -84,6 +85,27 @@ export default function EnhancedDashboardScreen() {
     } catch {}
   }, [API, getAuthToken, decodeJwtName])
   useEffect(() => { fetchCurrentUser() }, [fetchCurrentUser])
+
+  // Health check to verify backend connection on app startup
+  useEffect(() => {
+    const checkBackendHealth = async () => {
+      try {
+        const res = await fetch(`${API}/health`, { method: 'GET' })
+        if (res.ok) {
+          const data = await res.json()
+          console.log('[Backend] Connected:', data)
+          setBackendConnected(true)
+        } else {
+          console.warn('[Backend] Health check failed:', res.status)
+          setBackendConnected(false)
+        }
+      } catch (err) {
+        console.error('[Backend] Connection error:', err)
+        setBackendConnected(false)
+      }
+    }
+    checkBackendHealth()
+  }, [API])
 
   const logout = useCallback(async () => {
     try {

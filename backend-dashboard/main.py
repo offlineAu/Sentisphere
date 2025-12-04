@@ -23,6 +23,8 @@ from apscheduler.triggers.cron import CronTrigger
 
 from app.core.config import settings
 from app.db.database import engine, ENGINE_INIT_ERROR_MSG
+# NOTE: mobile_engine and get_mobile_db are now shims pointing to the unified database
+# Kept for backward compatibility - both now use the same engine as web
 from app.db.mobile_database import mobile_engine, get_mobile_db
 from app.db.session import get_db, SessionLocal
 from app.api.routes.auth import router as auth_router
@@ -2434,6 +2436,7 @@ def list_emotional_checkins(
 
 
 class JournalIn(BaseModel):
+    title: Optional[str] = None
     content: str
 
 
@@ -2450,6 +2453,7 @@ def create_journal(
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
     content = (payload.content or "").strip()
+    title = (payload.title or "").strip() if payload.title else None
     if not content:
         raise HTTPException(status_code=422, detail="Content required")
 
@@ -2459,11 +2463,11 @@ def create_journal(
             ins = conn.execute(
                 text(
                     """
-                    INSERT INTO journal (user_id, content, created_at)
-                    VALUES (:uid, :content, NOW())
+                    INSERT INTO journal (user_id, title, content, created_at)
+                    VALUES (:uid, :title, :content, NOW())
                     """
                 ),
-                {"uid": uid, "content": content},
+                {"uid": uid, "title": title, "content": content},
             )
             conn.commit()
             journal_id = int(ins.lastrowid)
@@ -2568,7 +2572,7 @@ def list_journals(limit: int = Query(50, ge=1, le=200), token: str = Depends(oau
 
     q = text(
         """
-        SELECT journal_id, content, created_at
+        SELECT journal_id, title, content, created_at
         FROM journal
         WHERE user_id = :uid AND (deleted_at IS NULL)
         ORDER BY created_at DESC
@@ -2580,6 +2584,7 @@ def list_journals(limit: int = Query(50, ge=1, le=200), token: str = Depends(oau
         return [
             {
                 "journal_id": r["journal_id"],
+                "title": r["title"],
                 "content": r["content"],
                 "created_at": r["created_at"].strftime("%Y-%m-%dT%H:%M:%S") if r["created_at"] else None,
             }
@@ -2596,7 +2601,7 @@ def get_journal(journal_id: int, token: str = Depends(oauth2_scheme)):
 
     q = text(
         """
-        SELECT journal_id, content, created_at
+        SELECT journal_id, title, content, created_at
         FROM journal
         WHERE journal_id = :jid AND user_id = :uid AND (deleted_at IS NULL)
         LIMIT 1
@@ -2608,6 +2613,7 @@ def get_journal(journal_id: int, token: str = Depends(oauth2_scheme)):
             raise HTTPException(status_code=404, detail="Journal not found")
         return {
             "journal_id": row["journal_id"],
+            "title": row["title"],
             "content": row["content"],
             "created_at": row["created_at"].strftime("%Y-%m-%dT%H:%M:%S") if row["created_at"] else None,
         }
@@ -2691,6 +2697,17 @@ async def register_push_token(
     if not push_token or not push_token.startswith("ExponentPushToken"):
         raise HTTPException(status_code=400, detail="Invalid push token format")
     
+    # Get user info for logging
+    get_user_q = text("SELECT nickname FROM user WHERE user_id = :uid")
+    try:
+        with mobile_engine.connect() as conn:
+            user_row = conn.execute(get_user_q, {"uid": uid}).first()
+            nickname = user_row[0] if user_row else "Unknown"
+    except:
+        nickname = "Unknown"
+    
+    logging.info(f"[Push Token Registration] User {uid} ({nickname}) registering token: {push_token[:30]}...")
+    
     update_q = text(
         """
         UPDATE user SET push_token = :push_token
@@ -2699,10 +2716,17 @@ async def register_push_token(
     )
     try:
         with mobile_engine.begin() as conn:
-            conn.execute(update_q, {"push_token": push_token, "uid": uid})
-        return {"ok": True, "message": "Push token registered successfully"}
+            result = conn.execute(update_q, {"push_token": push_token, "uid": uid})
+            rows_updated = result.rowcount
+        
+        if rows_updated > 0:
+            logging.info(f"[Push Token Registration] ✓ Successfully updated token for user {uid} ({nickname})")
+        else:
+            logging.warning(f"[Push Token Registration] No rows updated for user {uid} ({nickname}) - user may not exist")
+        
+        return {"ok": True, "message": "Push token registered successfully", "user_id": uid}
     except Exception as e:
-        logging.error(f"Failed to register push token: {e}")
+        logging.error(f"Failed to register push token for user {uid}: {e}")
         raise HTTPException(status_code=500, detail="Failed to register push token")
 
 
@@ -2968,6 +2992,28 @@ async def monitor_alerts_endpoint():
     
     return {
         "ok": True,
+        **result
+    }
+
+
+@app.post("/api/process-unsent-notifications")
+async def process_unsent_notifications_endpoint():
+    """
+    Process all unsent notifications and deliver them to their SPECIFIC users.
+    
+    ⚠️ CORRECT PER-USER DELIVERY:
+    - Each notification is sent ONLY to its associated user_id
+    - NO broadcast to all users
+    - Safe to run multiple times (idempotent)
+    
+    Use this to manually process any notifications that failed initial delivery.
+    """
+    from app.services.push_notification_service import process_unsent_notifications
+    
+    result = await process_unsent_notifications(mobile_engine)
+    
+    return {
+        "ok": result.get("success", False),
         **result
     }
 
@@ -3246,32 +3292,63 @@ def schedule_alert_monitor():
         logging.error(f"Alert monitor failed: {e}")
 
 
+def schedule_process_unsent():
+    """
+    Background task to process unsent notifications.
+    
+    ⚠️ CORRECT PER-USER DELIVERY:
+    - Each notification is sent ONLY to its associated user_id
+    - NO broadcast to all users
+    - Runs every 5 minutes to catch failed notifications
+    """
+    import asyncio
+    from app.services.push_notification_service import process_unsent_notifications
+    
+    try:
+        result = asyncio.run(process_unsent_notifications(mobile_engine))
+        logging.info(f"Process unsent: processed={result.get('processed')}, sent={result.get('sent')}, failed={result.get('failed')}")
+    except Exception as e:
+        logging.error(f"Process unsent failed: {e}")
+
+
 # Initialize scheduler with unified notification jobs
-try:
-    scheduler = BackgroundScheduler()
-    
-    # Daily quotes - every minute for testing (normally 9 AM daily)
-    # TODO: Change back to CronTrigger(hour=9, minute=0) for production
-    scheduler.add_job(
-        schedule_daily_quotes,
-        CronTrigger(minute="*"),  # Every minute for testing
-        id="daily_quotes",
-        replace_existing=True
-    )
-    
-    # Alert monitor every 1 minute (for quick response to high-risk alerts)
-    # TODO: Change back to */15 for production
-    scheduler.add_job(
-        schedule_alert_monitor,
-        CronTrigger(minute="*"),
-        id="alert_monitor",
-        replace_existing=True
-    )
-    
-    scheduler.start()
-    logging.info("Notification scheduler initialized (daily quotes every minute [TESTING], alert monitor every 1min)")
-except Exception as e:
-    logging.warning(f"Failed to initialize scheduler: {e}")
+railway_primary = os.getenv("RAILWAY_PRIMARY_INSTANCE")
+if railway_primary and railway_primary.lower() != "true":
+    logging.info("Skipping scheduler initialization (non-primary Railway instance)")
+else:
+    try:
+        scheduler = BackgroundScheduler()
+        
+        # Daily quotes - every minute for testing (normally 9 AM daily)
+        # TODO: Change back to CronTrigger(hour=9, minute=0) for production
+        scheduler.add_job(
+            schedule_daily_quotes,
+            CronTrigger(minute="*"),  # Every minute for testing
+            id="daily_quotes",
+            replace_existing=True
+        )
+        
+        # Alert monitor every 1 minute (for quick response to high-risk alerts)
+        # TODO: Change back to */15 for production
+        scheduler.add_job(
+            schedule_alert_monitor,
+            CronTrigger(minute="*"),
+            id="alert_monitor",
+            replace_existing=True
+        )
+        
+        # Process unsent notifications every 5 minutes (per-user delivery, NO broadcast)
+        scheduler.add_job(
+            schedule_process_unsent,
+            CronTrigger(minute="*/5"),
+            id="process_unsent",
+            replace_existing=True
+        )
+        
+        scheduler.start()
+        logging.info("Notification scheduler initialized (daily quotes every minute [TESTING], alert monitor every 1min, unsent processor every 5min)")
+    except Exception as e:
+        logging.warning(f"Failed to initialize scheduler: {e}")
 
 
 @app.get("/reports/top-stats")
@@ -3843,34 +3920,48 @@ def send_message(conversation_id: int, message: MessageIn, current_user: str = D
 
 @app.get("/health")
 def health():
-    status_map = {"web": "unknown", "mobile": "unknown"}
-
-    def check_db(label: str, db_engine, init_error_msg: str | None = None):
-        if init_error_msg:
-            status_map[label] = f"error: {init_error_msg}"
-            return False
+    """
+    Health check endpoint.
+    
+    NOTE: As of Dec 2024, mobile and web use a UNIFIED database.
+    The response structure is kept for backward compatibility with mobile app.
+    Both 'web' and 'mobile' keys now reflect the same unified database status.
+    """
+    db_status = "unknown"
+    
+    # Check unified database connection
+    if ENGINE_INIT_ERROR_MSG:
+        db_status = f"error: {ENGINE_INIT_ERROR_MSG}"
+        db_ok = False
+    else:
         try:
-            with db_engine.connect() as conn:
+            with engine.connect() as conn:
                 conn.execute(text("SELECT 1"))
-            status_map[label] = "connected"
-            return True
+            db_status = "connected"
+            db_ok = True
         except Exception as exc:
-            status_map[label] = f"error: {exc.__class__.__name__}"
-            return False
+            db_status = f"error: {exc.__class__.__name__}"
+            db_ok = False
 
-    web_ok = check_db("web", engine, ENGINE_INIT_ERROR_MSG)
-    mobile_ok = check_db("mobile", mobile_engine)
+    # Response structure kept for backward compatibility
+    # Both web and mobile now use the same unified database
+    status_map = {
+        "web": db_status,
+        "mobile": db_status,  # Same as web - unified DB
+        "unified": True,  # Flag indicating unified DB mode
+    }
 
-    if web_ok and mobile_ok:
+    if db_ok:
         return {"status": "ok", "databases": status_map}
 
-    problem = []
-    if not web_ok:
-        problem.append("web_db unreachable")
-    if not mobile_ok:
-        problem.append("mobile_db unreachable")
-
-    raise HTTPException(status_code=503, detail={"status": "unhealthy", "databases": status_map, "error": ", ".join(problem)})
+    raise HTTPException(
+        status_code=503, 
+        detail={
+            "status": "unhealthy", 
+            "databases": status_map, 
+            "error": "database unreachable"
+        }
+    )
 
 # --- Mark messages as read in a conversation ---
 @app.post("/api/conversations/{conversation_id}/read")

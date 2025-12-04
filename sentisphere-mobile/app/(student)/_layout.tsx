@@ -1,29 +1,71 @@
-import { useEffect, useState, useRef } from 'react';
-import { Platform } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Platform, BackHandler } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
-import { Stack, useRouter } from 'expo-router';
-import * as Notifications from 'expo-notifications';
+import { Stack, useRouter, useSegments } from 'expo-router';
 import { 
-  initializePushNotifications, 
-  addNotificationReceivedListener, 
-  addNotificationResponseListener,
-  removeNotificationListener 
+  initializePushNotifications,
+  setupGlobalNotificationListeners,
+  cleanupGlobalNotificationListeners
 } from '@/utils/notifications';
 
 export default function StudentLayout() {
   const router = useRouter();
+  const segments = useSegments();
   const [authorized, setAuthorized] = useState<boolean | null>(null);
-  const notificationListener = useRef<Notifications.Subscription | null>(null);
-  const responseListener = useRef<Notifications.Subscription | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+
+  /**
+   * Handle Android hardware back button.
+   * When user is logged in and on the main tabs (dashboard), prevent going back to auth screen.
+   * This keeps the user in the app instead of accidentally logging out.
+   */
+  useEffect(() => {
+    if (Platform.OS !== 'android' || !authorized) return;
+
+    const onBackPress = () => {
+      // Cast segments to string array to avoid TypeScript strict typing issues
+      const segmentStrings = segments as string[];
+      
+      // Check if we're on the main tabs (dashboard area)
+      const isOnMainTabs = segmentStrings.some(s => s.includes('(tabs)') || s.includes('tabs'));
+      const isOnDashboard = segmentStrings.some(s => s.includes('dashboard'));
+      
+      // If on main tabs or dashboard with no deep navigation, prevent back
+      if (isOnMainTabs && !segmentStrings.some(s => s.includes('appointments') || s.includes('analytics'))) {
+        // On main dashboard - prevent back to auth screen
+        return true; // Prevent default back behavior
+      }
+      
+      // Allow normal back navigation for other screens (appointments, chat details, etc.)
+      return false;
+    };
+
+    const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => subscription.remove();
+  }, [authorized, segments]);
 
   // Check authentication - this runs first, BEFORE any push notification logic
   useEffect(() => {
     let isMounted = true;
+    const API = process.env.EXPO_PUBLIC_API_URL || 'https://sentisphere-production.up.railway.app';
+
+    const clearStoredToken = async () => {
+      try {
+        if (Platform.OS === 'web') {
+          window.localStorage?.removeItem('auth_token');
+        } else {
+          await SecureStore.deleteItemAsync('auth_token');
+        }
+      } catch (e) {
+        console.log('[Auth] Error clearing token:', e);
+      }
+    };
 
     const checkAuth = async () => {
       try {
         let token: string | null = null;
 
+        // 1. Try to get stored token
         if (Platform.OS === 'web') {
           token = typeof window !== 'undefined' ? window.localStorage?.getItem('auth_token') ?? null : null;
         } else {
@@ -34,13 +76,49 @@ export default function StudentLayout() {
           return;
         }
 
-        if (token) {
-          setAuthorized(true);
-        } else {
+        // 2. If no token, redirect to auth
+        if (!token) {
+          console.log('[Auth] No stored token found - showing login screen');
           setAuthorized(false);
           router.replace('/auth');
+          return;
         }
-      } catch {
+
+        // 3. Validate token with backend before accepting it
+        console.log('[Auth] Found stored token, validating with backend...');
+        try {
+          const response = await fetch(`${API}/api/auth/mobile/me`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+
+          if (!isMounted) {
+            return;
+          }
+
+          if (response.ok) {
+            const userData = await response.json();
+            const uid = String(userData.user_id || userData.id || '');
+            console.log('[Auth] ✓ Token valid for user:', userData.nickname, '(id:', uid, ')');
+            setUserId(uid);
+            setAuthorized(true);
+          } else {
+            // Token invalid/expired - clear it and show login
+            console.log('[Auth] ✗ Token invalid (status:', response.status, ') - clearing and showing login');
+            await clearStoredToken();
+            setAuthorized(false);
+            router.replace('/auth');
+          }
+        } catch (error) {
+          console.log('[Auth] ✗ Token validation failed:', error);
+          // Network error or backend unreachable - clear token and show login
+          await clearStoredToken();
+          if (isMounted) {
+            setAuthorized(false);
+            router.replace('/auth');
+          }
+        }
+      } catch (error) {
+        console.log('[Auth] Error during auth check:', error);
         if (!isMounted) {
           return;
         }
@@ -59,68 +137,33 @@ export default function StudentLayout() {
   /**
    * Initialize push notifications AFTER successful authentication.
    * 
-   * IMPORTANT: This is completely optional and will NOT:
-   * - Block authentication
-   * - Prevent the app from working if it fails
-   * - Crash the app on any errors
+   * NEW ARCHITECTURE:
+   * - Uses centralized initializePushNotifications(userId) with SecureStore caching
+   * - Uses singleton setupGlobalNotificationListeners() - exactly ONE set
+   * - Cleanup handled by cleanupGlobalNotificationListeners()
    * 
-   * Push notifications require:
-   * - Physical device (or iOS simulator with limitations)
-   * - EAS Dev Build (not Expo Go) for full functionality
-   * - User permission granted
+   * This is completely optional and will NOT block the app.
    */
   useEffect(() => {
-    if (!authorized) return;
+    if (!authorized || !userId) return;
     if (Platform.OS === 'web') return;
 
-    let mounted = true;
+    console.log('[Push] === PUSH SETUP START ===');
+    
+    // Initialize push notifications with userId for idempotent caching
+    initializePushNotifications(userId);
+    
+    // Setup global listeners (singleton - safe to call multiple times)
+    setupGlobalNotificationListeners();
+    
+    console.log('[Push] === PUSH SETUP COMPLETE ===');
 
-    const setupPushNotifications = async () => {
-      try {
-        // Initialize push notifications (requests permission, gets token, registers with backend)
-        // This is wrapped in try-catch and will NOT crash the app
-        await initializePushNotifications();
-
-        if (!mounted) return;
-
-        // Setup notification listeners for when app is in foreground
-        notificationListener.current = addNotificationReceivedListener(notification => {
-          console.log('[Notification] Received in foreground:', notification.request.content.title);
-        });
-
-        // Setup tap listener for when user taps on notification
-        responseListener.current = addNotificationResponseListener(response => {
-          console.log('[Notification] User tapped notification');
-          const data = response.notification.request.content.data;
-          
-          // Handle different notification types
-          if (data?.category === 'daily_quote') {
-            console.log('[Notification] Daily quote tapped');
-            // Could navigate to a quotes/wellness screen
-          } else if (data?.category === 'wellness_reminder') {
-            console.log('[Notification] Wellness reminder tapped');
-            // Could navigate to counselor info or support screen
-          }
-        });
-      } catch (error) {
-        // Log but don't crash - push notifications are optional
-        console.error('[Push] Error setting up notifications:', error);
-      }
-    };
-
-    setupPushNotifications();
-
-    // Cleanup listeners on unmount
+    // Cleanup on unmount (e.g., when user navigates away or logs out)
     return () => {
-      mounted = false;
-      if (notificationListener.current) {
-        removeNotificationListener(notificationListener.current);
-      }
-      if (responseListener.current) {
-        removeNotificationListener(responseListener.current);
-      }
+      // Note: We don't cleanup here normally because listeners should persist
+      // Cleanup happens explicitly on logout via cleanupGlobalNotificationListeners()
     };
-  }, [authorized]);
+  }, [authorized, userId]);
 
   if (authorized !== true) {
     return null;

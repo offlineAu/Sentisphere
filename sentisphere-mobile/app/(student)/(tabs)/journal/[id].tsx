@@ -17,11 +17,12 @@ export default function JournalDetailScreen() {
   const router = useRouter();
   const scheme = useColorScheme() ?? 'light';
   const palette = Colors[scheme] as any;
-  const API = process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8010';
+  const API = process.env.EXPO_PUBLIC_API_URL || 'https://sentisphere-production.up.railway.app';
   const { width: winW, height: winH } = useWindowDimensions();
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [apiTitle, setApiTitle] = useState<string | null>(null);
   const [content, setContent] = useState('');
   const [createdAt, setCreatedAt] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -91,6 +92,7 @@ export default function JournalDetailScreen() {
           return;
         }
         const d = await res.json();
+        setApiTitle(d?.title ? String(d.title) : null);
         setContent(String(d?.content || ''));
         setCreatedAt(String(d?.created_at || ''));
       } catch {
@@ -102,9 +104,13 @@ export default function JournalDetailScreen() {
   }, [id]);
 
   const title = useMemo(() => {
+    // Use API title if available, otherwise fallback to first line of content
+    if (apiTitle && apiTitle.trim()) {
+      return apiTitle.trim();
+    }
     const first = content.trim().split(/\n+/)[0]?.trim() || 'Journal Entry';
     return first.slice(0, 80) || 'Journal Entry';
-  }, [content]);
+  }, [apiTitle, content]);
 
   // Format date as "Saturday, November 29, 2025"
   const when = useMemo(() => {

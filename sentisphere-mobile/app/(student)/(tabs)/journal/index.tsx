@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState, useEffect } from 'react';
-import { Animated, Easing, Pressable, StyleSheet, TextInput, View, Keyboard, Alert, TouchableWithoutFeedback, KeyboardAvoidingView, ScrollView, Platform, Modal, useWindowDimensions } from 'react-native';
+import { Animated, Easing, Pressable, StyleSheet, TextInput, View, Keyboard, Alert, TouchableWithoutFeedback, ScrollView, Platform, Modal, useWindowDimensions } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import Swipeable from 'react-native-gesture-handler/Swipeable';
 import { Feather } from '@expo/vector-icons';
@@ -17,8 +17,9 @@ import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as SecureStore from 'expo-secure-store';
 import { getDeletedJournalIds, addDeletedJournalId } from '@/utils/soft-delete';
+import { KeyboardAwareScrollView, KeyboardAwareScrollViewRef } from '@/components/KeyboardAwareScrollView';
 
-const JournalListIcon = require('@/assets/images/journal list.png');
+const JournalListIcon = require('@/assets/images/journal-list.png');
 
 
 type Entry = { id: string; title: string; body: string; date: string };
@@ -27,7 +28,7 @@ export default function JournalListScreen() {
   const scheme = useColorScheme() ?? 'light';
   const palette = Colors[scheme] as any;
   const { height: winH, width: winW } = useWindowDimensions();
-  const API = process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8010';
+  const API = process.env.EXPO_PUBLIC_API_URL || 'https://sentisphere-production.up.railway.app';
   const router = useRouter();
 
   // Tabs: 0 = Write Entry, 1 = My Entries
@@ -38,21 +39,11 @@ export default function JournalListScreen() {
   const openSwipeRef = useRef<Swipeable | null>(null);
   const fetchEntriesRef = useRef<(() => void) | null>(null);
   // Scroll ref for auto-scroll to focused input with smooth animation
-  const scrollViewRef = useRef<ScrollView>(null);
+  const scrollViewRef = useRef<KeyboardAwareScrollViewRef>(null);
   const scrollAnim = useRef(new Animated.Value(0)).current;
-  const scrollToInput = (yOffset: number = 300) => {
-    // Trigger subtle animation for visual feedback
-    scrollAnim.setValue(0);
-    Animated.timing(scrollAnim, {
-      toValue: 1,
-      duration: 280,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
-    // Delay scroll slightly for smoother feel
-    setTimeout(() => {
-      scrollViewRef.current?.scrollTo({ y: yOffset, animated: true });
-    }, 80);
+  const scrollToInput = (inputY: number = 300) => {
+    // Use KeyboardAwareScrollView's built-in smooth scroll method
+    scrollViewRef.current?.scrollInputIntoView(inputY);
   };
   const onTabChange = (next: 0 | 1) => {
     setTab(next);
@@ -259,8 +250,10 @@ export default function JournalListScreen() {
         .filter((r: any) => !deletedIds.has(String(r?.journal_id)))
         .map((r: any) => {
           const content = String(r?.content || '');
+          // Use API title if available, otherwise fallback to first line of content
+          const apiTitle = r?.title ? String(r.title).trim() : '';
           const firstLine = content.trim().split(/\n+/)[0]?.trim() || '';
-          const title = firstLine.slice(0, 60) || 'Journal Entry';
+          const title = apiTitle || firstLine.slice(0, 60) || 'Journal Entry';
           const body = content.slice(0, 160);
           const date = (r?.created_at || '').slice(0, 10) || '';
           return { id: String(r?.journal_id), title, body, date };
@@ -309,12 +302,22 @@ export default function JournalListScreen() {
   // Save handler (POST to backend)
   const handleSave = async () => {
     if (isSaving) return;
-    const text = body.trim();
-    if (!title.trim()) {
-      Alert.alert('Add a title', 'Please add a title for your journal entry before saving.');
+    const titleText = title.trim();
+    const contentText = body.trim();
+    
+    // Validate both fields are required
+    if (!titleText && !contentText) {
+      Alert.alert('Empty Entry', 'Please add a title and content for your journal entry before saving.');
       return;
     }
-    if (!text) return;
+    if (!titleText) {
+      Alert.alert('Title Required', 'Please add a title for your journal entry before saving.');
+      return;
+    }
+    if (!contentText) {
+      Alert.alert('Content Required', 'Please write some content for your journal entry before saving.');
+      return;
+    }
     if (Platform.OS !== 'web') {
       try { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {}
     }
@@ -329,7 +332,7 @@ export default function JournalListScreen() {
       const res = await fetch(`${API}/api/journals`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` },
-        body: JSON.stringify({ content: text }),
+        body: JSON.stringify({ title: titleText, content: contentText }),
       });
       if (res.status === 401) {
         await clearAuthToken();
@@ -346,8 +349,8 @@ export default function JournalListScreen() {
       const d = await res.json();
       const newEntry: Entry = {
         id: String(d?.journal_id ?? Date.now()),
-        title: title.trim(),
-        body: text,
+        title: titleText,
+        body: contentText,
         date: new Date().toISOString().slice(0, 10),
       };
       setEntries((prev) => [newEntry, ...prev]);
@@ -367,18 +370,11 @@ export default function JournalListScreen() {
 
   return (
     <GlobalScreenWrapper backgroundColor={scheme === 'dark' ? palette.background : '#FAFBFC'}>
-      <KeyboardAvoidingView 
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined} 
-        style={{ flex: 1, backgroundColor: scheme === 'dark' ? palette.background : '#FAFBFC' }}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 0}
+      <KeyboardAwareScrollView
+        ref={scrollViewRef}
+        backgroundColor={scheme === 'dark' ? palette.background : '#FAFBFC'}
+        contentContainerStyle={{ padding: 24, paddingTop: 20, paddingBottom: 120 }}
       >
-        <ScrollView
-          ref={scrollViewRef}
-          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ padding: 24, paddingTop: 20, paddingBottom: 120, backgroundColor: scheme === 'dark' ? palette.background : '#FAFBFC' }}
-        >
           <Animated.View style={makeFadeUp(entranceHeader)}>
             <View style={{ height: 24 }} />
             <ThemedText type="title">Journal</ThemedText>
@@ -620,8 +616,7 @@ export default function JournalListScreen() {
         </Animated.View>
       )}
           </Animated.View>
-        </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardAwareScrollView>
       {/* Saved toast */}
       <Animated.View
         pointerEvents="none"

@@ -57,7 +57,7 @@ export default function ChatScreen() {
   const { width } = useWindowDimensions();
   const isTablet = width >= 900;
   const insets = useSafeAreaInsets();
-  const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8010';
+  const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://sentisphere-production.up.railway.app';
   const [conversations, setConversations] = useState<ApiConversation[]>([]);
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -363,7 +363,7 @@ export default function ChatScreen() {
 
   return (
     <GlobalScreenWrapper backgroundColor="#FFFFFF" topPadding={24}>
-      <KeyboardAvoidingView style={{ flex: 1, paddingHorizontal: 16, backgroundColor: '#FFFFFF' }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}> 
+      <KeyboardAvoidingView style={{ flex: 1, paddingHorizontal: 16, backgroundColor: '#FFFFFF' }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}> 
         {/* Header with back and add buttons */}
         <Animated.View style={[styles.headerRow, makeFadeUp(entrance.header)]}>
           <Pressable

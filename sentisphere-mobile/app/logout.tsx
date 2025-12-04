@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/ui/icon';
 import * as SecureStore from 'expo-secure-store';
 import { router } from 'expo-router';
+import { cleanupOnLogout } from '@/utils/notifications';
 
 export default function LogoutScreen() {
   // Match success overlays: fade + scale in (0.96 -> 1) with cubic timing
@@ -19,11 +20,19 @@ export default function LogoutScreen() {
 
   const doLogout = async () => {
     try {
+      // Cleanup push notifications (unregister from backend, clear cache, remove listeners)
+      await cleanupOnLogout();
+      
+      // Clear local auth token
       if (Platform.OS === 'web') {
         try { (window as any)?.localStorage?.removeItem('auth_token'); } catch {}
       } else {
         try { await SecureStore.deleteItemAsync('auth_token'); } catch {}
       }
+      
+      console.log('[Logout] Logout complete, navigating to auth screen');
+    } catch (error) {
+      console.error('[Logout] Error during logout:', error);
     } finally {
       router.replace('/auth');
     }

@@ -3,7 +3,7 @@ import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
 import { GlobalScreenWrapper } from '@/components/GlobalScreenWrapper';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Easing, Platform, Pressable, ScrollView, View, Modal, ActivityIndicator, LayoutAnimation, UIManager, TextInput, KeyboardAvoidingView, Image } from 'react-native';
+import { Animated, Easing, Platform, Pressable, ScrollView, View, Modal, ActivityIndicator, LayoutAnimation, UIManager, TextInput, Image } from 'react-native';
 import * as Print from 'expo-print';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
@@ -19,6 +19,7 @@ import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { useCallback } from 'react';
+import { KeyboardAwareScrollView, KeyboardAwareScrollViewRef } from '@/components/KeyboardAwareScrollView';
 
 // Counselor type matching backend response
 type Counselor = { 
@@ -43,7 +44,7 @@ export default function AppointmentsScreen() {
     }
     router.back();
   };
-  const API = process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8010';
+  const API = process.env.EXPO_PUBLIC_API_URL || 'https://sentisphere-production.up.railway.app';
 
   // Form state (survey-style)
   const [fullName, setFullName] = useState('');
@@ -184,19 +185,23 @@ export default function AppointmentsScreen() {
   // Scroll ref for auto-scroll to focused input with smooth animation
   const scrollViewRef = useRef<ScrollView>(null);
   const scrollAnim = useRef(new Animated.Value(0)).current;
-  const scrollToInput = (yOffset: number = 200) => {
+  const scrollToInput = (inputY: number = 200) => {
     // Trigger subtle animation for visual feedback
     scrollAnim.setValue(0);
     Animated.timing(scrollAnim, {
       toValue: 1,
-      duration: 280,
+      duration: Platform.OS === 'android' ? 220 : 280,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start();
-    // Delay scroll slightly for smoother feel
+    // Calculate scroll position: input position minus offset to keep input visible but not at top
+    const visibleOffset = Platform.OS === 'android' ? 180 : 200;
+    const targetY = Math.max(0, inputY - visibleOffset);
+    // Platform-specific delay: Android needs longer since keyboardDidShow fires after keyboard is visible
+    const delay = Platform.OS === 'android' ? 150 : 80;
     setTimeout(() => {
-      scrollViewRef.current?.scrollTo({ y: yOffset, animated: true });
-    }, 80);
+      scrollViewRef.current?.scrollTo({ y: targetY, animated: true });
+    }, delay);
   };
 
   // Dropdown open animations
@@ -353,8 +358,11 @@ export default function AppointmentsScreen() {
           try { await FileSystem.deleteAsync(desired, { idempotent: true }); } catch {}
           if ((file as any)?.base64) {
             try {
-              let PDFDocumentLocal: any = null;
-              try { PDFDocumentLocal = (await import('pdf-lib/dist/pdf-lib.esm.js')).PDFDocument; } catch {}
+              let PDFDocumentLocal: typeof import('pdf-lib')['PDFDocument'] | null = null;
+              try {
+                const pdfLib = require('pdf-lib') as typeof import('pdf-lib');
+                PDFDocumentLocal = pdfLib.PDFDocument;
+              } catch {}
               if (PDFDocumentLocal) {
                 const src = `data:application/pdf;base64,${(file as any).base64}`;
                 const doc = await PDFDocumentLocal.load(src);
@@ -435,16 +443,9 @@ export default function AppointmentsScreen() {
 
   return (
     <GlobalScreenWrapper backgroundColor="#FFFFFF">
-      <KeyboardAvoidingView 
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined} 
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 0} 
-        style={{ flex: 1, backgroundColor: '#FFFFFF' }}
-      >
-      <ScrollView
-        ref={scrollViewRef}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
-        showsVerticalScrollIndicator={false}
+      <KeyboardAwareScrollView
+        ref={scrollViewRef as any}
+        backgroundColor="#FFFFFF"
         contentContainerStyle={{ padding: 24, paddingBottom: 60 }}
       >
         <View style={styles.page}>
@@ -457,7 +458,7 @@ export default function AppointmentsScreen() {
           <View style={styles.headerSection}>
             <View style={styles.iconContainer}>
               <Image
-                source={require('../../../assets/images/calendar green.png')}
+                source={require('../../../assets/images/calendar-green.png')}
                 style={styles.headerIcon}
                 resizeMode="contain"
                 accessible
@@ -806,10 +807,7 @@ export default function AppointmentsScreen() {
             </CardContent>
           </Card>
         </View>
-      </ScrollView>
-      </KeyboardAvoidingView>
-
-      
+      </KeyboardAwareScrollView>
 
       {/* Toast */}
       <Animated.View

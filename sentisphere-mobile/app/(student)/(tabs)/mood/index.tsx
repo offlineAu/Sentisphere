@@ -34,7 +34,7 @@ export default function MoodScreen() {
   const palette = Colors[scheme] as any;
   const insets = useSafeAreaInsets();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
-  const API = process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8010';
+  const API = process.env.EXPO_PUBLIC_API_URL || 'https://sentisphere-production.up.railway.app';
 
   // Responsive calculations for different screen sizes
   const isSmallScreen = screenWidth < 375;
@@ -467,7 +467,7 @@ export default function MoodScreen() {
         <View style={{ width: 40 }} />
       </Animated.View>
 
-      <KeyboardAvoidingView style={{ flex: 1, backgroundColor: '#FFFFFF' }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView style={{ flex: 1, backgroundColor: '#FFFFFF' }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <Animated.View style={[styles.stepContainer, makeFadeUp(entrance.content), { opacity: Animated.multiply(entrance.content, fadeAnim), transform: [{ translateX: slideAnim }] }]}>
           {step === 0 && (
             <ScrollView 
