@@ -15,13 +15,9 @@ function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
   const [barWidth, setBarWidth] = useState(0);
 
-  // Filter out routes explicitly hidden via href: null (expo-router)
-  const hiddenNames = new Set(['chat/index', 'chat/[id]', 'journal/new', 'journal/[id]', 'learn/[id]', 'learn/article/[articleId]']);
-  const visibleRoutes = state.routes.filter((route) => {
-    const opts = descriptors[route.key]?.options as any;
-    if (opts?.href === null) return false;
-    return !hiddenNames.has(route.name);
-  });
+  // Only show primary tab routes in the bottom bar
+  const mainTabNames = new Set(['dashboard/index', 'mood/index', 'journal/index', 'learn/index']);
+  const visibleRoutes = state.routes.filter((route) => mainTabNames.has(route.name as string));
 
   // Hide the entire tab bar on specific deep screens (e.g., article detail)
   const currentName = state.routes[state.index]?.name as string | undefined;

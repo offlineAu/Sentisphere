@@ -2677,6 +2677,17 @@ async def register_push_token(
     if not push_token or not push_token.startswith("ExponentPushToken"):
         raise HTTPException(status_code=400, detail="Invalid push token format")
     
+    # Get user info for logging
+    get_user_q = text("SELECT nickname FROM user WHERE user_id = :uid")
+    try:
+        with mobile_engine.connect() as conn:
+            user_row = conn.execute(get_user_q, {"uid": uid}).first()
+            nickname = user_row[0] if user_row else "Unknown"
+    except:
+        nickname = "Unknown"
+    
+    logging.info(f"[Push Token Registration] User {uid} ({nickname}) registering token: {push_token[:30]}...")
+    
     update_q = text(
         """
         UPDATE user SET push_token = :push_token
@@ -2685,10 +2696,17 @@ async def register_push_token(
     )
     try:
         with mobile_engine.begin() as conn:
-            conn.execute(update_q, {"push_token": push_token, "uid": uid})
-        return {"ok": True, "message": "Push token registered successfully"}
+            result = conn.execute(update_q, {"push_token": push_token, "uid": uid})
+            rows_updated = result.rowcount
+        
+        if rows_updated > 0:
+            logging.info(f"[Push Token Registration] ✓ Successfully updated token for user {uid} ({nickname})")
+        else:
+            logging.warning(f"[Push Token Registration] No rows updated for user {uid} ({nickname}) - user may not exist")
+        
+        return {"ok": True, "message": "Push token registered successfully", "user_id": uid}
     except Exception as e:
-        logging.error(f"Failed to register push token: {e}")
+        logging.error(f"Failed to register push token for user {uid}: {e}")
         raise HTTPException(status_code=500, detail="Failed to register push token")
 
 
