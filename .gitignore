@@ -18,8 +18,6 @@ yarn-error.log*
 .env.production.local
 
 # Firebase / FCM credentials (NEVER COMMIT)
-fcm-key.json
-google-services.json
 GoogleService-Info.plist
 firebase-admin*.json
 service-account*.json
