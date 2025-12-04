@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/ui/icon';
 import * as SecureStore from 'expo-secure-store';
 import { router } from 'expo-router';
-import { unregisterPushToken } from '@/utils/notifications';
+import { cleanupOnLogout } from '@/utils/notifications';
 
 export default function LogoutScreen() {
   // Match success overlays: fade + scale in (0.96 -> 1) with cubic timing
@@ -20,9 +20,8 @@ export default function LogoutScreen() {
 
   const doLogout = async () => {
     try {
-      // Unregister push token from backend BEFORE clearing auth token
-      console.log('[Logout] Unregistering push token...');
-      await unregisterPushToken();
+      // Cleanup push notifications (unregister from backend, clear cache, remove listeners)
+      await cleanupOnLogout();
       
       // Clear local auth token
       if (Platform.OS === 'web') {

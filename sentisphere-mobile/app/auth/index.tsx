@@ -119,6 +119,24 @@ export default function AuthScreen() {
     } catch {}
   }
 
+  // DEV ONLY: Log instructions for clearing auth tokens in Metro console
+  useEffect(() => {
+    if (__DEV__) {
+      console.log('\n═══════════════════════════════════════════════════════════════');
+      console.log('🧪 [DEV] AUTH TESTING - How to clear stored tokens:');
+      console.log('───────────────────────────────────────────────────────────────');
+      console.log('Option 1: Uninstall and reinstall the app (cleanest)');
+      console.log('Option 2: Clear device storage manually:');
+      console.log('  • iOS Simulator: Device → Erase All Content and Settings');
+      console.log('  • Android Emulator: Settings → Apps → Your App → Clear Data');
+      console.log('  • Physical device: Uninstall app or clear app data in settings');
+      console.log('───────────────────────────────────────────────────────────────');
+      console.log('💡 Auth flow will validate tokens on app start and auto-clear');
+      console.log('   invalid ones, showing the login screen automatically.');
+      console.log('═══════════════════════════════════════════════════════════════\n');
+    }
+  }, [])
+
   const showToast = (message: string) => {
     setToastMessage(message)
     Animated.parallel([
@@ -174,6 +192,7 @@ export default function AuthScreen() {
       setStatus('Registered and signed in')
       setSuccessNickname(nickname.trim())
       setSplashPhase('success')
+      // Push notifications will be initialized in (student)/_layout.tsx after navigation
     } catch (e: any) {
       setStatus(null)
       showToast(e?.message || 'Registration failed')
@@ -199,6 +218,7 @@ export default function AuthScreen() {
       if (tok) { await saveToken(tok) }
       setStatus('Signed in')
       setWelcomeVisible(true)
+      // Push notifications will be initialized in (student)/_layout.tsx after navigation
     } catch (e: any) {
       setStatus(null)
       const msg = (e?.message || '').toString()

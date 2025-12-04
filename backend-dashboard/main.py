@@ -2601,6 +2601,28 @@ async def monitor_alerts_endpoint():
     }
 
 
+@app.post("/api/process-unsent-notifications")
+async def process_unsent_notifications_endpoint():
+    """
+    Process all unsent notifications and deliver them to their SPECIFIC users.
+    
+    ⚠️ CORRECT PER-USER DELIVERY:
+    - Each notification is sent ONLY to its associated user_id
+    - NO broadcast to all users
+    - Safe to run multiple times (idempotent)
+    
+    Use this to manually process any notifications that failed initial delivery.
+    """
+    from app.services.push_notification_service import process_unsent_notifications
+    
+    result = await process_unsent_notifications(mobile_engine)
+    
+    return {
+        "ok": result.get("success", False),
+        **result
+    }
+
+
 # ============================================================================
 # SAVED RESOURCES ENDPOINTS (Learn & Grow Bookmarks)
 # ============================================================================
@@ -2875,6 +2897,25 @@ def schedule_alert_monitor():
         logging.error(f"Alert monitor failed: {e}")
 
 
+def schedule_process_unsent():
+    """
+    Background task to process unsent notifications.
+    
+    ⚠️ CORRECT PER-USER DELIVERY:
+    - Each notification is sent ONLY to its associated user_id
+    - NO broadcast to all users
+    - Runs every 5 minutes to catch failed notifications
+    """
+    import asyncio
+    from app.services.push_notification_service import process_unsent_notifications
+    
+    try:
+        result = asyncio.run(process_unsent_notifications(mobile_engine))
+        logging.info(f"Process unsent: processed={result.get('processed')}, sent={result.get('sent')}, failed={result.get('failed')}")
+    except Exception as e:
+        logging.error(f"Process unsent failed: {e}")
+
+
 # Initialize scheduler with unified notification jobs
 railway_primary = os.getenv("RAILWAY_PRIMARY_INSTANCE")
 if railway_primary and railway_primary.lower() != "true":
@@ -2901,8 +2942,16 @@ else:
             replace_existing=True
         )
         
+        # Process unsent notifications every 5 minutes (per-user delivery, NO broadcast)
+        scheduler.add_job(
+            schedule_process_unsent,
+            CronTrigger(minute="*/5"),
+            id="process_unsent",
+            replace_existing=True
+        )
+        
         scheduler.start()
-        logging.info("Notification scheduler initialized (daily quotes every minute [TESTING], alert monitor every 1min)")
+        logging.info("Notification scheduler initialized (daily quotes every minute [TESTING], alert monitor every 1min, unsent processor every 5min)")
     except Exception as e:
         logging.warning(f"Failed to initialize scheduler: {e}")
 
