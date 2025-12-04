@@ -19,9 +19,7 @@
             })();
         </script>
 
-        
-
-        <title inertia>{{ config('app.name', 'Sentisphere') }}</title>
+        <title inertia>Sentisphere</title>
 
         <link rel="icon" href="/logo.svg" type="image/svg+xml">
         <link rel="apple-touch-icon" href="/apple-touch-icon.png">

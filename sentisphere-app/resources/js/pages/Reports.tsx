@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { ChevronLeft, ChevronRight, TrendingUp, TrendingDown, AlertTriangle, UserRound, CalendarDays, Activity, Download, Filter, Lightbulb } from "lucide-react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, Legend } from "recharts";
 import { motion, AnimatePresence } from "framer-motion";
@@ -11,6 +11,7 @@ import styles from "./Reports.module.css";
 import Slider from "react-slick";
 import "slick-carousel/slick/slick.css";
 import "slick-carousel/slick/slick-theme.css";
+import { useDashboardSocket } from "@/hooks";
 
 type TopStat = {
   label: string;
@@ -184,6 +185,7 @@ function CustomWeekTick({ x, y, payload }: any) {
 function Reports() {
 
   const [loading, setLoading] = useState(true);
+  const [refreshKey, setRefreshKey] = useState(0);
   const [topStats, setTopStats] = useState<TopStat[]>([]);
   const [riskLevels, setRiskLevels] = useState<RiskLevel[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
@@ -309,12 +311,23 @@ function Reports() {
     customPaging: () => <span className="block h-2 w-2 rounded-full bg-gray-300" />,
   }), [insights.length]);
 
+  // WebSocket for instant notifications when new data arrives
+  const handleDataUpdate = useCallback(() => {
+    console.log('[Reports] New data notification - refreshing...');
+    setRefreshKey(prev => prev + 1);
+  }, []);
+
+  useDashboardSocket({
+    autoConnect: true,
+    onStatsUpdate: handleDataUpdate,
+  });
+
   // --- Fetch participation ---
   useEffect(() => {
     api.get<{ participation: number }>(`/reports/participation`, { params: filterParams })
       .then(({ data }) => setParticipation(Number(data?.participation || 0)))
       .catch(err => console.error(err));
-  }, [globalRange, rangeStart, rangeEnd]);
+  }, [globalRange, rangeStart, rangeEnd, refreshKey]);
 
   // --- Fetch reports (respects global date filter for time-dependent data) ---
   useEffect(() => {
@@ -363,15 +376,39 @@ function Reports() {
         const topData = topRes.data || {};
 
         const calcDelta = (current?: number, previous?: number) => {
-          if (previous === undefined || previous === null || previous === 0) {
+          // Handle undefined/null values
+          if (current === undefined || current === null) {
             return { delta: "", deltaColor: "" };
           }
-          const c = Number(current ?? 0);
-          const p = Number(previous ?? 0);
-          if (!Number.isFinite(c) || !Number.isFinite(p) || p === 0) {
+          if (previous === undefined || previous === null) {
             return { delta: "", deltaColor: "" };
           }
-          const change = ((c - p) / p) * 100;
+          
+          // Convert to numbers and validate
+          const c = Number(current);
+          const p = Number(previous);
+          
+          // Check for invalid numbers
+          if (!Number.isFinite(c) || !Number.isFinite(p)) {
+            return { delta: "", deltaColor: "" };
+          }
+          
+          // If previous is 0, show "new" or absolute change
+          if (p === 0) {
+            if (c === 0) {
+              return { delta: "", deltaColor: "" };
+            }
+            return { delta: "New", deltaColor: "text-blue-600" };
+          }
+          
+          // Calculate percentage change
+          const change = ((c - p) / Math.abs(p)) * 100;
+          
+          // Handle very small changes (less than 0.1%)
+          if (Math.abs(change) < 0.1) {
+            return { delta: "~0%", deltaColor: "text-gray-600" };
+          }
+          
           const sign = change >= 0 ? "+" : "";
           const color = change >= 0 ? "text-green-600" : "text-red-600";
           return { delta: `${sign}${change.toFixed(1)}%`, deltaColor: color };
@@ -454,7 +491,7 @@ function Reports() {
     };
 
     fetchReports();
-  }, [globalRange, rangeStart, rangeEnd]);
+  }, [globalRange, rangeStart, rangeEnd, refreshKey]);
 
   if (loading) return (
     <div className="flex h-[80vh] w-full items-center justify-center">
@@ -480,8 +517,16 @@ function Reports() {
   }));
 
   const latestIndex = sortedTrendWeeks[0]?.index ?? 0;
-  const prevIndex = sortedTrendWeeks[1]?.index ?? latestIndex;
-  const changePct = prevIndex !== 0 ? Math.round(((latestIndex - prevIndex) / Math.max(prevIndex, 1e-9)) * 100) : 0;
+  const prevIndex = sortedTrendWeeks[1]?.index ?? 0;
+  
+  // Robust percentage calculation
+  const calculateChangePct = (current: number, previous: number): number => {
+    if (!Number.isFinite(current) || !Number.isFinite(previous)) return 0;
+    if (previous === 0) return current === 0 ? 0 : 100;
+    return Math.round(((current - previous) / Math.abs(previous)) * 100);
+  };
+  
+  const changePct = calculateChangePct(latestIndex, prevIndex);
 
   return (
     <main

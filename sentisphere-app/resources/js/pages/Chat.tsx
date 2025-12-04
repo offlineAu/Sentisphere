@@ -262,13 +262,25 @@ export default function Chat() {
     if (!authenticated) return;
     const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
     if (!token) return;
-    let apiBase = (import.meta as any)?.env?.VITE_API_URL || "";
-    // Strip trailing /api if present
-    if (apiBase.endsWith('/api')) apiBase = apiBase.slice(0, -4);
-    const base = apiBase || window.location.origin;
-    const wsBase = base.replace(/^http/i, "ws");
-    const url = `${wsBase}/ws/conversations?token=${encodeURIComponent(token)}`;
-    const ws = new WebSocket(url);
+    
+    // Build WebSocket URL with proper backend connection
+    let wsUrl: string;
+    
+    if (window.location.hostname.includes('railway.app')) {
+      // Production: Railway deployment
+      wsUrl = `wss://sentisphere.up.railway.app/ws/conversations?token=${encodeURIComponent(token)}`;
+    } else if ((import.meta as any).env.DEV) {
+      // Development: Connect directly to FastAPI backend on port 8010
+      wsUrl = `ws://localhost:8010/ws/conversations?token=${encodeURIComponent(token)}`;
+    } else {
+      // Production build on local server
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const host = window.location.hostname;
+      wsUrl = `${protocol}//${host}:8010/ws/conversations?token=${encodeURIComponent(token)}`;
+    }
+    
+    console.log('[Chat] Connecting to:', wsUrl.replace(/token=.*/, 'token=***'));
+    const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
     ws.onmessage = (ev) => {
       let evt: any;
@@ -324,12 +336,12 @@ export default function Chat() {
     });
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex min-h-screen dark:bg-neutral-900">
       <Sidebar />
       <main
         className={`transition-all duration-200 min-h-screen space-y-4 ${
           open ? "pl-[17rem]" : "pl-[5rem]"
-        } pt-1 pr-6 pb-6`}
+        } pt-1 pr-6 pb-6 dark:bg-neutral-900`}
       >
         <motion.div
           initial={{ opacity: 0, y: 6 }}
@@ -340,8 +352,8 @@ export default function Chat() {
           {/* Header */}
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
             <div className="ml-2">
-              <h1 className={styles.headerTitle}>Chat Conversations</h1>
-              <p className={styles.headerSubtitle}>
+              <h1 className={`${styles.headerTitle} dark:text-neutral-100`}>Chat Conversations</h1>
+              <p className={`${styles.headerSubtitle} dark:text-neutral-400`}>
                 Manage and respond to student concerns.
               </p>
               <div />
@@ -351,7 +363,7 @@ export default function Chat() {
           <div className="flex gap-4 min-h-0 items-stretch overflow-hidden">
             {/* Sidebar (Conversations) */}
             <div className="hidden md:block md:w-[340px] flex-none min-h-0 min-w-0">
-              <div className="bg-white rounded-2xl shadow p-4 h-[82vh] min-h-0 flex flex-col overflow-hidden">
+              <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow p-4 h-[82vh] min-h-0 flex flex-col overflow-hidden">
                 <div className="flex items-center gap-2 mb-3 flex-none">
                   <div className="relative flex-1">
                     <input
@@ -359,14 +371,14 @@ export default function Chat() {
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                       placeholder="Search messages..."
-                      className="w-full pl-10 pr-3 py-2 rounded-xl border border-gray-300 focus:ring-2 focus:ring-emerald-500 outline-none"
+                      className="w-full pl-10 pr-3 py-2 rounded-xl border border-gray-300 dark:border-neutral-600 dark:bg-neutral-700 dark:text-neutral-100 focus:ring-2 focus:ring-emerald-500 outline-none"
                     />
                     <Search className="h-4 w-4 text-gray-500 absolute left-3 top-1/2 -translate-y-1/2" />
                   </div>
                 </div>
                 <div className="overflow-y-scroll flex-1 min-h-0" style={{ scrollbarGutter: 'stable both-edges' }}>
                   {filteredConversations.length === 0 ? (
-                    <div className="text-sm text-gray-500 px-2 py-4">
+                    <div className="text-sm text-gray-500 dark:text-neutral-400 px-2 py-4">
                       No conversations available yet. You&apos;ll see student chats here once they reach out.
                     </div>
                   ) : (
@@ -399,7 +411,6 @@ export default function Chat() {
                               <div className="flex items-center justify-between gap-3">
                                 <div className="min-w-0">
                                   <div className="font-semibold text-sm text-gray-900 truncate">{c.initiator_nickname || `Conversation #${convId}`}</div>
-                                  <div className="text-[12px] text-gray-500 truncate">{c.subject || ''}</div>
                                 </div>
                                 <div className="flex items-center gap-3 shrink-0">
                                   <span className="text-xs opacity-75">
@@ -450,7 +461,7 @@ export default function Chat() {
 
             {/* Chat Window */}
             <div className="flex-[1_1_0] min-h-0 min-w-0 sm:min-w-[480px] lg:min-w-[640px] w-full">
-              <div className="bg-white rounded-2xl shadow flex flex-col h-[82vh] min-h-0 min-w-0 w-full overflow-hidden">
+              <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow flex flex-col h-[82vh] min-h-0 min-w-0 w-full overflow-hidden">
                 {currentConversation ? (
                   <>
                     {/* Chat Header (compact) */}
