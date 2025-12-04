@@ -19,3 +19,4 @@ transformers>=4.44.0
 sentence-transformers>=2.6.1
 scikit-learn>=1.4.0
 python-multipart
+pusher>=3.3.0

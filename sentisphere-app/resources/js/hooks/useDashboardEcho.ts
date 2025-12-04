@@ -1,7 +1,7 @@
 /**
- * useDashboardEcho - React hook for real-time dashboard updates via Laravel Echo + Pusher
+ * useDashboardEcho - React hook for real-time dashboard updates via Pusher
  * 
- * This replaces useDashboardSocket.ts with Laravel's native broadcasting system.
+ * This provides instant updates for dashboard stats when data changes.
  * 
  * Usage:
  * ```tsx
@@ -12,17 +12,7 @@
  */
 
 import { useEffect, useState, useCallback, useRef } from 'react';
-import echoInstance from '@/lib/echo';
-
-// Type the echo instance properly
-const echo = echoInstance as {
-  channel: (name: string) => {
-    listen: (event: string, callback: (data: any) => void) => void;
-    stopListening: (event: string) => void;
-  };
-  leaveChannel: (name: string) => void;
-  connector?: { pusher?: any };
-} | null;
+import Pusher from 'pusher-js';
 
 // ============================================================================
 // Types
@@ -46,10 +36,10 @@ export interface DashboardStats {
 }
 
 interface DashboardEvent {
-  type: 'stats_update';
-  stats: DashboardStats;
-  reason: string;
-  timestamp: string;
+  type: string;
+  stats?: DashboardStats;
+  reason?: string;
+  timestamp?: string;
 }
 
 interface UseDashboardEchoOptions {
@@ -79,6 +69,8 @@ export function useDashboardEcho(options: UseDashboardEchoOptions = {}) {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [range, setRange] = useState(initialRange);
+  const pusherRef = useRef<Pusher | null>(null);
+  const channelRef = useRef<any>(null);
 
   // Refs to avoid stale closures
   const onStatsUpdateRef = useRef(onStatsUpdate);
@@ -89,7 +81,7 @@ export function useDashboardEcho(options: UseDashboardEchoOptions = {}) {
     onConnectionChangeRef.current = onConnectionChange;
   }, [onStatsUpdate, onConnectionChange]);
 
-  // Fetch initial stats from Laravel
+  // Fetch initial stats from API
   const fetchInitialStats = useCallback(async () => {
     try {
       const response = await fetch(`/api/dashboard/current?range=${range}`);
@@ -98,10 +90,10 @@ export function useDashboardEcho(options: UseDashboardEchoOptions = {}) {
         setStats(data);
         setLastUpdate(new Date());
         onStatsUpdateRef.current?.(data);
-        console.log('[DashboardEcho] Initial stats loaded');
+        console.log('[Dashboard] Stats loaded');
       }
     } catch (error) {
-      console.error('[DashboardEcho] Failed to fetch initial stats:', error);
+      console.error('[Dashboard] Failed to fetch stats:', error);
     }
   }, [range]);
 
@@ -115,70 +107,98 @@ export function useDashboardEcho(options: UseDashboardEchoOptions = {}) {
     setRange(newRange);
   }, []);
 
-  // Subscribe to Echo channel (if available) or just fetch stats
+  // Initialize Pusher and subscribe to dashboard channel
   useEffect(() => {
-    if (!autoConnect) {
-      return;
-    }
+    if (!autoConnect) return;
 
     // Always fetch initial stats
     fetchInitialStats();
 
-    // If Echo is not available, just use HTTP polling fallback
-    if (!echo) {
-      console.log('[DashboardEcho] Echo not available, using 5s polling');
-      // Poll every 5 seconds as fallback (Pusher will be instant when enabled)
+    const pusherKey = (import.meta as any).env?.VITE_PUSHER_APP_KEY;
+    const pusherCluster = (import.meta as any).env?.VITE_PUSHER_APP_CLUSTER || 'ap1';
+
+    // If Pusher is not configured, use polling fallback
+    if (!pusherKey) {
+      console.log('[Dashboard] Pusher not configured, using 5s polling');
       const pollInterval = setInterval(() => {
         fetchInitialStats();
       }, 5000);
       return () => clearInterval(pollInterval);
     }
 
-    // Subscribe to dashboard channel
-    const channel = echo.channel('dashboard');
+    try {
+      const pusher = new Pusher(pusherKey, {
+        cluster: pusherCluster,
+      });
+      pusherRef.current = pusher;
 
-    // Listen for DashboardUpdated events
-    channel.listen('.DashboardUpdated', (event: DashboardEvent) => {
-      console.log('[DashboardEcho] Received update:', event.reason);
-      
-      if (event.stats) {
-        setStats(event.stats);
-        setLastUpdate(new Date());
-        onStatsUpdateRef.current?.(event.stats);
-      }
-    });
-
-    // Track connection state via Pusher
-    const pusher = (echo as any).connector?.pusher;
-    if (pusher) {
+      // Track connection state
       pusher.connection.bind('connected', () => {
-        console.log('[DashboardEcho] ✓ Connected to Pusher');
+        console.log('[Dashboard] ✓ Pusher connected');
         setConnected(true);
         onConnectionChangeRef.current?.(true);
       });
 
       pusher.connection.bind('disconnected', () => {
-        console.log('[DashboardEcho] Disconnected from Pusher');
+        console.log('[Dashboard] Pusher disconnected');
         setConnected(false);
         onConnectionChangeRef.current?.(false);
       });
 
-      pusher.connection.bind('error', (error: any) => {
-        console.error('[DashboardEcho] Pusher error:', error);
+      pusher.connection.bind('error', (err: any) => {
+        console.error('[Dashboard] Pusher error:', err);
       });
 
-      // Check initial state
-      if (pusher.connection.state === 'connected') {
-        setConnected(true);
-        onConnectionChangeRef.current?.(true);
-      }
-    }
+      // Subscribe to dashboard channel
+      const channel = pusher.subscribe('dashboard');
+      channelRef.current = channel;
 
-    // Cleanup
-    return () => {
-      channel.stopListening('.DashboardUpdated');
-      echo.leaveChannel('dashboard');
-    };
+      // Listen for dashboard update events
+      channel.bind('stats_update', (data: DashboardEvent) => {
+        console.log('[Dashboard] Pusher update received:', data.reason);
+        if (data.stats) {
+          setStats(data.stats);
+          setLastUpdate(new Date());
+          onStatsUpdateRef.current?.(data.stats);
+        } else {
+          // If no stats in event, refresh from API
+          fetchInitialStats();
+        }
+      });
+
+      // Listen for new checkin events
+      channel.bind('new_checkin', () => {
+        console.log('[Dashboard] New checkin - refreshing');
+        fetchInitialStats();
+      });
+
+      // Listen for new journal events
+      channel.bind('new_journal', () => {
+        console.log('[Dashboard] New journal - refreshing');
+        fetchInitialStats();
+      });
+
+      // Listen for new alert events
+      channel.bind('new_alert', () => {
+        console.log('[Dashboard] New alert - refreshing');
+        fetchInitialStats();
+      });
+
+      return () => {
+        channel.unbind_all();
+        pusher.unsubscribe('dashboard');
+        pusher.disconnect();
+        pusherRef.current = null;
+        channelRef.current = null;
+      };
+    } catch (e) {
+      console.error('[Dashboard] Pusher init failed:', e);
+      // Fallback to polling
+      const pollInterval = setInterval(() => {
+        fetchInitialStats();
+      }, 5000);
+      return () => clearInterval(pollInterval);
+    }
   }, [autoConnect, fetchInitialStats]);
 
   // Refetch when range changes
