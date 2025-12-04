@@ -131,8 +131,10 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
 
     // Log the token prominently for testing
     console.log('========================================');
-    console.log('Expo Push Token:', token);
-    console.log('Test at: https://expo.dev/notifications');
+    console.log('🔔 Expo Push Token:', token);
+    console.log('📱 Platform:', Platform.OS);
+    console.log('📱 Device:', Device.isDevice ? 'Physical' : 'Simulator');
+    console.log('🧪 Test at: https://expo.dev/notifications');
     console.log('========================================');
 
     return token;
@@ -167,7 +169,13 @@ export async function registerPushTokenWithBackend(pushToken: string | null): Pr
       return false;
     }
 
-    console.log('[Push] Registering push token with backend...');
+    // Log token details for debugging
+    console.log('========================================');
+    console.log('[Push] 🔍 REGISTERING PUSH TOKEN');
+    console.log('[Push] Platform:', Platform.OS);
+    console.log('[Push] Token (first 40 chars):', pushToken.substring(0, 40));
+    console.log('[Push] Auth token (first 20 chars):', authToken.substring(0, 20));
+    console.log('========================================');
     
     const response = await fetch(`${API}/api/push-token`, {
       method: 'POST',
@@ -179,16 +187,18 @@ export async function registerPushTokenWithBackend(pushToken: string | null): Pr
     });
 
     if (response.ok) {
+      const result = await response.json();
       console.log('[Push] ✓ Push token registered with backend successfully');
+      console.log('[Push] Response:', result);
       return true;
     } else {
       const errorText = await response.text().catch(() => '');
-      console.error('[Push] Failed to register push token:', response.status, errorText);
+      console.error('[Push] ❌ Failed to register push token:', response.status, errorText);
       // Don't crash - push registration is optional
       return false;
     }
   } catch (error) {
-    console.error('[Push] Failed to register push token with backend:', error);
+    console.error('[Push] ❌ Failed to register push token with backend:', error);
     // Don't crash - push registration is optional
     return false;
   }
