@@ -33,7 +33,15 @@ Route::get('/profile', function () {
 require __DIR__.'/settings.php';
 require __DIR__.'/auth.php';
 
-// Proxy all /api requests to FastAPI (BFF pattern)
+// Dashboard webhook routes (handled by Laravel, not proxied to FastAPI)
+use App\Http\Controllers\DashboardWebhookController;
+
+Route::post('/api/dashboard/notify-update', [DashboardWebhookController::class, 'notify'])
+    ->name('dashboard.webhook');
+Route::get('/api/dashboard/current', [DashboardWebhookController::class, 'current'])
+    ->name('dashboard.current');
+
+// Proxy all other /api requests to FastAPI (BFF pattern)
 Route::any('/api/{path?}', [ApiProxyController::class, 'proxy'])
     ->where('path', '.*')
     ->name('fastapi.proxy');
