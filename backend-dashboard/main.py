@@ -1147,6 +1147,9 @@ class DashboardEventDispatcher:
 # Global dispatcher instance
 dashboard_dispatcher = DashboardEventDispatcher(debounce_seconds=0.5)
 
+# Toggle between WebSocket (legacy) and Laravel webhook (new Pusher system)
+USE_LARAVEL_WEBHOOK = os.getenv("USE_LARAVEL_WEBHOOK", "false").lower() == "true"
+
 
 async def notify_dashboard_update(reason: str = "data_change"):
     """
@@ -1161,8 +1164,25 @@ async def notify_dashboard_update(reason: str = "data_change"):
     
     Args:
         reason: Description of what triggered the update
+    
+    Mode:
+        - USE_LARAVEL_WEBHOOK=false (default): Uses direct WebSocket broadcast
+        - USE_LARAVEL_WEBHOOK=true: Sends webhook to Laravel for Pusher broadcast
     """
-    await dashboard_dispatcher.trigger(reason)
+    if USE_LARAVEL_WEBHOOK:
+        # New system: Laravel Echo + Pusher
+        try:
+            from app.services.laravel_webhook_service import notify_laravel_dashboard
+            await notify_laravel_dashboard(reason)
+        except ImportError:
+            logging.warning("[dashboard] Laravel webhook service not available, falling back to WebSocket")
+            await dashboard_dispatcher.trigger(reason)
+        except Exception as e:
+            logging.error("[dashboard] Laravel webhook failed: %s, falling back to WebSocket", e)
+            await dashboard_dispatcher.trigger(reason)
+    else:
+        # Legacy system: Direct WebSocket broadcast
+        await dashboard_dispatcher.trigger(reason)
 
 
 @app.get("/api/auth/me")

@@ -35,4 +35,16 @@ return [
         ],
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Webhook Configuration
+    |--------------------------------------------------------------------------
+    |
+    | Shared secret for verifying incoming webhooks from FastAPI backend.
+    |
+    */
+    'webhook' => [
+        'shared_secret' => env('SERVICES_WEBHOOK_SHARED_SECRET'),
+    ],
+
 ];
