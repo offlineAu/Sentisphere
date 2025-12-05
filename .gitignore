@@ -28,6 +28,16 @@ sentisphere-*.json
 .vscode/
 .idea/
 
+
+# FCM / Firebase Admin keys (NEVER COMMIT)
+fcm-key.json
+firebase-admin*.json
+service-account.json
+service-account-*.json
+*-firebase-adminsdk-*.json
+*serviceaccount*.json
+sentisphere-*.json
+
 # System files
 .DS_Store
 Thumbs.db

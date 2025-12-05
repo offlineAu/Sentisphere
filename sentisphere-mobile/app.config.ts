@@ -20,14 +20,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   android: {
     adaptiveIcon: {
       foregroundImage: "./assets/images/sentisphere-logo.png",
-      backgroundColor: "#E6F4FE"
+      backgroundColor: "#ffffffff"
     },
     edgeToEdgeEnabled: true,
     predictiveBackGestureEnabled: false,
     package: "com.sentisphere.mobile",
-    // NOTE: Release SHA-1/SHA-256 must be added to Firebase and a fresh google-services.json downloaded
-    // Run `eas credentials --platform android --profile releaseApk` to retrieve fingerprints before shipping
-    googleServicesFile: process.env.GOOGLE_SERVICES_JSON ?? "./google-services.json",
+    googleServicesFile: "./google-services.json",
     softwareKeyboardLayoutMode: "pan"
   },
   androidStatusBar: {
@@ -71,14 +69,16 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       "expo-build-properties",
       {
         android: {
-          compileSdkVersion: 34,
-          targetSdkVersion: 34
+          compileSdkVersion: 36,
+          targetSdkVersion: 36,
+          minSdkVersion: 24
         },
         ios: {
-          deploymentTarget: "13.0"
+          deploymentTarget: "15.1"
         }
       }
-    ]
+    ],
+    "./plugins/withFirebaseMessaging"
   ],
   experiments: {
     typedRoutes: true,
@@ -90,9 +90,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     },
     router: {},
     // Expose API URL from environment variable
-    apiUrl: process.env.EXPO_PUBLIC_API_URL || "https://sentisphere-production.up.railway.app",
-    // Pusher Beams instance ID for Android push notifications
-    pusherInstanceId: process.env.EXPO_PUBLIC_PUSHER_INSTANCE_ID || ""
+    apiUrl: process.env.EXPO_PUBLIC_API_URL || "https://sentisphere-production.up.railway.app"
   },
   owner: "hyun00"
 });

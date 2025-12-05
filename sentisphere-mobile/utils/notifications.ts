@@ -6,14 +6,13 @@
  * - Module-level singleton listeners (exactly ONE set)
  * - SecureStore-based caching to prevent duplicate backend POSTs
  * 
- * HYBRID PUSH SYSTEM:
- * - Android: Uses Pusher Beams (handled by push-hybrid.ts)
- * - iOS: Uses Expo Push Notifications (handled here and in push-hybrid.ts)
+ * UNIFIED EXPO PUSH:
+ * - Both Android and iOS use Expo Push Notifications
  * 
  * USAGE:
+ * - Call initializePushNotifications(userId) after authentication
  * - Call setupGlobalNotificationListeners() to attach listeners
  * - Call cleanupGlobalNotificationListeners() on logout
- * - For push token registration, use push-hybrid.ts instead
  */
 
 import { Platform } from 'react-native';
@@ -103,25 +102,18 @@ async function deleteStoredValue(key: string): Promise<void> {
  * Request notification permissions and get the Expo push token.
  * Internal function - handles all platform-specific logic.
  * 
- * NOTE: For iOS remote push registration, use push-hybrid.ts instead.
- * This function is kept for backward compatibility and local notification setup.
+ * Works for both Android and iOS using Expo Push Notifications.
  */
 async function getExpoPushToken(): Promise<string | null> {
-  // Setup Android notification channel (still needed for Pusher Beams notifications)
-  if (Platform.OS === 'android') {
-    try {
-      await Notifications.setNotificationChannelAsync('default', {
-        name: 'default',
-        importance: Notifications.AndroidImportance.MAX,
-        vibrationPattern: [0, 250, 250, 250],
-        lightColor: '#FF231F7C',
-      });
-    } catch (error) {
-      console.warn('[Push] Failed to setup Android channel:', error);
-    }
-    // Android uses Pusher Beams - skip Expo token generation
-    console.log('[Push] Android uses Pusher Beams - skipping Expo token generation');
-    return null;
+  // Setup Android notification channel (MUST be done before requesting token)
+  if (Platform.OS === "android") {
+    await Notifications.setNotificationChannelAsync("default", {
+      name: "Default",
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: "#FF231F7C",
+    });
+    console.log("[Push] Android notification channel created");
   }
 
   // Check device compatibility
@@ -135,7 +127,7 @@ async function getExpoPushToken(): Promise<string | null> {
     return null;
   }
 
-  // iOS only from here
+  // Both Android and iOS from here
   try {
     // Check/request permissions
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
@@ -159,11 +151,18 @@ async function getExpoPushToken(): Promise<string | null> {
     }
 
     // Get token
+    if (Platform.OS === 'android') {
+      console.log("📱 ANDROID — requesting Push Token...");
+    }
     const tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
-    console.log('[Push] ✓ iOS Token obtained:', tokenData.data.substring(0, 30) + '...');
+    const platform = Platform.OS === 'android' ? 'Android' : 'iOS';
+    if (Platform.OS === 'android') {
+      console.log("📱 ANDROID PUSH TOKEN:", tokenData.data);
+    }
+    console.log(`[Push] ✓ ${platform} Token obtained:`, tokenData.data.substring(0, 30) + '...');
     return tokenData.data;
   } catch (error) {
-    console.error('[Push] Failed to get iOS token:', error);
+    console.error('[Push] Failed to get push token:', error);
     return null;
   }
 }
@@ -210,34 +209,18 @@ async function postTokenToBackend(pushToken: string): Promise<boolean> {
 /**
  * Initialize push notifications for a user.
  * 
- * DEPRECATED: Use initializePush from push-hybrid.ts instead.
- * This function is kept for backward compatibility.
- * 
- * For the hybrid push system:
- * - Android: Pusher Beams (handled by push-hybrid.ts)
- * - iOS: Expo Push (handled by push-hybrid.ts)
+ * Works for both Android and iOS using Expo Push Notifications.
  * 
  * @param userId - The authenticated user's ID (string)
  */
 export async function initializePushNotifications(userId: string): Promise<void> {
   console.log('[Push] initializePushNotifications called for userId:', userId);
-  console.log('[Push] ⚠️ DEPRECATED: Use initializePush from push-hybrid.ts instead');
 
   if (Platform.OS === 'web') {
     console.log('[Push] Skipping - web platform');
     return;
   }
 
-  // Android now uses Pusher Beams - skip Expo token registration
-  if (Platform.OS === 'android') {
-    console.log('[Push] Android uses Pusher Beams - skipping Expo token registration');
-    // Still setup notification channel for receiving Pusher notifications
-    await getExpoPushToken();
-    return;
-  }
-
-  // iOS: Continue with Expo push token registration (backward compatibility)
-  // Note: push-hybrid.ts is the preferred method for iOS as well
   try {
     const currentToken = await getExpoPushToken();
     if (!currentToken) {
