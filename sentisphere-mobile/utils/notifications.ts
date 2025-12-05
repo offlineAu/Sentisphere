@@ -129,6 +129,10 @@ async function getExpoPushToken(): Promise<string | null> {
 
   // Both Android and iOS from here
   try {
+    // Debug logging for build-time variables
+    console.log("[Debug] EAS Project ID:", Constants.expoConfig?.extra?.eas?.projectId);
+    console.log("[Debug] Firebase google-services loaded:", !!process.env.GOOGLE_SERVICES_JSON);
+
     // Check/request permissions
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;

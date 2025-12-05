@@ -25,7 +25,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     edgeToEdgeEnabled: true,
     predictiveBackGestureEnabled: false,
     package: "com.sentisphere.mobile",
-    googleServicesFile: "./google-services.json",
+    googleServicesFile: process.env.GOOGLE_SERVICES_JSON,
     softwareKeyboardLayoutMode: "pan"
   },
   androidStatusBar: {
