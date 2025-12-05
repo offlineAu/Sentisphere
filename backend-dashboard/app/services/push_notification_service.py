@@ -848,6 +848,19 @@ async def send_wellness_reminder_instantly(
     result["alert_id"] = alert_id
     result["message_title"] = title
     
+    # If notification was sent successfully, mark the alert as resolved
+    if result.get("success"):
+        try:
+            from app.services.smart_alert_service import SmartAlertService
+            from app.db.database import SessionLocal
+            with SessionLocal() as db:
+                SmartAlertService.resolve_alert_on_notification(db, alert_id)
+                result["alert_resolved"] = True
+                logger.info(f"Alert {alert_id} resolved after successful notification")
+        except Exception as e:
+            logger.warning(f"Could not resolve alert {alert_id}: {e}")
+            result["alert_resolved"] = False
+    
     return result
 
 

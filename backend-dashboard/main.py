@@ -406,6 +406,24 @@ def create_checkin(
         db.rollback()
         db.refresh(created)
 
+    # Check for smart alert trigger (2-3 consecutive negative check-ins)
+    try:
+        from app.services.smart_alert_service import SmartAlertService
+        alert_data = SmartAlertService.check_user_for_alert(db, current_user.user_id)
+        if alert_data:
+            alert = SmartAlertService.create_smart_alert(db, alert_data)
+            # Notify dashboard of new alert
+            try:
+                asyncio.create_task(notify_dashboard_update("new_alert"))
+                pusher_service.broadcast_new_alert(
+                    alert.alert_id, 
+                    alert.severity.value if hasattr(alert.severity, 'value') else str(alert.severity)
+                )
+            except Exception:
+                pass
+    except Exception as e:
+        logging.warning(f"Smart alert check failed: {e}")
+
     # Notify dashboard WebSocket clients of the new check-in
     try:
         asyncio.create_task(notify_dashboard_update("new_checkin"))
@@ -1855,27 +1873,61 @@ def counselor_unread_count(
 @app.get("/api/counselor/conversations")
 def counselor_list_conversations(
     include_messages: bool = Query(False),
+    group_by_user: bool = Query(True),  # Default to grouping by user
     current_user: User = Depends(require_counselor),
     mdb: Session = Depends(get_mobile_db),
 ):
-    """List all conversations assigned to the current counselor."""
+    """List all conversations assigned to the current counselor.
+    
+    By default, groups conversations by user showing only the most recent
+    conversation per user to prevent duplicate entries.
+    """
     counselor_id = current_user.user_id
-    conv_rows = list(
-        mdb.execute(
-            text(
-                """
-                SELECT c.conversation_id, c.initiator_user_id, c.initiator_role,
-                       c.subject, c.counselor_id, c.status, c.created_at, c.last_activity_at,
-                       u.name AS initiator_name, u.email AS initiator_email, u.nickname AS initiator_nickname
-                FROM conversations c
-                LEFT JOIN user u ON c.initiator_user_id = u.user_id
-                WHERE c.counselor_id = :counselor_id
-                ORDER BY COALESCE(c.last_activity_at, c.created_at) DESC
-                """
-            ),
-            {"counselor_id": counselor_id},
-        ).mappings()
-    )
+    
+    if group_by_user:
+        # Get only the most recent conversation per user
+        conv_rows = list(
+            mdb.execute(
+                text(
+                    """
+                    SELECT c.conversation_id, c.initiator_user_id, c.initiator_role,
+                           c.subject, c.counselor_id, c.status, c.created_at, c.last_activity_at,
+                           u.name AS initiator_name, u.email AS initiator_email, u.nickname AS initiator_nickname
+                    FROM conversations c
+                    LEFT JOIN user u ON c.initiator_user_id = u.user_id
+                    INNER JOIN (
+                        SELECT initiator_user_id, MAX(conversation_id) as max_conv_id
+                        FROM conversations
+                        WHERE counselor_id = :counselor_id
+                        GROUP BY initiator_user_id
+                    ) latest ON c.initiator_user_id = latest.initiator_user_id 
+                             AND c.conversation_id = latest.max_conv_id
+                    WHERE c.counselor_id = :counselor_id
+                    ORDER BY COALESCE(c.last_activity_at, c.created_at) DESC
+                    """
+                ),
+                {"counselor_id": counselor_id},
+            ).mappings()
+        )
+    else:
+        # Get all conversations (legacy behavior)
+        conv_rows = list(
+            mdb.execute(
+                text(
+                    """
+                    SELECT c.conversation_id, c.initiator_user_id, c.initiator_role,
+                           c.subject, c.counselor_id, c.status, c.created_at, c.last_activity_at,
+                           u.name AS initiator_name, u.email AS initiator_email, u.nickname AS initiator_nickname
+                    FROM conversations c
+                    LEFT JOIN user u ON c.initiator_user_id = u.user_id
+                    WHERE c.counselor_id = :counselor_id
+                    ORDER BY COALESCE(c.last_activity_at, c.created_at) DESC
+                    """
+                ),
+                {"counselor_id": counselor_id},
+            ).mappings()
+        )
+    
     conversations = [dict(row) for row in conv_rows]
     if include_messages and conversations:
         for c in conversations:

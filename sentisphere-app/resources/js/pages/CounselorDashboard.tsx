@@ -24,6 +24,7 @@ import { LoadingSpinner } from "../components/loading-spinner";
 import { sessionStatus } from "../lib/auth";
 import { router } from "@inertiajs/react";
 import { useDashboardSocket, type DashboardStats } from "@/hooks";
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
 
 // Format date to be more readable (e.g., "October 23, 2023 3:58 PM")
 const formatDate = (dateString: string | Date, includeTime = false) => {
@@ -207,11 +208,11 @@ const StatCard: React.FC<{
     }
   };
 
-  return (
-    <div className={`${getGradient()} rounded-2xl shadow p-5 hover:shadow-md transition-all duration-300 h-full relative`} title={tooltip}>
+  const cardContent = (
+    <div className={`${getGradient()} rounded-2xl shadow p-5 hover:shadow-md transition-all duration-300 h-full relative group cursor-default`}>
       {/* Live indicator */}
       {isLive && (
-        <div className="absolute top-2 right-2 flex items-center gap-1" title="Real-time updates active">
+        <div className="absolute top-2 right-2 flex items-center gap-1">
           <span className="relative flex h-2 w-2">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
             <span className="relative inline-flex rounded-full h-2 w-2 bg-white"></span>
@@ -219,9 +220,8 @@ const StatCard: React.FC<{
         </div>
       )}
       <div className="flex items-center justify-between mb-2">
-        <h3 className="text-sm font-medium text-white flex items-center gap-1">
+        <h3 className="text-sm font-medium text-white">
           {title}
-          {tooltip && <Info className="h-3 w-3 opacity-70" />}
         </h3>
         <div className={`p-2 rounded-lg ${getIconBgColor()}`}>
           <div className={getTextColor()}>
@@ -238,6 +238,22 @@ const StatCard: React.FC<{
         </div>
       )}
     </div>
+  );
+
+  if (!tooltip) return cardContent;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        {cardContent}
+      </TooltipTrigger>
+      <TooltipContent 
+        side="bottom"
+        className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg"
+      >
+        {tooltip}
+      </TooltipContent>
+    </Tooltip>
   );
 };
 
@@ -893,24 +909,75 @@ export default function CounselorDashboard() {
     mixed: "#10b981",    // teal/emerald blend (not used in chart)
   };
 
-  // Simple dark tooltip to mimic the sample's small percentage badge
-  const CustomTooltip = ({ active, payload }: any) => {
+  // Beautiful dark gradient tooltip for charts
+  const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
       const p0 = payload[0];
       const pl = p0?.payload || {};
       const percent = typeof pl.percent === 'number' ? pl.percent : (typeof p0?.value === 'number' ? p0.value : 0);
-      const label = pl.label || pl.name;
-      const value = typeof pl.value === 'number' ? pl.value : undefined;
+      const dataLabel = pl.label || pl.name || label;
+      const value = typeof pl.value === 'number' ? pl.value : (typeof p0?.value === 'number' ? p0.value : undefined);
       return (
         <div style={{
-          background: '#111827',
+          background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
           color: '#fff',
-          padding: '1px 4px',
-          borderRadius: 4,
-          fontSize: 12,
-          boxShadow: 'none'
+          padding: '10px 14px',
+          borderRadius: 10,
+          fontSize: 13,
+          boxShadow: '0 4px 20px rgba(0,0,0,0.25)',
+          border: '1px solid rgba(255,255,255,0.1)',
+          minWidth: 120
         }}>
-          {label ? `${label}: ${value ?? ''}${value !== undefined ? ' (' + percent + '%)' : percent + '%'}` : `${percent}%`}
+          <div style={{ fontWeight: 600, marginBottom: 4, color: '#e2e8f0' }}>{dataLabel}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ 
+              width: 8, 
+              height: 8, 
+              borderRadius: '50%', 
+              background: p0?.color || '#22c55e',
+              display: 'inline-block'
+            }}></span>
+            <span>
+              {value !== undefined ? `${value}` : ''} 
+              {percent !== undefined && <span style={{ color: '#94a3b8', marginLeft: 4 }}>({percent}%)</span>}
+            </span>
+          </div>
+        </div>
+      );
+    }
+    return null;
+  };
+
+  // Chart tooltip for line charts (Weekly Mood Analytics)
+  const MoodChartTooltip = ({ active, payload, label }: any) => {
+    if (active && payload && payload.length) {
+      return (
+        <div style={{
+          background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
+          color: '#fff',
+          padding: '12px 16px',
+          borderRadius: 12,
+          fontSize: 13,
+          boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+          border: '1px solid rgba(255,255,255,0.1)',
+          minWidth: 140
+        }}>
+          <div style={{ fontWeight: 600, marginBottom: 8, color: '#e2e8f0', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: 6 }}>
+            {label}
+          </div>
+          {payload.map((entry: any, index: number) => (
+            <div key={index} style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+              <span style={{ 
+                width: 10, 
+                height: 10, 
+                borderRadius: '50%', 
+                background: entry.color || '#22c55e',
+                display: 'inline-block'
+              }}></span>
+              <span style={{ color: '#cbd5e1' }}>{entry.name || 'Value'}:</span>
+              <span style={{ fontWeight: 600 }}>{entry.value?.toFixed?.(1) ?? entry.value}</span>
+            </div>
+          ))}
         </div>
       );
     }
@@ -939,6 +1006,7 @@ export default function CounselorDashboard() {
   }
 
   return (
+    <TooltipProvider delayDuration={200}>
     <div className="flex flex-col min-h-screen">
       <div className="flex-1 pr-8 pl-3 sm:pl-5">
         <div className="flex items-center justify-between p-4">
@@ -1058,16 +1126,16 @@ export default function CounselorDashboard() {
 
         {showScaleInfo && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-            <div className="bg-white rounded-2xl shadow-lg p-6 w-full max-w-md">
-              <div className="flex items-center justify-between mb-3">
+            <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-md relative">
+              <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-semibold text-primary">Mood Scale</h3>
                 <button
                   type="button"
-                  className="text-gray-500 hover:text-gray-700 text-xl"
+                  className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600 hover:text-gray-800 transition-colors"
                   onClick={() => setShowScaleInfo(false)}
                   aria-label="Close"
                 >
-                  &times;
+                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                 </button>
               </div>
               <div className="text-sm text-gray-700 space-y-1">
@@ -1131,10 +1199,16 @@ export default function CounselorDashboard() {
           <div className="lg:col-span-2 space-y-6">
             <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow p-5 hover:shadow-md transition-all duration-300 w-full border border-gray-100">
               <div className={`${styles.cardHeader}`}>
-                <div className="flex items-center gap-2">
-                  <h2 className={styles.sectionTitle}>Weekly Mood Analytics</h2>
-                  <span className="text-[10px] text-blue-500 cursor-help" title="Average mood scores per week based on student check-ins. Scale: 1 (Terrible) to 9 (Awesome). Helps identify trends and periods of concern.">ⓘ</span>
-                </div>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div className="flex items-center gap-2 cursor-help">
+                      <h2 className={styles.sectionTitle}>Weekly Mood Analytics</h2>
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
+                    Average mood scores per week based on student check-ins. Scale: 1 (Terrible) to 9 (Awesome). Helps identify trends and periods of concern.
+                  </TooltipContent>
+                </Tooltip>
                 <div className="flex items-center gap-2">
                   <button
                     className={`${styles.pill} ${styles.pillSecondary} ${page === 0 ? "opacity-40 cursor-not-allowed" : ""}`}
@@ -1192,12 +1266,37 @@ export default function CounselorDashboard() {
                         }}
                       />
                       <YAxis domain={[1, 9]} ticks={[1,2,3,4,5,6,7,8,9]} tickFormatter={(v) => labelForScore(Number(v))} stroke="var(--primary)" />
-                      <RTooltip content={({ active, payload }) => {
+                      <RTooltip content={({ active, payload, label }) => {
                         if (active && payload && payload.length) {
                           const val = payload[0].value as number;
                           return (
-                            <div style={{ background: '#111827', color: '#fff', padding: '4px 8px', borderRadius: 4, fontSize: 12 }}>
-                              {`${val.toFixed(2)} (${labelForScore(val)})`}
+                            <div style={{
+                              background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
+                              color: '#fff',
+                              padding: '12px 16px',
+                              borderRadius: 12,
+                              fontSize: 13,
+                              boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+                              border: '1px solid rgba(255,255,255,0.1)',
+                              minWidth: 140
+                            }}>
+                              <div style={{ fontWeight: 600, marginBottom: 8, color: '#e2e8f0', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: 6 }}>
+                                {label}
+                              </div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <span style={{ 
+                                  width: 10, 
+                                  height: 10, 
+                                  borderRadius: '50%', 
+                                  background: 'var(--primary)',
+                                  display: 'inline-block'
+                                }}></span>
+                                <span style={{ color: '#cbd5e1' }}>Mood Score:</span>
+                                <span style={{ fontWeight: 600 }}>{val.toFixed(2)}</span>
+                              </div>
+                              <div style={{ marginTop: 6, color: '#94a3b8', fontSize: 12 }}>
+                                Level: <span style={{ color: '#22c55e', fontWeight: 500 }}>{labelForScore(val)}</span>
+                              </div>
                             </div>
                           );
                         }
@@ -1240,10 +1339,16 @@ export default function CounselorDashboard() {
           {/* Recent Alerts (1/3 width on desktop) */}
           <div>
             <div className="bg-white rounded-2xl shadow p-4 h-[470px] flex flex-col justify-between">
-              <h3 className="font-semibold text-primary text-lg mb-1 flex items-center gap-1">
-                Recent Alerts
-                <span className="text-[10px] text-blue-500 cursor-help" title="Automatically generated alerts when students show concerning patterns: high stress, negative sentiment, distress keywords, or declining mood trends.">ⓘ</span>
-              </h3>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <h3 className="font-semibold text-primary text-lg mb-1 cursor-help">
+                    Recent Alerts
+                  </h3>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
+                  Alerts are triggered when students show 2-3 consecutive negative check-ins or reach a sentiment threshold indicating distress.
+                </TooltipContent>
+              </Tooltip>
               <p className="text-[#6b7280] text-sm mb-3">Students who may need attention</p>
               <div className="space-y-3 flex-1 overflow-y-auto pr-1">
                 {recentAlerts.slice(0, 5).map((alert, idx) => (
@@ -1286,15 +1391,15 @@ export default function CounselorDashboard() {
 
         {showAllAlerts && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-            <div className="bg-white rounded-2xl shadow-lg p-6 w-full max-w-lg">
-              <div className="flex items-center justify-between mb-3">
+            <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-lg relative">
+              <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-semibold text-primary">All Alerts</h2>
                 <button
-                  className="text-gray-500 hover:text-gray-700 text-xl"
+                  className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600 hover:text-gray-800 transition-colors"
                   onClick={() => setShowAllAlerts(false)}
                   aria-label="Close"
                 >
-                  &times;
+                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                 </button>
               </div>
               <div
@@ -1341,10 +1446,16 @@ export default function CounselorDashboard() {
           <div className="lg:col-span-2 space-y-6">
             <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow p-5 hover:shadow-md transition-all duration-300 w-full border border-gray-100">
               <div className={`${styles.cardHeader}`}>
-                <div className="flex items-center gap-2">
-                  <h2 className={styles.sectionTitle}>Sentiment Breakdown</h2>
-                  <span className="text-[10px] text-blue-500 cursor-help" title="Distribution of sentiment from student check-ins and journals. Analyzed using NLP to classify text as Positive, Neutral, or Negative.">ⓘ</span>
-                </div>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div className="flex items-center gap-2 cursor-help">
+                      <h2 className={styles.sectionTitle}>Sentiment Breakdown</h2>
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
+                    Distribution of sentiment from student check-ins and journals. Analyzed using NLP to classify text as Positive, Neutral, or Negative.
+                  </TooltipContent>
+                </Tooltip>
                 <div className="flex justify-end gap-2">
                   {(["week", "month", "year"] as const).map((p) => (
                     <button
@@ -1453,10 +1564,16 @@ export default function CounselorDashboard() {
               {/* Check-in Breakdown: Mood, Energy, Stress */}
               <div className="mt-6 space-y-3">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-sm font-medium text-primary flex items-center gap-1">
-                    Check-in Breakdown
-                    <span className="text-[10px] text-blue-500 cursor-help" title="Summary of student-reported mood, energy, and stress levels from check-ins. Shows distribution across different levels for the selected period.">ⓘ</span>
-                  </h3>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <h3 className="text-sm font-medium text-primary cursor-help">
+                        Check-in Breakdown
+                      </h3>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
+                      Summary of student-reported mood, energy, and stress levels from check-ins. Shows distribution across different levels for the selected period.
+                    </TooltipContent>
+                  </Tooltip>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   {(() => {
@@ -1591,21 +1708,12 @@ export default function CounselorDashboard() {
                 
                 {/* AI Summary Button Card moved below Appointment Logs */}
 
-                {/* AI Summary Modal */}
+                {/* Wellness Summary Modal */}
                 {showAISummary && (
-                  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-xl p-6 max-w-2xl w-full max-h-[80vh] flex flex-col">
+                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+                    <div className="bg-white rounded-2xl shadow-xl p-6 max-w-2xl w-full max-h-[80vh] flex flex-col">
                       <div className="flex justify-between items-center mb-4">
-                        <h3 className="text-lg font-semibold text-gray-900">AI Sentiment Analysis</h3>
-                        <button 
-                          onClick={() => {
-                            setShowAISummary(false);
-                            setAICheckinSummary('');
-                          }}
-                          className="text-gray-500 hover:text-gray-700 text-xl"
-                        >
-                          &times;
-                        </button>
+                        <h3 className="text-lg font-semibold text-primary">Weekly Wellness Summary</h3>
                       </div>
                       <div className="flex-1 overflow-y-auto mb-4">
                         {aiCheckinSummary ? (
@@ -1619,15 +1727,6 @@ export default function CounselorDashboard() {
                         )}
                       </div>
                       <div className="flex justify-end space-x-3 pt-4 border-t">
-                        <button
-                          onClick={() => {
-                            setShowAISummary(false);
-                            setAICheckinSummary('');
-                          }}
-                          className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
-                        >
-                          Close
-                        </button>
                         <button
                           onClick={async () => {
                             try {
@@ -1646,9 +1745,18 @@ export default function CounselorDashboard() {
                               console.error('Error generating AI summary:', error);
                             }
                           }}
-                          className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700"
+                          className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors"
                         >
                           {aiCheckinSummary ? 'Regenerate' : 'Generate'} Analysis
+                        </button>
+                        <button
+                          onClick={() => {
+                            setShowAISummary(false);
+                            setAICheckinSummary('');
+                          }}
+                          className="px-5 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors shadow-sm"
+                        >
+                          Close
                         </button>
                       </div>
                     </div>
@@ -1660,10 +1768,16 @@ export default function CounselorDashboard() {
           {/* Right rail: Appointment Logs */}
         <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow p-5 hover:shadow-md transition-all duration-300 border border-gray-100 flex flex-col self-start h-[470px] justify-between">
                   <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-lg font-semibold text-primary flex items-center gap-1">
-                      Appointment Logs
-                      <span className="text-[10px] text-blue-500 cursor-help" title="Record of students who downloaded appointment request forms. Helps track counseling demand and follow up with students seeking support.">ⓘ</span>
-                    </h2>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <h2 className="text-lg font-semibold text-primary cursor-help">
+                          Appointment Logs
+                        </h2>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
+                        Record of students who downloaded appointment request forms. Helps track counseling demand and follow up with students seeking support.
+                      </TooltipContent>
+                    </Tooltip>
                     {appointmentLogs.length > APPOINTMENTS_PER_PAGE && (
                       <span className="text-xs text-gray-500">
                         {appointmentPage * APPOINTMENTS_PER_PAGE + 1}-{Math.min((appointmentPage + 1) * APPOINTMENTS_PER_PAGE, appointmentLogs.length)} of {appointmentLogs.length}
@@ -1730,10 +1844,16 @@ export default function CounselorDashboard() {
                 )}
             {/* Wellness Analysis below Appointment Logs */}
             <div className="mt-5 pt-4 border-t">
-              <div className="text-sm font-medium text-primary mb-2 flex items-center gap-1">
-                Weekly Wellness Summary
-                <span className="text-[10px] text-blue-500 cursor-help" title="Generates a summary of student wellness patterns from the previous week. Uses rule-based analysis of mood trends, sentiment, and stress patterns.">ⓘ</span>
-              </div>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="text-sm font-medium text-primary mb-2 cursor-help">
+                    Weekly Wellness Summary
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
+                  Generates a summary of student wellness patterns from the previous week. Uses rule-based analysis of mood trends, sentiment, and stress patterns.
+                </TooltipContent>
+              </Tooltip>
               <div className="flex-1 flex items-center justify-center">
                 <button
                   onClick={async () => {
@@ -1768,6 +1888,7 @@ export default function CounselorDashboard() {
         </div>
       </div>
     </div>
+    </TooltipProvider>
   );
 }
 
