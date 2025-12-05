@@ -1,12 +1,23 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { Alert, StyleSheet, View, Animated, Easing, Pressable, Platform, useWindowDimensions, Modal, ScrollView } from 'react-native';
+import { 
+  StyleSheet, 
+  View, 
+  Animated, 
+  Easing, 
+  Pressable, 
+  Platform, 
+  Modal, 
+  ScrollView, 
+  TextInput,
+  KeyboardAvoidingView,
+  ActivityIndicator,
+  Keyboard,
+} from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
-import { ThemedView } from '@/components/themed-view';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
-import { Colors } from '@/constants/theme';
-import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Button } from '@/components/ui/button';
 import * as Haptics from 'expo-haptics';
 import { useFocusEffect } from '@react-navigation/native';
@@ -15,42 +26,50 @@ import { addDeletedJournalId } from '@/utils/soft-delete';
 export default function JournalDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const scheme = useColorScheme() ?? 'light';
-  const palette = Colors[scheme] as any;
+  const insets = useSafeAreaInsets();
   const API = process.env.EXPO_PUBLIC_API_URL || 'https://sentisphere-production.up.railway.app';
-  const { width: winW, height: winH } = useWindowDimensions();
 
+  // Data state
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [apiTitle, setApiTitle] = useState<string | null>(null);
   const [content, setContent] = useState('');
   const [createdAt, setCreatedAt] = useState<string | null>(null);
+  
+  // Edit mode state
+  const [isEditing, setIsEditing] = useState(false);
+  const [editContent, setEditContent] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [showSaveSuccess, setShowSaveSuccess] = useState(false);
+  
+  // Delete state
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  
+  // Animation refs
   const confirmScale = useRef(new Animated.Value(0)).current;
-  const cardScale = useRef(new Animated.Value(0.96)).current;
   const cardOpacity = useRef(new Animated.Value(0)).current;
-
-  // Entrance animations
   const entranceHeader = useRef(new Animated.Value(0)).current;
   const entranceContent = useRef(new Animated.Value(0)).current;
   const entranceActions = useRef(new Animated.Value(0)).current;
+  const successOpacity = useRef(new Animated.Value(0)).current;
 
   const runEntrance = useCallback(() => {
     entranceHeader.setValue(0);
     entranceContent.setValue(0);
     entranceActions.setValue(0);
-    Animated.stagger(70, [
-      Animated.timing(entranceHeader, { toValue: 1, duration: 280, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-      Animated.timing(entranceContent, { toValue: 1, duration: 280, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-      Animated.timing(entranceActions, { toValue: 1, duration: 280, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+    Animated.stagger(80, [
+      Animated.timing(entranceHeader, { toValue: 1, duration: 350, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(entranceContent, { toValue: 1, duration: 350, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(entranceActions, { toValue: 1, duration: 350, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
     ]).start();
   }, []);
 
   const makeFadeUp = (v: Animated.Value) => ({
     opacity: v,
-    transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }],
+    transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) }],
   });
 
   useEffect(() => { runEntrance(); }, []);
@@ -62,57 +81,64 @@ export default function JournalDetailScreen() {
     }
     try { return await SecureStore.getItemAsync('auth_token') } catch { return null }
   };
+  
   const clearAuthToken = async () => {
     if (Platform.OS === 'web') { try { (window as any)?.localStorage?.removeItem('auth_token') } catch {} ; return; }
     try { await SecureStore.deleteItemAsync('auth_token') } catch {}
   };
 
-  const load = useRef(async () => {}).current;
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const tok = await getAuthToken();
-        if (!tok) { setError('Not signed in'); setLoading(false); return; }
-        const res = await fetch(`${API}/api/journals/${id}`, { headers: { Authorization: `Bearer ${tok}` } });
-        if (res.status === 401) {
-          await clearAuthToken();
-          router.replace('/auth');
-          return;
-        }
-        if (res.status === 404) {
-          setError('Not found');
-          setLoading(false);
-          return;
-        }
-        if (!res.ok) {
-          setError('Failed to load');
-          setLoading(false);
-          return;
-        }
-        const d = await res.json();
-        setApiTitle(d?.title ? String(d.title) : null);
-        setContent(String(d?.content || ''));
-        setCreatedAt(String(d?.created_at || ''));
-      } catch {
-        setError('Failed to load');
-      } finally {
-        setLoading(false);
+  // Fetch journal entry function (reusable for initial load and after save)
+  const fetchJournalEntry = useCallback(async (showLoading = true) => {
+    if (showLoading) setLoading(true);
+    setError(null);
+    try {
+      const tok = await getAuthToken();
+      if (!tok) { setError('Not signed in'); setLoading(false); return; }
+      
+      // No trailing slash - correct endpoint
+      const res = await fetch(`${API}/api/journals/${id}`, { 
+        headers: { Authorization: `Bearer ${tok}` } 
+      });
+      
+      if (res.status === 401) {
+        await clearAuthToken();
+        router.replace('/auth');
+        return;
       }
-    })();
-  }, [id]);
+      if (res.status === 404) {
+        setError('Not found');
+        setLoading(false);
+        return;
+      }
+      if (!res.ok) {
+        setError('Failed to load');
+        setLoading(false);
+        return;
+      }
+      const d = await res.json();
+      setApiTitle(d?.title ? String(d.title) : null);
+      setContent(String(d?.content || ''));
+      setCreatedAt(String(d?.created_at || ''));
+    } catch (e) {
+      console.error('[Journal] Fetch error:', e);
+      setError('Failed to load');
+    } finally {
+      if (showLoading) setLoading(false);
+    }
+  }, [id, API]);
+
+  // Load journal entry on mount
+  useEffect(() => {
+    fetchJournalEntry();
+  }, [fetchJournalEntry]);
 
   const title = useMemo(() => {
-    // Use API title if available, otherwise fallback to first line of content
-    if (apiTitle && apiTitle.trim()) {
-      return apiTitle.trim();
-    }
+    if (apiTitle && apiTitle.trim()) return apiTitle.trim();
     const first = content.trim().split(/\n+/)[0]?.trim() || 'Journal Entry';
     return first.slice(0, 80) || 'Journal Entry';
   }, [apiTitle, content]);
 
-  // Format date as "Saturday, November 29, 2025"
+  // Format date
   const when = useMemo(() => {
     if (!createdAt) return '';
     try {
@@ -123,16 +149,131 @@ export default function JournalDetailScreen() {
     }
   }, [createdAt]);
 
+  // Format time
+  const timeStr = useMemo(() => {
+    if (!createdAt) return '';
+    try {
+      const d = new Date(createdAt);
+      return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+    } catch {
+      return '';
+    }
+  }, [createdAt]);
+
   // Entrance animation
   useEffect(() => {
     if (!loading) {
-      Animated.parallel([
-        Animated.spring(cardScale, { toValue: 1, useNativeDriver: true, tension: 60, friction: 12 }),
-        Animated.timing(cardOpacity, { toValue: 1, duration: 320, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-      ]).start();
+      Animated.timing(cardOpacity, { toValue: 1, duration: 400, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
     }
   }, [loading]);
 
+  // === EDIT MODE HANDLERS ===
+  const handleStartEdit = () => {
+    if (Platform.OS !== 'web') {
+      try { Haptics.selectionAsync(); } catch {}
+    }
+    setEditContent(content);
+    setSaveError(null);
+    setIsEditing(true);
+  };
+
+  const handleCancelEdit = () => {
+    if (Platform.OS !== 'web') {
+      try { Haptics.selectionAsync(); } catch {}
+    }
+    setIsEditing(false);
+    setEditContent('');
+    setSaveError(null);
+  };
+
+  const handleSaveEdit = async () => {
+    if (isSaving) return;
+    
+    // Dismiss keyboard first
+    Keyboard.dismiss();
+    
+    const trimmedContent = editContent.trim();
+    if (!trimmedContent) {
+      setSaveError('Content cannot be empty');
+      return;
+    }
+    
+    setIsSaving(true);
+    setSaveError(null);
+    
+    // Store previous content for rollback
+    const previousContent = content;
+    
+    try {
+      const tok = await getAuthToken();
+      if (!tok) throw new Error('Not signed in');
+      
+      // Correct PATCH request - no trailing slash, correct body shape
+      const url = `${API}/api/journals/${id}`;
+      console.log('[Journal] PATCH request to:', url);
+      
+      const res = await fetch(url, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${tok}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ content: trimmedContent }),
+      });
+      
+      console.log('[Journal] PATCH response status:', res.status);
+      
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        console.error('[Journal] PATCH error:', res.status, errData);
+        throw new Error(errData.detail || `Failed to save (${res.status})`);
+      }
+      
+      // Parse response to get updated data
+      const updatedData = await res.json().catch(() => null);
+      console.log('[Journal] PATCH success, updated data:', updatedData);
+      
+      // Update local state with server response or our edited content
+      if (updatedData?.content) {
+        setContent(updatedData.content);
+      } else {
+        setContent(trimmedContent);
+      }
+      
+      // Re-fetch to ensure we have the latest data from server
+      await fetchJournalEntry(false);
+      
+      // Success feedback
+      if (Platform.OS !== 'web') {
+        try { await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
+      }
+      
+      // Exit edit mode
+      setIsEditing(false);
+      setEditContent('');
+      setShowSaveSuccess(true);
+      
+      // Animate success toast
+      Animated.sequence([
+        Animated.timing(successOpacity, { toValue: 1, duration: 200, useNativeDriver: true }),
+        Animated.delay(1500),
+        Animated.timing(successOpacity, { toValue: 0, duration: 300, useNativeDriver: true }),
+      ]).start(() => setShowSaveSuccess(false));
+      
+    } catch (e: any) {
+      console.error('[Journal] Save failed:', e);
+      // Revert to previous content
+      setContent(previousContent);
+      setSaveError(e?.message || 'Unable to save changes');
+      if (Platform.OS !== 'web') {
+        try { await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error); } catch {}
+      }
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // === DELETE HANDLERS ===
   const animateConfirm = useCallback((to: 0 | 1, done?: () => void) => {
     Animated.timing(confirmScale, {
       toValue: to,
@@ -166,37 +307,157 @@ export default function JournalDetailScreen() {
     setIsDeleting(true);
     setDeleteError(null);
     try {
-      // Soft delete - only store the ID locally, don't call backend
-      // This keeps the data in backend for analytics purposes
       await addDeletedJournalId(id);
-      
       if (Platform.OS !== 'web') {
         try { await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
       }
-      // Navigate back to journal list
       closeConfirm(() => router.replace('/(student)/(tabs)/journal'));
     } catch (e: any) {
-      setDeleteError(e?.message || 'Unable to delete this journal entry. Please try again.');
+      setDeleteError(e?.message || 'Unable to delete this journal entry.');
       setIsDeleting(false);
     }
   };
 
   const handleCancelDelete = () => closeConfirm();
 
-  return (
-    <View style={styles.container}>
+  // Render editing mode - full page Apple Notes style
+  if (isEditing) {
+    return (
+      <View style={[styles.container, { paddingTop: insets.top }]}>
+        {/* Edit mode header */}
+        <View style={styles.editHeader}>
+          <Pressable 
+            onPress={handleCancelEdit}
+            disabled={isSaving}
+            style={({ pressed }) => [styles.headerBtn, pressed && { opacity: 0.7 }, isSaving && { opacity: 0.5 }]}
+            accessibilityRole="button"
+            accessibilityLabel="Cancel editing"
+          >
+            <Icon name="x" size={20} color="#6B7280" />
+            <ThemedText style={styles.cancelText}>Cancel</ThemedText>
+          </Pressable>
+          
+          <ThemedText style={styles.editHeaderTitle}>Editing</ThemedText>
+          
+          <Pressable 
+            onPress={handleSaveEdit}
+            disabled={isSaving}
+            style={({ pressed }) => [
+              styles.headerBtn,
+              styles.saveHeaderBtn,
+              pressed && { opacity: 0.85 },
+              isSaving && { opacity: 0.7 },
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="Save changes"
+          >
+            {isSaving ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <>
+                <Icon name="check" size={18} color="#FFFFFF" />
+                <ThemedText style={styles.saveHeaderText}>Save</ThemedText>
+              </>
+            )}
+          </Pressable>
+        </View>
 
-      {/* Floating back button */}
-      <Animated.View style={[styles.floatingHeader, makeFadeUp(entranceHeader)]}>
-        <Pressable onPress={() => router.replace('/(student)/(tabs)/journal')} accessibilityRole="button" style={styles.floatingBtn} accessibilityLabel="Go back to journal list">
+        <KeyboardAvoidingView 
+          style={{ flex: 1 }} 
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <ScrollView
+            style={styles.editScrollView}
+            contentContainerStyle={styles.editScrollContent}
+            keyboardShouldPersistTaps="always"
+            keyboardDismissMode="interactive"
+            showsVerticalScrollIndicator={false}
+          >
+            {/* Date indicator */}
+            <View style={styles.dateLine}>
+              <Icon name="calendar" size={14} color="#9CA3AF" />
+              <ThemedText style={styles.dateText}>{when}</ThemedText>
+              {timeStr ? (
+                <>
+                  <View style={styles.dateDot} />
+                  <ThemedText style={styles.dateText}>{timeStr}</ThemedText>
+                </>
+              ) : null}
+            </View>
+
+            {/* Full-page TextInput - Apple Notes style */}
+            <TextInput
+              style={styles.fullPageInput}
+              value={editContent}
+              onChangeText={setEditContent}
+              multiline
+              autoFocus
+              placeholder="Write your thoughts..."
+              placeholderTextColor="#9CA3AF"
+              textAlignVertical="top"
+              scrollEnabled={false}
+              pointerEvents="auto"
+              accessible
+              accessibilityLabel="Journal content"
+            />
+
+            {saveError ? (
+              <View style={styles.errorBox}>
+                <Icon name="alert-circle" size={14} color="#DC2626" />
+                <ThemedText style={styles.errorBoxText}>{saveError}</ThemedText>
+              </View>
+            ) : null}
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </View>
+    );
+  }
+
+  // Render view mode
+  return (
+    <View style={[styles.container, { paddingTop: insets.top }]}>
+      {/* Success toast */}
+      {showSaveSuccess && (
+        <Animated.View style={[styles.successToast, { opacity: successOpacity }]}>
+          <Icon name="check-circle" size={18} color="#059669" />
+          <ThemedText style={styles.successToastText}>Changes saved</ThemedText>
+        </Animated.View>
+      )}
+
+      {/* View mode header */}
+      <Animated.View style={[styles.viewHeader, makeFadeUp(entranceHeader)]}>
+        <Pressable 
+          onPress={() => router.replace('/(student)/(tabs)/journal')} 
+          accessibilityRole="button" 
+          style={({ pressed }) => [styles.headerBtn, pressed && { opacity: 0.7 }]}
+          accessibilityLabel="Go back to journal list"
+        >
           <Icon name="arrow-left" size={20} color="#047857" />
         </Pressable>
+        
+        <View style={styles.headerActions}>
+          <Pressable 
+            onPress={handleStartEdit}
+            style={({ pressed }) => [styles.headerIconBtn, pressed && { opacity: 0.7 }]}
+            accessibilityRole="button"
+            accessibilityLabel="Edit entry"
+          >
+            <Icon name="edit-2" size={20} color="#047857" />
+          </Pressable>
+          <Pressable 
+            onPress={handleDeletePress}
+            style={({ pressed }) => [styles.headerIconBtn, pressed && { opacity: 0.7 }]}
+            accessibilityRole="button"
+            accessibilityLabel="Delete entry"
+          >
+            <Icon name="trash-2" size={20} color="#DC2626" />
+          </Pressable>
+        </View>
       </Animated.View>
 
       {loading ? (
         <View style={styles.loadingWrap}>
-          <View style={styles.skeletonIcon} />
-          <View style={[styles.skeletonLine, { width: '60%', height: 24, marginTop: 24 }]} />
+          <View style={[styles.skeletonLine, { width: '60%', height: 24 }]} />
           <View style={[styles.skeletonLine, { width: '40%', height: 14, marginTop: 8 }]} />
           <View style={[styles.skeletonLine, { width: '100%', marginTop: 32 }]} />
           <View style={[styles.skeletonLine, { width: '92%' }]} />
@@ -210,43 +471,32 @@ export default function JournalDetailScreen() {
           <Button title="Go back" variant="outline" onPress={() => router.replace('/(student)/(tabs)/journal')} style={{ marginTop: 16 }} />
         </View>
       ) : (
-        <Animated.View style={[styles.cardWrap, { opacity: cardOpacity, transform: [{ scale: cardScale }] }, makeFadeUp(entranceContent)]}>
+        <Animated.View style={[styles.contentWrap, { opacity: cardOpacity }, makeFadeUp(entranceContent)]}>
           <ScrollView
             showsVerticalScrollIndicator={false}
-            contentContainerStyle={styles.cardContent}
+            contentContainerStyle={styles.viewScrollContent}
           >
-            {/* Icon badge */}
-            <View style={styles.iconBadge}>
-              <Icon name="book-open" size={28} color="#047857" />
+            {/* Title */}
+            <ThemedText style={styles.viewTitle}>{title}</ThemedText>
+            
+            {/* Date line */}
+            <View style={styles.dateLine}>
+              <Icon name="calendar" size={14} color="#9CA3AF" />
+              <ThemedText style={styles.dateText}>{when}</ThemedText>
+              {timeStr ? (
+                <>
+                  <View style={styles.dateDot} />
+                  <ThemedText style={styles.dateText}>{timeStr}</ThemedText>
+                </>
+              ) : null}
             </View>
 
-            {/* Title */}
-            <ThemedText style={styles.cardTitle}>{title}</ThemedText>
+            {/* Subtle divider */}
+            <View style={styles.divider} />
 
-            {/* Date subtitle */}
-            {when ? (
-              <ThemedText style={styles.cardDate}>{when}</ThemedText>
-            ) : null}
-
-            {/* Content body */}
-            <ThemedText style={styles.cardBody}>{content}</ThemedText>
+            {/* Content - clean paper-like display */}
+            <ThemedText style={styles.viewContent}>{content}</ThemedText>
           </ScrollView>
-
-          {/* Delete action button at bottom */}
-          <Animated.View style={[styles.cardFooter, makeFadeUp(entranceActions)]}>
-            <Pressable
-              onPress={handleDeletePress}
-              accessibilityRole="button"
-              accessibilityLabel="Delete journal entry"
-              style={({ pressed }) => [
-                styles.deleteBtn,
-                pressed && { opacity: 0.85, transform: [{ scale: 0.98 }] },
-              ]}
-            >
-              <Icon name="trash-2" size={18} color="#b91c1c" />
-              <ThemedText style={styles.deleteBtnText}>Delete Entry</ThemedText>
-            </Pressable>
-          </Animated.View>
         </Animated.View>
       )}
 
@@ -266,7 +516,7 @@ export default function JournalDetailScreen() {
             ])}
           >
             <View style={styles.confirmIconWrap}>
-              <Icon name="trash-2" size={28} color="#b91c1c" />
+              <Icon name="trash-2" size={28} color="#DC2626" />
             </View>
             <ThemedText style={styles.confirmTitle}>Let this story go?</ThemedText>
             <ThemedText style={styles.confirmMessage}>
@@ -292,7 +542,7 @@ export default function JournalDetailScreen() {
                 onPress={handleConfirmDelete}
                 loading={isDeleting}
                 style={{ flex: 1, paddingVertical: 12, backgroundColor: 'rgba(239,68,68,0.08)', borderWidth: 0 }}
-                textStyle={{ fontSize: 14, color: '#b91c1c' }}
+                textStyle={{ fontSize: 14, color: '#DC2626' }}
               />
             </View>
           </Animated.View>
@@ -305,141 +555,193 @@ export default function JournalDetailScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FAFBFC',
+    backgroundColor: '#FAFAF8', // Warm off-white/cream background
   },
-  floatingHeader: {
+  // === HEADERS === (transparent, no white box)
+  editHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    // No background, no border - seamless with page
+  },
+  viewHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    // No background, no border - seamless with page
+  },
+  editHeaderTitle: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 17,
+    color: '#1F2937',
+  },
+  headerBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  headerIconBtn: {
+    padding: 10,
+    borderRadius: 8,
+  },
+  cancelText: {
+    fontFamily: 'Inter_500Medium',
+    fontSize: 15,
+    color: '#6B7280',
+  },
+  saveHeaderBtn: {
+    backgroundColor: '#10B981',
+    paddingHorizontal: 16,
+  },
+  saveHeaderText: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 15,
+    color: '#FFFFFF',
+  },
+  // === SUCCESS TOAST ===
+  successToast: {
     position: 'absolute',
-    top: 56,
+    top: 12,
     left: 20,
-    zIndex: 10,
-  },
-  floatingBtn: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#FFFFFF',
+    right: 20,
+    zIndex: 100,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
+    gap: 8,
+    backgroundColor: '#ECFDF5',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+    shadowColor: '#059669',
+    shadowOpacity: 0.1,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.04)',
+    elevation: 4,
   },
+  successToastText: {
+    fontFamily: 'Inter_500Medium',
+    fontSize: 14,
+    color: '#059669',
+  },
+  // === LOADING STATE ===
   loadingWrap: {
     flex: 1,
-    paddingTop: 120,
-    paddingHorizontal: 32,
-    alignItems: 'center',
+    paddingTop: 40,
+    paddingHorizontal: 24,
     gap: 10,
-  },
-  skeletonIcon: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: '#F3F4F6',
   },
   skeletonLine: {
     height: 16,
-    borderRadius: 10,
+    borderRadius: 8,
     backgroundColor: '#F3F4F6',
-    alignSelf: 'stretch',
   },
+  // === ERROR STATE ===
   errorWrap: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 32,
   },
-  cardWrap: {
+  // === EDIT MODE ===
+  editScrollView: {
     flex: 1,
-    marginTop: 116,
-    marginHorizontal: 16,
-    marginBottom: 24,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 24,
-    shadowColor: '#000',
-    shadowOpacity: 0.04,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.03)',
   },
-  cardContent: {
-    paddingTop: 40,
-    paddingHorizontal: 24,
-    paddingBottom: 120,
+  editScrollContent: {
+    flexGrow: 1,
+    paddingHorizontal: 20,
+    paddingTop: 24,
+    paddingBottom: 40,
   },
-  iconBadge: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#F0FDF4',
+  fullPageInput: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 17,
+    lineHeight: 28,
+    color: '#374151',
+    letterSpacing: 0.1,
+    minHeight: 300,
+    textAlignVertical: 'top',
+    padding: 0,
+  },
+  errorBox: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 24,
-    alignSelf: 'center',
-    shadowColor: '#10B981',
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
+    gap: 6,
+    marginTop: 16,
+    padding: 12,
+    backgroundColor: '#FEF2F2',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#FECACA',
   },
-  cardTitle: {
+  errorBoxText: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 13,
+    color: '#DC2626',
+    flex: 1,
+  },
+  // === VIEW MODE ===
+  contentWrap: {
+    flex: 1,
+  },
+  viewScrollContent: {
+    flexGrow: 1,
+    paddingHorizontal: 20,
+    paddingTop: 24,
+    paddingBottom: 40,
+  },
+  viewTitle: {
     fontFamily: 'Inter_600SemiBold',
-    fontSize: 22,
-    color: '#111827',
-    textAlign: 'center',
-    letterSpacing: -0.3,
-    lineHeight: 30,
+    fontSize: 26,
+    color: '#1F2937',
+    letterSpacing: -0.5,
+    lineHeight: 34,
+    marginBottom: 12,
   },
-  cardDate: {
+  dateLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 20,
+  },
+  dateText: {
     fontFamily: 'Inter_400Regular',
     fontSize: 13,
     color: '#9CA3AF',
-    marginTop: 8,
-    textAlign: 'center',
   },
-  cardBody: {
+  dateDot: {
+    width: 3,
+    height: 3,
+    borderRadius: 1.5,
+    backgroundColor: '#D1D5DB',
+  },
+  divider: {
+    height: 1,
+    backgroundColor: '#E5E7EB',
+    marginBottom: 24,
+  },
+  viewContent: {
     fontFamily: 'Inter_400Regular',
-    fontSize: 16,
-    lineHeight: 28,
-    color: '#4B5563',
-    marginTop: 32,
-    textAlign: 'left',
-    alignSelf: 'stretch',
+    fontSize: 17,
+    lineHeight: 30,
+    color: '#374151',
     letterSpacing: 0.1,
   },
-  cardFooter: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    backgroundColor: '#FFFFFF',
-    borderTopWidth: 1,
-    borderTopColor: '#F3F4F6',
-  },
-  deleteBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 14,
-    borderRadius: 14,
-    backgroundColor: '#FEF2F2',
-    borderWidth: 0,
-  },
-  deleteBtnText: {
-    fontFamily: 'Inter_500Medium',
-    fontSize: 14,
-    color: '#DC2626',
-  },
+  // === DELETE MODAL ===
   overlay: {
     flex: 1,
     backgroundColor: 'rgba(15, 23, 42, 0.5)',
@@ -449,9 +751,9 @@ const styles = StyleSheet.create({
   },
   confirmCard: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 28,
+    borderRadius: 24,
     padding: 28,
-    gap: 20,
+    gap: 16,
     width: '100%',
     maxWidth: 360,
     shadowColor: '#0f172a',
@@ -461,32 +763,29 @@ const styles = StyleSheet.create({
     elevation: 14,
   },
   confirmIconWrap: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     alignSelf: 'center',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    backgroundColor: '#FEF2F2',
   },
   confirmTitle: {
-    fontSize: 21,
+    fontSize: 20,
     fontFamily: 'Inter_700Bold',
     textAlign: 'center',
     color: '#111827',
-    marginTop: 4,
   },
   confirmMessage: {
-    fontSize: 15,
+    fontSize: 14,
     textAlign: 'center',
-    color: '#6b7280',
-    marginHorizontal: 8,
-    marginTop: -2,
+    color: '#6B7280',
+    lineHeight: 22,
   },
   noticeBox: {
     borderWidth: 1,
-    borderRadius: 14,
+    borderRadius: 12,
     padding: 12,
-    marginTop: 8,
   },
 });
