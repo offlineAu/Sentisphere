@@ -123,6 +123,17 @@ type WeeklyInsight = {
 
 type CalendarEvent = { name: string; start: string; end: string; type?: string };
 
+type BehavioralMetric = {
+  label: string;
+  value: string | number;
+};
+
+type BehavioralInsight = {
+  title: string;
+  description: string;
+  metrics: BehavioralMetric[];
+};
+
 type TrendsResponseNew = {
   dates: string[];
   mood: number[];
@@ -191,6 +202,8 @@ function Reports() {
   const [participation, setParticipation] = useState(0);
   const [summary, setSummary] = useState<ReportSummary | null>(null);
   const [insights, setInsights] = useState<WeeklyInsight[]>([]);
+  const [behavioralInsights, setBehavioralInsights] = useState<BehavioralInsight[]>([]);
+  const [behavioralLoading, setBehavioralLoading] = useState(false);
   const [engagement, setEngagement] = useState<EngagementMetrics | null>(null);
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const d = new Date();
@@ -472,6 +485,18 @@ function Reports() {
           }))
         );
 
+        // Fetch behavioral insights
+        setBehavioralLoading(true);
+        try {
+          const behavioralRes = await api.get<any>(`/reports/behavior`, { params: filterParams });
+          const behavioralData = behavioralRes.data || [];
+          setBehavioralInsights(Array.isArray(behavioralData) ? behavioralData : []);
+        } catch {
+          setBehavioralInsights([]);
+        } finally {
+          setBehavioralLoading(false);
+        }
+
         setLoading(false);
       } catch (err) {
         console.error("Error fetching reports:", err);
@@ -608,23 +633,30 @@ function Reports() {
           };
 
           return (
-            <div key={i} className={cardClass} title={tooltips[stat.label] || stat.label}>
-              <div className="flex items-center justify-between">
-                <h3 className={titleClass}>{stat.label}</h3>
-                {stat.delta && (isTotal || isRisk) ? (
-                  <ChevronRight className="h-3 w-3" />
-                ) : stat.delta ? (
-                  <TrendingUp className={`h-3 w-3 ${stat.deltaColor}`} />
-                ) : null}
-              </div>
-              <div className={valueClass}>{stat.value}</div>
-              {stat.delta && (
-                <div className={deltaClass}>
-                  {(isTotal || isRisk) && <ChevronRight className="h-3 w-3" />} {stat.delta}
-                  <span className="ml-1 opacity-70 text-[10px]">vs last week</span>
+            <Tooltip key={i}>
+              <TooltipTrigger asChild>
+                <div className={cardClass}>
+                  <div className="flex items-center justify-between">
+                    <h3 className={titleClass}>{stat.label}</h3>
+                    {stat.delta && (isTotal || isRisk) ? (
+                      <ChevronRight className="h-3 w-3" />
+                    ) : stat.delta ? (
+                      <TrendingUp className={`h-3 w-3 ${stat.deltaColor}`} />
+                    ) : null}
+                  </div>
+                  <div className={valueClass}>{stat.value}</div>
+                  {stat.delta && (
+                    <div className={deltaClass}>
+                      {(isTotal || isRisk) && <ChevronRight className="h-3 w-3" />} {stat.delta}
+                      <span className="ml-1 opacity-70 text-[10px]">vs last week</span>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
+                {tooltips[stat.label] || stat.label}
+              </TooltipContent>
+            </Tooltip>
           );
         })}
       </div>
@@ -734,10 +766,17 @@ function Reports() {
                 { label: "Active Event", value: summary?.event_name ? `${summary.event_name}` : "None", tooltip: "Current academic event that may affect student wellness (exams, holidays, etc.)." },
               ];
               return items.map((s, i) => (
-                <div key={i} className="flex-1 bg-gray-50 rounded-xl p-3 text-center cursor-help" title={s.tooltip}>
-                  <div className="text-[#6b7280] text-xs font-medium">{s.label}</div>
-                  <div className={`text-lg font-bold ${s.className || "text-[#333]"}`}>{s.value}</div>
-                </div>
+                <Tooltip key={i}>
+                  <TooltipTrigger asChild>
+                    <div className="flex-1 bg-gray-50 rounded-xl p-3 text-center cursor-help">
+                      <div className="text-[#6b7280] text-xs font-medium">{s.label}</div>
+                      <div className={`text-lg font-bold ${s.className || "text-[#333]"}`}>{s.value}</div>
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
+                    {s.tooltip}
+                  </TooltipContent>
+                </Tooltip>
               ));
             })()}
           </div>
@@ -814,8 +853,9 @@ function Reports() {
         </div>
       </div>
 
-      {/* Weekly Insights (full width) */}
-      <div className="grid grid-cols-1 gap-4">
+      {/* Weekly Insights & Behavioral Insights (side by side) */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        {/* Weekly Insights */}
         <div className="bg-white rounded-2xl shadow p-4 relative">
           <div className="flex items-center justify-between mb-3">
             <div>
@@ -933,6 +973,63 @@ function Reports() {
             </div>
           )}
         </div>
+
+        {/* Behavioral & Pattern Insights */}
+        <div className="bg-white rounded-2xl shadow p-4 relative">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <h2 className={`${styles.sectionTitle} cursor-help`}>Behavioral & Pattern Insights</h2>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
+                  AI-detected behavioral patterns including activity timing, stress correlations, and usage trends. Helps identify when students are most active and potential intervention opportunities.
+                </TooltipContent>
+              </Tooltip>
+              <p className="text-xs text-[#6b7280] mt-1">
+                Activity patterns and behavioral trends from student data.
+              </p>
+            </div>
+          </div>
+          {behavioralLoading ? (
+            <div className="flex flex-col items-center justify-center py-8 text-center">
+              <LoadingSpinner className="h-8 w-8 text-primary" />
+              <p className="text-sm text-gray-500 mt-2">Loading behavioral insights...</p>
+            </div>
+          ) : behavioralInsights.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-8 text-center">
+              <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-3">
+                <Activity className="h-6 w-6 text-gray-400" />
+              </div>
+              <p className="text-sm text-gray-500 font-medium">No behavioral insights yet</p>
+              <p className="text-xs text-gray-400 mt-1 max-w-[280px]">
+                Behavioral patterns are analyzed daily when there's enough student activity data.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2">
+              {behavioralInsights.map((insight, idx) => (
+                <div key={idx} className="rounded-xl border bg-gradient-to-br from-gray-50 to-white p-4 transition hover:shadow-md">
+                  <h3 className="text-sm font-semibold text-[#111827] mb-2 flex items-center gap-2">
+                    <Activity className="h-4 w-4 text-primary" />
+                    {insight.title}
+                  </h3>
+                  <p className="text-xs text-[#6b7280] mb-3 leading-relaxed">{insight.description}</p>
+                  {insight.metrics && insight.metrics.length > 0 && (
+                    <div className="grid grid-cols-2 gap-2">
+                      {insight.metrics.map((metric, mIdx) => (
+                        <div key={mIdx} className="bg-white rounded-lg p-2 border text-center">
+                          <div className="text-[10px] text-[#6b7280] uppercase tracking-wide">{metric.label}</div>
+                          <div className="text-sm font-bold text-[#111827] mt-0.5">{metric.value}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Engagement Metrics (full width under paired sections) */}
@@ -957,19 +1054,40 @@ function Reports() {
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-center flex-1">
-            <div className="bg-gray-50 rounded-xl p-3 flex flex-col justify-center cursor-help" title="Number of unique students who submitted at least one check-in this week.">
-              <div className="text-[#6b7280] text-xs">Active Students (This Week)</div>
-              <div className="text-xl font-bold text-[#111827]">{engagement.active_students_this_week}</div>
-              <div className="text-xs text-[#6b7280]">Last Week: {engagement.active_students_last_week}</div>
-            </div>
-            <div className="bg-gray-50 rounded-xl p-3 flex flex-col justify-center cursor-help" title="Average number of emotional check-ins submitted per active student this week.">
-              <div className="text-[#6b7280] text-xs">Avg Check-ins / Student</div>
-              <div className="text-xl font-bold text-[#111827]">{engagement.avg_checkins_per_student}</div>
-            </div>
-            <div className="bg-gray-50 rounded-xl p-3 flex flex-col justify-center cursor-help" title="Percentage change in student participation compared to last week. Positive = more students engaging.">
-              <div className="text-[#6b7280] text-xs">Participation Change</div>
-              <div className={`text-xl font-bold ${String(engagement.participation_change).startsWith('-') ? 'text-red-600' : 'text-green-600'}`}>{engagement.participation_change}</div>
-            </div>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="bg-gray-50 rounded-xl p-3 flex flex-col justify-center cursor-help">
+                  <div className="text-[#6b7280] text-xs">Active Students (This Week)</div>
+                  <div className="text-xl font-bold text-[#111827]">{engagement.active_students_this_week}</div>
+                  <div className="text-xs text-[#6b7280]">Last Week: {engagement.active_students_last_week}</div>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
+                Number of unique students who submitted at least one check-in this week.
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="bg-gray-50 rounded-xl p-3 flex flex-col justify-center cursor-help">
+                  <div className="text-[#6b7280] text-xs">Avg Check-ins / Student</div>
+                  <div className="text-xl font-bold text-[#111827]">{engagement.avg_checkins_per_student}</div>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
+                Average number of emotional check-ins submitted per active student this week.
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="bg-gray-50 rounded-xl p-3 flex flex-col justify-center cursor-help">
+                  <div className="text-[#6b7280] text-xs">Participation Change</div>
+                  <div className={`text-xl font-bold ${String(engagement.participation_change).startsWith('-') ? 'text-red-600' : 'text-green-600'}`}>{engagement.participation_change}</div>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
+                Percentage change in student participation compared to last week. Positive means more students are engaging.
+              </TooltipContent>
+            </Tooltip>
           </div>
         )}
       </div>
@@ -1023,22 +1141,50 @@ function Reports() {
           </div>
           {chatKpi ? (
             <div className="mb-3 grid grid-cols-2 gap-2 text-xs">
-              <div className="bg-gray-50 rounded-xl p-3 text-center cursor-help" title="Overall success rate: weighted average of alert resolution (60%) and conversation completion (40%).">
-                <div className="text-[#6b7280]">Overall Success</div>
-                <div className="text-lg font-bold text-green-600">{chatKpi.overall_success_rate}%</div>
-              </div>
-              <div className="bg-gray-50 rounded-xl p-3 text-center cursor-help" title="Total chat conversations between students and counselors.">
-                <div className="text-[#6b7280]">Total Sessions</div>
-                <div className="text-lg font-bold text-[#111827]">{chatKpi.total_sessions}</div>
-              </div>
-              <div className="bg-gray-50 rounded-xl p-3 text-center cursor-help" title="Percentage of alerts that have been resolved by counselors.">
-                <div className="text-[#6b7280]">Alerts Resolved</div>
-                <div className="text-lg font-bold text-[#111827]">{(chatKpi as any).resolved_alerts || 0}/{(chatKpi as any).total_alerts || 0}</div>
-              </div>
-              <div className="bg-gray-50 rounded-xl p-3 text-center cursor-help" title="Average number of messages exchanged per conversation.">
-                <div className="text-[#6b7280]">Avg. Messages</div>
-                <div className="text-lg font-bold text-[#111827]">{chatKpi.average_messages_per_conversation}</div>
-              </div>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="bg-gray-50 rounded-xl p-3 text-center cursor-help">
+                    <div className="text-[#6b7280]">Overall Success</div>
+                    <div className="text-lg font-bold text-green-600">{chatKpi.overall_success_rate}%</div>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
+                  Overall success rate: weighted average of alert resolution (60%) and conversation completion (40%).
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="bg-gray-50 rounded-xl p-3 text-center cursor-help">
+                    <div className="text-[#6b7280]">Total Sessions</div>
+                    <div className="text-lg font-bold text-[#111827]">{chatKpi.total_sessions}</div>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
+                  Total chat conversations between students and counselors.
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="bg-gray-50 rounded-xl p-3 text-center cursor-help">
+                    <div className="text-[#6b7280]">Alerts Resolved</div>
+                    <div className="text-lg font-bold text-[#111827]">{(chatKpi as any).resolved_alerts || 0}/{(chatKpi as any).total_alerts || 0}</div>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
+                  Number of alerts that have been resolved by counselors out of total alerts.
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="bg-gray-50 rounded-xl p-3 text-center cursor-help">
+                    <div className="text-[#6b7280]">Avg. Messages</div>
+                    <div className="text-lg font-bold text-[#111827]">{chatKpi.average_messages_per_conversation}</div>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
+                  Average number of messages exchanged per conversation.
+                </TooltipContent>
+              </Tooltip>
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center py-4 text-center mb-3">

@@ -891,22 +891,31 @@ class CounselorReportService:
 
     @classmethod
     def recent_alerts(cls, db: Session, *, limit: int = 5) -> List[Dict[str, Any]]:
+        """Get recent open/in-progress alerts with high or medium severity.
+        
+        This is consistent with high-risk-flags and attention-students endpoints.
+        """
         stmt = (
             select(
                 Alert.alert_id,
+                Alert.user_id,
                 func.lower(Alert.severity).label("severity"),
                 func.lower(Alert.status).label("status"),
                 Alert.created_at,
                 User.name.label("student_name"),
             )
             .join(User, Alert.user_id == User.user_id)
-            .where(Alert.status.in_([AlertStatus.OPEN, AlertStatus.IN_PROGRESS, AlertStatus.RESOLVED]))
+            .where(
+                Alert.status.in_([AlertStatus.OPEN, AlertStatus.IN_PROGRESS]),
+                Alert.severity.in_([AlertSeverity.HIGH, AlertSeverity.MEDIUM])
+            )
             .order_by(Alert.created_at.desc())
             .limit(limit)
         )
         return [
             {
                 "id": row.alert_id,
+                "user_id": row.user_id,
                 "name": row.student_name,
                 # Use plain string values to avoid enum mapping issues with legacy data
                 "severity": row.severity,

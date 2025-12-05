@@ -47,7 +47,7 @@ CREATE TABLE counselor_profile (
 CREATE TABLE journal (
     journal_id INT PRIMARY KEY AUTO_INCREMENT,
     user_id INT,
-    title VARCHAR(255) NULL,
+    title VARCHAR(255) NOT NULL,
     content TEXT,
     deleted_at DATETIME NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
