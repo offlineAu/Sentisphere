@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
-import { Send, MessageSquare, User, Search } from "lucide-react";
+import { Send, MessageSquare, User, Search, X, Calendar, Mail, Activity, AlertTriangle } from "lucide-react";
 import { useSidebar } from "../components/SidebarContext";
 import Sidebar from "../components/Sidebar";
 import { LoadingSpinner } from "../components/loading-spinner";
@@ -82,6 +82,18 @@ export default function Chat() {
   const pusherRef = useRef<Pusher | null>(null);
   const pusherChannelRef = useRef<any>(null);
   const prevSubRef = useRef<number | null>(null);
+  
+  // Student details modal state
+  const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [studentDetails, setStudentDetails] = useState<{
+    nickname: string;
+    email?: string;
+    recentMood?: string;
+    totalCheckins?: number;
+    lastCheckin?: string;
+    hasAlerts?: boolean;
+  } | null>(null);
+  const [loadingDetails, setLoadingDetails] = useState(false);
 
   const normalizeMessage = (m: any): ChatMessage => ({
     ...m,
@@ -416,12 +428,74 @@ export default function Chat() {
       }
     });
     
+    // Listen for conversation status changes on this specific channel
+    channel.bind('status', (data: any) => {
+      console.log('[Chat] Conversation status changed (channel):', data);
+      if (data?.status) {
+        setConversations(prev => prev.map(c => 
+          c.conversation_id === activeConversation 
+            ? { ...c, status: data.status as 'open' | 'ended' } 
+            : c
+        ));
+      }
+    });
+    
     prevSubRef.current = activeConversation;
     
     return () => {
       channel.unbind_all();
     };
   }, [activeConversation, userId]);
+
+  // Fetch student details for the details modal
+  const fetchStudentDetails = async (studentUserId: number) => {
+    setLoadingDetails(true);
+    setShowDetailsModal(true);
+    try {
+      // Fetch user info
+      const userRes = await api.get<{ nickname: string; email?: string }>(`/users/${studentUserId}`);
+      
+      // Fetch recent check-ins for this student
+      let recentMood = "Unknown";
+      let totalCheckins = 0;
+      let lastCheckin = "";
+      let hasAlerts = false;
+      
+      try {
+        const checkinsRes = await api.get<any[]>(`/checkins`, { params: { user_id: studentUserId, limit: 5 } });
+        if (checkinsRes.data && checkinsRes.data.length > 0) {
+          totalCheckins = checkinsRes.data.length;
+          recentMood = checkinsRes.data[0]?.mood_level || "Unknown";
+          lastCheckin = checkinsRes.data[0]?.created_at || "";
+        }
+      } catch {
+        // Ignore if checkins endpoint fails
+      }
+      
+      try {
+        const alertsRes = await api.get<any[]>(`/alerts`, { params: { user_id: studentUserId, limit: 1 } });
+        hasAlerts = alertsRes.data && alertsRes.data.length > 0;
+      } catch {
+        // Ignore if alerts endpoint fails
+      }
+      
+      setStudentDetails({
+        nickname: userRes.data.nickname || `User #${studentUserId}`,
+        email: userRes.data.email,
+        recentMood,
+        totalCheckins,
+        lastCheckin,
+        hasAlerts,
+      });
+    } catch (err) {
+      console.error("Error fetching student details:", err);
+      setStudentDetails({
+        nickname: `User #${studentUserId}`,
+      });
+    } finally {
+      setLoadingDetails(false);
+    }
+  };
 
   // Show loading spinner while data is being fetched
   if (loading) {
@@ -598,10 +672,108 @@ export default function Chat() {
                         </div>
                       </div>
                       <div className="flex items-center gap-3">
-                        <button className="text-xs px-2.5 py-1 rounded-full border border-gray-300 text-gray-600 hover:bg-gray-100 active:bg-gray-200 dark:border-neutral-600 dark:text-neutral-300 dark:hover:bg-neutral-700">Details</button>
+                        <button 
+                          onClick={() => fetchStudentDetails(currentConversation.initiator_user_id)}
+                          className="text-xs px-2.5 py-1 rounded-full border border-gray-300 text-gray-600 hover:bg-gray-100 active:bg-gray-200 dark:border-neutral-600 dark:text-neutral-300 dark:hover:bg-neutral-700 transition-colors"
+                        >
+                          Details
+                        </button>
                         <User className="h-5 w-5 text-gray-500 dark:text-neutral-400" />
                       </div>
                     </div>
+
+                    {/* Student Details Modal */}
+                    {showDetailsModal && (
+                      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+                        <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-xl p-6 max-w-md w-full">
+                          <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-lg font-semibold text-primary dark:text-emerald-400">Student Details</h3>
+                            <button 
+                              onClick={() => {
+                                setShowDetailsModal(false);
+                                setStudentDetails(null);
+                              }}
+                              className="text-gray-500 hover:text-gray-700 dark:text-neutral-400 dark:hover:text-neutral-200"
+                            >
+                              <X className="h-5 w-5" />
+                            </button>
+                          </div>
+                          
+                          {loadingDetails ? (
+                            <div className="flex items-center justify-center py-8">
+                              <LoadingSpinner size="md" className="text-primary" />
+                            </div>
+                          ) : studentDetails ? (
+                            <div className="space-y-4">
+                              <div className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-neutral-700 rounded-xl">
+                                <div className="h-12 w-12 rounded-full bg-emerald-100 dark:bg-emerald-900 flex items-center justify-center">
+                                  <User className="h-6 w-6 text-emerald-600 dark:text-emerald-400" />
+                                </div>
+                                <div>
+                                  <div className="font-semibold text-gray-900 dark:text-white">{studentDetails.nickname}</div>
+                                  {studentDetails.email && (
+                                    <div className="text-sm text-gray-500 dark:text-neutral-400 flex items-center gap-1">
+                                      <Mail className="h-3 w-3" />
+                                      {studentDetails.email}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                              
+                              <div className="grid grid-cols-2 gap-3">
+                                <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-xl">
+                                  <div className="text-xs text-blue-600 dark:text-blue-400 mb-1 flex items-center gap-1">
+                                    <Activity className="h-3 w-3" />
+                                    Recent Mood
+                                  </div>
+                                  <div className="font-semibold text-gray-900 dark:text-white">{studentDetails.recentMood || "N/A"}</div>
+                                </div>
+                                <div className="p-3 bg-purple-50 dark:bg-purple-900/20 rounded-xl">
+                                  <div className="text-xs text-purple-600 dark:text-purple-400 mb-1 flex items-center gap-1">
+                                    <Calendar className="h-3 w-3" />
+                                    Check-ins
+                                  </div>
+                                  <div className="font-semibold text-gray-900 dark:text-white">{studentDetails.totalCheckins || 0}</div>
+                                </div>
+                              </div>
+                              
+                              {studentDetails.lastCheckin && (
+                                <div className="text-xs text-gray-500 dark:text-neutral-400">
+                                  Last check-in: {new Date(studentDetails.lastCheckin).toLocaleDateString('en-PH', { 
+                                    month: 'short', 
+                                    day: 'numeric', 
+                                    year: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                  })}
+                                </div>
+                              )}
+                              
+                              {studentDetails.hasAlerts && (
+                                <div className="flex items-center gap-2 p-3 bg-red-50 dark:bg-red-900/20 rounded-xl text-red-600 dark:text-red-400">
+                                  <AlertTriangle className="h-4 w-4" />
+                                  <span className="text-sm">This student has active alerts</span>
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="text-center text-gray-500 py-4">No details available</div>
+                          )}
+                          
+                          <div className="mt-6 flex justify-end">
+                            <button
+                              onClick={() => {
+                                setShowDetailsModal(false);
+                                setStudentDetails(null);
+                              }}
+                              className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-neutral-300 bg-gray-100 dark:bg-neutral-700 rounded-lg hover:bg-gray-200 dark:hover:bg-neutral-600 transition-colors"
+                            >
+                              Close
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
                     {/* Messages */}
                     <div ref={messagesScrollRef} className="flex-1 min-h-0 min-w-0 w-full max-w-full p-4 overflow-y-scroll space-y-3" style={{ scrollbarGutter: 'stable both-edges', scrollBehavior: 'smooth' }}>

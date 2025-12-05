@@ -77,12 +77,33 @@ export default function Sidebar() {
         pusherRef.current = pusher;
         
         const channel = pusher.subscribe('conversations');
+        
+        // Refetch unread count when new message arrives
         channel.bind('new_message', () => {
-          // Refetch unread count when new message arrives
+          console.log('[Sidebar] new_message event received');
           fetchUnreadCount();
         });
+        
+        // Refetch when conversation status changes (opened/ended)
         channel.bind('status_changed', () => {
+          console.log('[Sidebar] status_changed event received');
           fetchUnreadCount();
+        });
+        
+        // Refetch when a new conversation is created
+        channel.bind('new_conversation', () => {
+          console.log('[Sidebar] new_conversation event received');
+          fetchUnreadCount();
+        });
+        
+        // Refetch when messages are marked as read
+        channel.bind('messages_read', () => {
+          console.log('[Sidebar] messages_read event received');
+          fetchUnreadCount();
+        });
+        
+        pusher.connection.bind('connected', () => {
+          console.log('[Sidebar] Pusher connected');
         });
       } catch {
         // Ignore Pusher errors

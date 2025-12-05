@@ -150,6 +150,52 @@ class ConversationService:
         return len(messages)
 
     @staticmethod
+    def list_conversations_grouped_by_user(
+        db: Session,
+        *,
+        counselor_user_id: Optional[int] = None,
+        include_messages: bool = False,
+    ) -> List[Conversation]:
+        """
+        List conversations grouped by initiator user, showing only the most recent
+        conversation per user. This prevents duplicate entries when a user has
+        multiple conversations (opened, ended, deleted, reopened).
+        """
+        from sqlalchemy import func as sqlfunc
+        
+        # Subquery to get the latest conversation_id per user
+        subq = (
+            select(
+                Conversation.initiator_user_id,
+                sqlfunc.max(Conversation.conversation_id).label("max_conv_id")
+            )
+            .group_by(Conversation.initiator_user_id)
+            .subquery()
+        )
+        
+        # Main query joining with the subquery
+        stmt = (
+            select(Conversation)
+            .join(
+                subq,
+                (Conversation.initiator_user_id == subq.c.initiator_user_id) &
+                (Conversation.conversation_id == subq.c.max_conv_id)
+            )
+            .order_by(
+                Conversation.last_activity_at.desc(),
+                Conversation.created_at.desc(),
+            )
+        )
+        
+        if counselor_user_id is not None:
+            stmt = stmt.where(Conversation.counselor_id == counselor_user_id)
+        
+        if include_messages:
+            stmt = stmt.options(joinedload(Conversation.messages))
+        
+        return list(db.scalars(stmt))
+
+    @staticmethod
     def get_or_create_by_pair(
         db: Session,
         *,

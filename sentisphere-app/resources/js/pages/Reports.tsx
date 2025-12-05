@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { ChevronLeft, ChevronRight, TrendingUp, TrendingDown, AlertTriangle, UserRound, CalendarDays, Activity, Download, Filter, Lightbulb } from "lucide-react";
+import { ChevronLeft, ChevronRight, TrendingUp, TrendingDown, AlertTriangle, UserRound, CalendarDays, Activity, Download, Filter, Lightbulb, Bell, Send, X, MessageSquare } from "lucide-react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, Legend } from "recharts";
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
 import { motion, AnimatePresence } from "framer-motion";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { LoadingSpinner } from "../components/loading-spinner";
@@ -218,6 +219,13 @@ function Reports() {
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+
+  // Notification modal state
+  const [showNotifyModal, setShowNotifyModal] = useState(false);
+  const [notifyStudent, setNotifyStudent] = useState<AttentionStudent | null>(null);
+  const [notifyType, setNotifyType] = useState<'automated' | 'manual'>('automated');
+  const [manualMessage, setManualMessage] = useState('');
+  const [sendingNotification, setSendingNotification] = useState(false);
 
   const calendarDays = useMemo(() => {
     const monthStart = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1);
@@ -510,6 +518,7 @@ function Reports() {
   const changePct = calculateChangePct(latestIndex, prevIndex);
 
   return (
+    <TooltipProvider delayDuration={200}>
     <main
       className={`transition-all duration-200 min-h-screen pt-1 pr-6 pb-6 w-full p-4 sm:p-5 space-y-5 max-w-full`}
       style={{ minHeight: "100vh", backgroundColor: "transparent" }}
@@ -625,8 +634,14 @@ function Reports() {
         <div className="bg-white rounded-2xl shadow p-4 w-full max-w-full xl:col-span-2">
           <div className="flex justify-between items-center mb-2">
             <div className="flex items-center gap-2">
-              <h2 className={styles.sectionTitle}>Wellness Trends</h2>
-              <span className="text-[10px] text-blue-500 cursor-help" title="Weekly wellness metrics: Wellness Index (overall score 0-100), Mood (happiness level), Energy (activity level), and Stress (pressure level). Higher is better for all except Stress.">ⓘ</span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <h2 className={`${styles.sectionTitle} cursor-help`}>Wellness Trends</h2>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
+                  Weekly wellness metrics: Wellness Index (overall score 0-100), Mood (happiness level), Energy (activity level), and Stress (pressure level). Higher is better for all except Stress.
+                </TooltipContent>
+              </Tooltip>
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -664,25 +679,40 @@ function Reports() {
                   <XAxis dataKey="week_label" interval={0} stroke="var(--primary)" angle={0} height={64} tick={{ fill: "var(--foreground)", fontSize: 12 }} />
                   <YAxis domain={[0, 100]} tick={{ fill: "var(--foreground)", fontSize: 12 }} stroke="var(--primary)" />
                   <RTooltip 
-                    contentStyle={{
-                      backgroundColor: 'white',
-                      border: 'none',
-                      borderRadius: '12px',
-                      boxShadow: '0 10px 40px -5px rgba(0, 0, 0, 0.15)',
-                      padding: '12px 16px',
+                    content={({ active, payload, label }) => {
+                      if (active && payload && payload.length) {
+                        return (
+                          <div style={{
+                            background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
+                            color: '#fff',
+                            padding: '14px 18px',
+                            borderRadius: 12,
+                            fontSize: 13,
+                            boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+                            border: '1px solid rgba(255,255,255,0.1)',
+                            minWidth: 160
+                          }}>
+                            <div style={{ fontWeight: 600, marginBottom: 10, color: '#e2e8f0', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: 8 }}>
+                              Week of {label}
+                            </div>
+                            {payload.map((entry: any, index: number) => (
+                              <div key={index} style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
+                                <span style={{ 
+                                  width: 10, 
+                                  height: 10, 
+                                  borderRadius: '50%', 
+                                  background: entry.color,
+                                  display: 'inline-block'
+                                }}></span>
+                                <span style={{ color: '#cbd5e1', flex: 1 }}>{entry.name}:</span>
+                                <span style={{ fontWeight: 600 }}>{entry.value}%</span>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      }
+                      return null;
                     }}
-                    labelStyle={{ fontWeight: 600, marginBottom: '8px', color: '#111827' }}
-                    itemStyle={{ padding: '2px 0', fontSize: '13px' }}
-                    formatter={(value: number, name: string) => {
-                      const labels: Record<string, string> = {
-                        'Wellness Index': 'Overall wellness score',
-                        'Mood': 'Average mood level',
-                        'Energy': 'Average energy level',
-                        'Stress': 'Average stress level (lower is better)',
-                      };
-                      return [`${value}%`, <span title={labels[name] || name}>{name}</span>];
-                    }}
-                    labelFormatter={(label) => `Week of ${label}`}
                   />
                   <Legend verticalAlign="top" height={32} wrapperStyle={{ fontSize: "0.75rem" }} />
                   <Line type="monotone" dataKey="wellness" name="Wellness Index" stroke="var(--primary)" strokeWidth={3} dot={{ r: 5, strokeWidth: 2, fill: 'white' }} activeDot={{ r: 8, fill: 'var(--primary)', stroke: 'white', strokeWidth: 2 }} />
@@ -717,8 +747,14 @@ function Reports() {
           <div className="flex items-center justify-between mb-4">
             <div>
               <div className="flex items-center gap-2">
-                <h2 className={styles.sectionTitle}>Academic Calendar</h2>
-                <span className="text-[10px] text-blue-500 cursor-help" title="Upload .ics or .csv calendar files to track academic events. Events are correlated with wellness trends to identify stress patterns during exams or holidays.">ⓘ</span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <h2 className={`${styles.sectionTitle} cursor-help`}>Academic Calendar</h2>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
+                    Upload .ics or .csv calendar files to track academic events. Events are correlated with wellness trends to identify stress patterns during exams or holidays.
+                  </TooltipContent>
+                </Tooltip>
               </div>
               <p className="text-xs text-[#6b7280] mt-1">Track events that may impact student wellness.</p>
             </div>
@@ -783,10 +819,16 @@ function Reports() {
         <div className="bg-white rounded-2xl shadow p-4 relative">
           <div className="flex items-center justify-between mb-3">
             <div>
-              <h2 className={styles.sectionTitle}>Weekly Insights</h2>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <h2 className={`${styles.sectionTitle} cursor-help`}>Weekly Insights</h2>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
+                  NLP-generated wellness analysis from student check-ins and journals. Auto-generated every Monday based on the previous week's data.
+                </TooltipContent>
+              </Tooltip>
               <p className="text-xs text-[#6b7280] mt-1">
                 NLP-generated wellness analysis from student check-ins and journals.
-                <span className="ml-1 text-[10px] text-blue-500" title="Insights are auto-generated every Monday based on the previous week's data. Only weeks with sufficient data are shown.">ⓘ</span>
               </p>
             </div>
             {insights.length > 0 && (
@@ -896,8 +938,14 @@ function Reports() {
       {/* Engagement Metrics (full width under paired sections) */}
       <div className="bg-white rounded-2xl shadow p-4 min-h-[200px] flex flex-col">
         <div className="flex items-center gap-2 mb-3">
-          <h3 className="text-[#333] font-semibold text-sm">Engagement Metrics</h3>
-          <span className="text-[10px] text-blue-500 cursor-help" title="Tracks student participation and activity levels. Higher engagement often correlates with better wellness outcomes.">ⓘ</span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <h3 className="text-[#333] font-semibold text-sm cursor-help">Engagement Metrics</h3>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
+              Tracks student participation and activity levels. Higher engagement often correlates with better wellness outcomes.
+            </TooltipContent>
+          </Tooltip>
         </div>
         {!engagement ? (
           <div className="flex flex-col items-center justify-center py-6 text-center flex-1">
@@ -929,14 +977,22 @@ function Reports() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="bg-white rounded-2xl shadow p-4">
           <div className="flex items-center gap-2 mb-3">
-            <h3 className="text-[#333] font-semibold text-sm">Top Student Concerns</h3>
-            <span className="text-[10px] text-blue-500 cursor-help" title="AI-analyzed themes from student journals and check-in comments. Each concern shows unique student count (same student counted once per concern).">ⓘ</span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <h3 className="text-[#333] font-semibold text-sm cursor-help">Top Student Concerns</h3>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
+                AI-analyzed themes from student journals and check-in comments. Each concern shows unique student count (same student counted once per concern).
+              </TooltipContent>
+            </Tooltip>
           </div>
           <div className="space-y-2">
             {concerns.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-6 text-center">
-                <p className="text-sm text-gray-500">{globalRange === 'this_week' ? 'No concerns detected this week' : 'No data for this period'}</p>
-                <p className="text-xs text-gray-400 mt-1">Concerns are extracted from journal entries and check-in comments.</p>
+              <div className="flex flex-col items-center justify-center py-8 text-center">
+                <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-3">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                </div>
+                <p className="text-sm text-gray-500 font-medium">No top student concerns yet</p>
               </div>
             ) : (
               concerns.map((c, i) => (
@@ -956,8 +1012,14 @@ function Reports() {
 
         <div className="bg-white rounded-2xl shadow p-4">
           <div className="flex items-center gap-2 mb-3">
-            <h3 className="text-[#333] font-semibold text-sm">Intervention Success</h3>
-            <span className="text-[10px] text-blue-500 cursor-help" title="Measures counselor intervention effectiveness. Success rate combines alert resolution (60%) and conversation completion (40%).">ⓘ</span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <h3 className="text-[#333] font-semibold text-sm cursor-help">Intervention Success</h3>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
+                Measures counselor intervention effectiveness. Success rate combines alert resolution (60%) and conversation completion (40%).
+              </TooltipContent>
+            </Tooltip>
           </div>
           {chatKpi ? (
             <div className="mb-3 grid grid-cols-2 gap-2 text-xs">
@@ -1006,11 +1068,17 @@ function Reports() {
       {/* Students Requiring Attention Table */}
       <div className="bg-white rounded-2xl shadow p-4 overflow-x-auto">
         <div className="flex items-center gap-2 mb-3">
-          <h3 className={styles.tableTitle}>
-            <span className="mr-2">Students Requiring Attention</span>
-            <span className="bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-medium">{attentionStudents.length}</span>
-          </h3>
-          <span className="text-[10px] text-blue-500 cursor-help" title="Students with open high-severity alerts. Click the envelope icon to send a wellness check notification to their mobile app.">ⓘ</span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <h3 className={`${styles.tableTitle} cursor-help`}>
+                <span className="mr-2">Students Requiring Attention</span>
+                <span className="bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-medium">{attentionStudents.length}</span>
+              </h3>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
+              Students with open high-severity alerts. Click "Notify" to send a wellness check notification to their mobile app.
+            </TooltipContent>
+          </Tooltip>
         </div>
         {attentionStudents.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-8 text-center">
@@ -1045,25 +1113,19 @@ function Reports() {
                     ))}
                   </td>
                   <td className="flex gap-2">
-                    <span
-                      role="button"
-                      title="Send wellness check notification to student's mobile app"
-                      className="cursor-pointer text-lg hover:scale-110 transition-transform"
-                      onClick={async () => {
-                        try {
-                          const message = `Hi ${student.name}, we noticed a few signs that you might benefit from a quick chat. When you're ready, please consider speaking with a counselor — we're here to help.`;
-                          await api.post(`/notify-student`, {
-                            user_id: student.userId,
-                            message,
-                          });
-                          window.alert("Notification sent to the student's mobile app.");
-                        } catch (e) {
-                          window.alert("Failed to send notification. Please try again.");
-                        }
+                    <button
+                      title="Send wellness check notification"
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors shadow-sm"
+                      onClick={() => {
+                        setNotifyStudent(student);
+                        setNotifyType('automated');
+                        setManualMessage('');
+                        setShowNotifyModal(true);
                       }}
                     >
-                      ✉️
-                    </span>
+                      <Bell className="h-3.5 w-3.5" />
+                      Notify
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -1071,7 +1133,153 @@ function Reports() {
           </table>
         )}
       </div>
+
+      {/* Notification Modal */}
+      {showNotifyModal && notifyStudent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-md relative">
+            <button
+              onClick={() => {
+                setShowNotifyModal(false);
+                setNotifyStudent(null);
+              }}
+              className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600 hover:text-gray-800 transition-colors"
+            >
+              <X className="h-4 w-4" />
+            </button>
+            
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                <Bell className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Send Notification</h3>
+                <p className="text-sm text-gray-500">to {notifyStudent.name}</p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              {/* Notification Type Selection */}
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={() => setNotifyType('automated')}
+                  className={`p-3 rounded-xl border-2 transition-all ${
+                    notifyType === 'automated'
+                      ? 'border-primary bg-primary/5'
+                      : 'border-gray-200 hover:border-gray-300'
+                  }`}
+                >
+                  <div className="flex flex-col items-center gap-2">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                      notifyType === 'automated' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-500'
+                    }`}>
+                      <Send className="h-4 w-4" />
+                    </div>
+                    <span className={`text-sm font-medium ${notifyType === 'automated' ? 'text-primary' : 'text-gray-600'}`}>
+                      Automated
+                    </span>
+                    <span className="text-xs text-gray-400 text-center">Pre-written wellness message</span>
+                  </div>
+                </button>
+                <button
+                  onClick={() => setNotifyType('manual')}
+                  className={`p-3 rounded-xl border-2 transition-all ${
+                    notifyType === 'manual'
+                      ? 'border-primary bg-primary/5'
+                      : 'border-gray-200 hover:border-gray-300'
+                  }`}
+                >
+                  <div className="flex flex-col items-center gap-2">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                      notifyType === 'manual' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-500'
+                    }`}>
+                      <MessageSquare className="h-4 w-4" />
+                    </div>
+                    <span className={`text-sm font-medium ${notifyType === 'manual' ? 'text-primary' : 'text-gray-600'}`}>
+                      Manual
+                    </span>
+                    <span className="text-xs text-gray-400 text-center">Write custom message</span>
+                  </div>
+                </button>
+              </div>
+
+              {/* Message Preview/Input */}
+              {notifyType === 'automated' ? (
+                <div className="p-4 bg-gray-50 rounded-xl">
+                  <p className="text-xs text-gray-500 mb-2">Message Preview:</p>
+                  <p className="text-sm text-gray-700">
+                    Hi {notifyStudent.name}, we noticed a few signs that you might benefit from a quick chat. When you're ready, please consider speaking with a counselor — we're here to help.
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <label className="text-xs text-gray-500 mb-2 block">Custom Message:</label>
+                  <textarea
+                    value={manualMessage}
+                    onChange={(e) => setManualMessage(e.target.value)}
+                    placeholder="Write your message here..."
+                    className="w-full p-3 border border-gray-200 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                    rows={4}
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-3 mt-6 pt-4 border-t">
+              <button
+                onClick={() => {
+                  setShowNotifyModal(false);
+                  setNotifyStudent(null);
+                }}
+                className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={sendingNotification || (notifyType === 'manual' && !manualMessage.trim())}
+                onClick={async () => {
+                  if (!notifyStudent) return;
+                  setSendingNotification(true);
+                  try {
+                    const message = notifyType === 'automated'
+                      ? `Hi ${notifyStudent.name}, we noticed a few signs that you might benefit from a quick chat. When you're ready, please consider speaking with a counselor — we're here to help.`
+                      : manualMessage.trim();
+                    
+                    await api.post(`/notify-student`, {
+                      user_id: notifyStudent.userId,
+                      message,
+                      type: notifyType,
+                    });
+                    
+                    setShowNotifyModal(false);
+                    setNotifyStudent(null);
+                    window.alert("Notification sent successfully!");
+                  } catch (e) {
+                    window.alert("Failed to send notification. Please try again.");
+                  } finally {
+                    setSendingNotification(false);
+                  }
+                }}
+                className="px-5 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {sendingNotification ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                    Sending...
+                  </>
+                ) : (
+                  <>
+                    <Send className="h-4 w-4" />
+                    Send Notification
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
+    </TooltipProvider>
   );
 }
 
