@@ -120,22 +120,6 @@ type WeeklyInsight = {
   metadata?: InsightMetadata;
 };
 
-type BehaviorInsight = {
-  title: string;
-  description: string;
-  metrics?: Array<{ label: string; value: number | string }>;
-  recommendation?: string;
-  risk_flags?: {
-    negative_sentiment_ratio_percent: number;
-    high_stress_days: number;
-    high_stress_streak?: number;
-    negative_mood_streak?: number;
-    feel_better_no_streak?: number;
-    late_night_journals: number;
-  };
-  metadata?: InsightMetadata;
-};
-
 type CalendarEvent = { name: string; start: string; end: string; type?: string };
 
 type TrendsResponseNew = {
@@ -229,10 +213,8 @@ function Reports() {
 
   // Carousels refs
   const weeklySliderRef = useRef<any>(null);
-  const behaviorSliderRef = useRef<any>(null);
 
-  // Behavior insights and events
-  const [behaviorInsights, setBehaviorInsights] = useState<BehaviorInsight[]>([]);
+  // Calendar events
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -333,24 +315,20 @@ function Reports() {
   useEffect(() => {
     const fetchReports = async () => {
       try {
-        const [summaryRes, trendsRes, weeklyInsightsRes, behaviorRes, eventsRes, engagementRes] = await Promise.all([
+        const [summaryRes, trendsRes, weeklyInsightsRes, eventsRes, engagementRes] = await Promise.all([
           // Time-independent
           api.get<ReportSummary>(`/reports/summary`),
           // Time-independent: overall trends do not change with global date filter
           api.get<any>(`/reports/trends`),
           api.get<WeeklyInsight[]>(`/reports/weekly-insights`, { params: filterParams }),
-          api.get<BehaviorInsight[]>(`/reports/behavior-insights`, { params: filterParams }),
           // Events listing is independent of filter
           api.get<Array<{ name: string; start: string; end: string; type?: string }>>(`/events`),
           api.get<EngagementMetrics>(`/reports/engagement`, { params: filterParams }),
         ]);
         setSummary(summaryRes.data || null);
-        // Prefer dedicated weekly-insights endpoint if available
-        if (Array.isArray(weeklyInsightsRes.data) && weeklyInsightsRes.data.length) {
-          setInsights(weeklyInsightsRes.data);
-        } else {
-          setInsights(summaryRes.data?.insights || []);
-        }
+        // Only use weekly-insights from ai_insights table (auto-generated)
+        // No fallback to summary.insights to avoid showing static/fake data
+        setInsights(Array.isArray(weeklyInsightsRes.data) ? weeklyInsightsRes.data : []);
 
         // Normalize trends data to TrendPoint[] if server returns the new arrays shape
         if (trendsRes.data && Array.isArray(trendsRes.data.dates)) {
@@ -368,7 +346,6 @@ function Reports() {
           setTrendWeeks(trendsRes.data?.weeks || []);
         }
 
-        setBehaviorInsights(Array.isArray(behaviorRes.data) ? behaviorRes.data : []);
         setEvents(Array.isArray(eventsRes.data) ? eventsRes.data : []);
         setEngagement(engagementRes.data || null);
 
@@ -591,11 +568,11 @@ function Reports() {
           const isRisk = stat.label === "At-Risk Students";
           const isActive = stat.label === "Active Users";
           const isWellness = stat.label === "Avg. Wellness Score";
-          const baseCard = "rounded-2xl shadow p-4";
+          const baseCard = "rounded-2xl shadow p-4 cursor-help";
           const gradientGreen = "bg-gradient-to-br from-primary/85 to-primary text-white";
           const gradientRed = "bg-gradient-to-br from-[#f87171] to-[#dc2626] text-white";
-          const gradientBlue = "bg-gradient-to-br from-[#38bdf8] to-[#0ea5e9] text-white"; // Active Users
-          const gradientYellow = "bg-gradient-to-br from-[#facc15] to-[#eab308] text-white"; // Avg. Wellness Score
+          const gradientBlue = "bg-gradient-to-br from-[#38bdf8] to-[#0ea5e9] text-white";
+          const gradientYellow = "bg-gradient-to-br from-[#facc15] to-[#eab308] text-white";
           const whiteCard = "bg-white hover:shadow-md transition";
           const cardClass = `${baseCard} ${
             isTotal
@@ -613,8 +590,16 @@ function Reports() {
           const valueClass = isGradient ? "text-3xl font-extrabold mt-1" : "text-xl font-bold text-gray-900";
           const deltaClass = isGradient ? "text-xs opacity-90 mt-1 flex items-center gap-1" : `text-xs ${stat.deltaColor}`;
 
+          // Tooltips for each stat
+          const tooltips: Record<string, string> = {
+            "Total Students": "Total number of registered students in the system.",
+            "Active Users": "Students who submitted at least one check-in this week. Excludes counselors.",
+            "At-Risk Students": "Students with open high-severity alerts requiring attention.",
+            "Avg. Wellness Score": "Average wellness index (0-100) based on mood, energy, and stress levels this week.",
+          };
+
           return (
-            <div key={i} className={cardClass}>
+            <div key={i} className={cardClass} title={tooltips[stat.label] || stat.label}>
               <div className="flex items-center justify-between">
                 <h3 className={titleClass}>{stat.label}</h3>
                 {stat.delta && (isTotal || isRisk) ? (
@@ -627,6 +612,7 @@ function Reports() {
               {stat.delta && (
                 <div className={deltaClass}>
                   {(isTotal || isRisk) && <ChevronRight className="h-3 w-3" />} {stat.delta}
+                  <span className="ml-1 opacity-70 text-[10px]">vs last week</span>
                 </div>
               )}
             </div>
@@ -638,12 +624,16 @@ function Reports() {
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
         <div className="bg-white rounded-2xl shadow p-4 w-full max-w-full xl:col-span-2">
           <div className="flex justify-between items-center mb-2">
-            <h2 className={styles.sectionTitle}>Trends</h2>
+            <div className="flex items-center gap-2">
+              <h2 className={styles.sectionTitle}>Wellness Trends</h2>
+              <span className="text-[10px] text-blue-500 cursor-help" title="Weekly wellness metrics: Wellness Index (overall score 0-100), Mood (happiness level), Energy (activity level), and Stress (pressure level). Higher is better for all except Stress.">ⓘ</span>
+            </div>
             <div className="flex items-center gap-2">
               <button
                 className={`p-2 rounded-full border ${page === 0 ? "opacity-40 cursor-not-allowed" : "hover:bg-gray-100"}`}
                 onClick={() => setPage(p => Math.max(p - 1, 0))}
                 disabled={page === 0}
+                title="View earlier weeks"
               >
                 <ChevronLeft className="h-5 w-5 text-primary" />
               </button>
@@ -651,6 +641,7 @@ function Reports() {
                 className={`p-2 rounded-full border ${page === maxPage ? "opacity-40 cursor-not-allowed" : "hover:bg-gray-100"}`}
                 onClick={() => setPage(p => Math.min(p + 1, maxPage))}
                 disabled={page === maxPage}
+                title="View later weeks"
               >
                 <ChevronRight className="h-5 w-5 text-primary" />
               </button>
@@ -669,15 +660,35 @@ function Reports() {
                       <stop offset="100%" stopColor="#86efac" stopOpacity={0.25} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                   <XAxis dataKey="week_label" interval={0} stroke="var(--primary)" angle={0} height={64} tick={{ fill: "var(--foreground)", fontSize: 12 }} />
                   <YAxis domain={[0, 100]} tick={{ fill: "var(--foreground)", fontSize: 12 }} stroke="var(--primary)" />
-                  <RTooltip formatter={(value: number) => `${value}%`} labelFormatter={(label) => `Week ${label}`} />
+                  <RTooltip 
+                    contentStyle={{
+                      backgroundColor: 'white',
+                      border: 'none',
+                      borderRadius: '12px',
+                      boxShadow: '0 10px 40px -5px rgba(0, 0, 0, 0.15)',
+                      padding: '12px 16px',
+                    }}
+                    labelStyle={{ fontWeight: 600, marginBottom: '8px', color: '#111827' }}
+                    itemStyle={{ padding: '2px 0', fontSize: '13px' }}
+                    formatter={(value: number, name: string) => {
+                      const labels: Record<string, string> = {
+                        'Wellness Index': 'Overall wellness score',
+                        'Mood': 'Average mood level',
+                        'Energy': 'Average energy level',
+                        'Stress': 'Average stress level (lower is better)',
+                      };
+                      return [`${value}%`, <span title={labels[name] || name}>{name}</span>];
+                    }}
+                    labelFormatter={(label) => `Week of ${label}`}
+                  />
                   <Legend verticalAlign="top" height={32} wrapperStyle={{ fontSize: "0.75rem" }} />
-                  <Line type="monotone" dataKey="wellness" name="Wellness Index" stroke="var(--primary)" strokeWidth={3} dot={{ r: 5, strokeWidth: 2 }} activeDot={{ r: 7 }} />
-                  <Line type="monotone" dataKey="mood" name="Mood" stroke="#22c55e" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
-                  <Line type="monotone" dataKey="energy" name="Energy" stroke="#3b82f6" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
-                  <Line type="monotone" dataKey="stress" name="Stress" stroke="#ef4444" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                  <Line type="monotone" dataKey="wellness" name="Wellness Index" stroke="var(--primary)" strokeWidth={3} dot={{ r: 5, strokeWidth: 2, fill: 'white' }} activeDot={{ r: 8, fill: 'var(--primary)', stroke: 'white', strokeWidth: 2 }} />
+                  <Line type="monotone" dataKey="mood" name="Mood" stroke="#22c55e" strokeWidth={2} dot={{ r: 4, fill: 'white' }} activeDot={{ r: 7, fill: '#22c55e', stroke: 'white', strokeWidth: 2 }} />
+                  <Line type="monotone" dataKey="energy" name="Energy" stroke="#3b82f6" strokeWidth={2} dot={{ r: 4, fill: 'white' }} activeDot={{ r: 7, fill: '#3b82f6', stroke: 'white', strokeWidth: 2 }} />
+                  <Line type="monotone" dataKey="stress" name="Stress" stroke="#ef4444" strokeWidth={2} dot={{ r: 4, fill: 'white' }} activeDot={{ r: 7, fill: '#ef4444', stroke: 'white', strokeWidth: 2 }} />
                 </LineChart>
               </ResponsiveContainer>
             )}
@@ -688,12 +699,12 @@ function Reports() {
             {(() => {
               const chText = `${changePct >= 0 ? "+" : ""}${changePct}%`;
               const items = [
-                { label: "Current Index", value: `${Math.round(latestIndex)}%` },
-                { label: "Change vs Last Week", value: chText, className: changePct >= 0 ? "text-green-600" : "text-red-600" },
-                { label: "Active Event", value: summary?.event_name ? `${summary.event_name}` : "None" },
+                { label: "Current Index", value: `${Math.round(latestIndex)}%`, tooltip: "This week's overall wellness score (0-100%). Combines mood, energy, and stress metrics." },
+                { label: "Change vs Last Week", value: chText, className: changePct >= 0 ? "text-green-600" : "text-red-600", tooltip: "Percentage change in wellness index compared to the previous week." },
+                { label: "Active Event", value: summary?.event_name ? `${summary.event_name}` : "None", tooltip: "Current academic event that may affect student wellness (exams, holidays, etc.)." },
               ];
               return items.map((s, i) => (
-                <div key={i} className="flex-1 bg-gray-50 rounded-xl p-3 text-center">
+                <div key={i} className="flex-1 bg-gray-50 rounded-xl p-3 text-center cursor-help" title={s.tooltip}>
                   <div className="text-[#6b7280] text-xs font-medium">{s.label}</div>
                   <div className={`text-lg font-bold ${s.className || "text-[#333]"}`}>{s.value}</div>
                 </div>
@@ -705,8 +716,11 @@ function Reports() {
         <div className="bg-white rounded-2xl shadow-sm border p-4 xl:col-span-1 flex flex-col">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h2 className={styles.sectionTitle}>Academic Calendar</h2>
-              <p className="text-xs text-[#6b7280] mt-1">Uploaded events, exams, and holidays appear directly on the calendar.</p>
+              <div className="flex items-center gap-2">
+                <h2 className={styles.sectionTitle}>Academic Calendar</h2>
+                <span className="text-[10px] text-blue-500 cursor-help" title="Upload .ics or .csv calendar files to track academic events. Events are correlated with wellness trends to identify stress patterns during exams or holidays.">ⓘ</span>
+              </div>
+              <p className="text-xs text-[#6b7280] mt-1">Track events that may impact student wellness.</p>
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -764,25 +778,38 @@ function Reports() {
         </div>
       </div>
 
-      {/* Weekly Insights + Behavioral & Pattern Insights (side by side) */}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+      {/* Weekly Insights (full width) */}
+      <div className="grid grid-cols-1 gap-4">
         <div className="bg-white rounded-2xl shadow p-4 relative">
           <div className="flex items-center justify-between mb-3">
             <div>
               <h2 className={styles.sectionTitle}>Weekly Insights</h2>
-              <p className="text-xs text-[#6b7280] mt-1">Data-informed highlights across wellness and engagement.</p>
+              <p className="text-xs text-[#6b7280] mt-1">
+                NLP-generated wellness analysis from student check-ins and journals.
+                <span className="ml-1 text-[10px] text-blue-500" title="Insights are auto-generated every Monday based on the previous week's data. Only weeks with sufficient data are shown.">ⓘ</span>
+              </p>
             </div>
-            <div className="flex items-center gap-2">
-              <button className="p-1 rounded-full border hover:bg-gray-100" onClick={() => weeklySliderRef.current?.slickPrev()} aria-label="Previous insight">
-                <ChevronLeft className="h-4 w-4" />
-              </button>
-              <button className="p-1 rounded-full border hover:bg-gray-100" onClick={() => weeklySliderRef.current?.slickNext()} aria-label="Next insight">
-                <ChevronRight className="h-4 w-4" />
-              </button>
-            </div>
+            {insights.length > 0 && (
+              <div className="flex items-center gap-2">
+                <button className="p-1 rounded-full border hover:bg-gray-100" onClick={() => weeklySliderRef.current?.slickPrev()} aria-label="Previous insight">
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                <button className="p-1 rounded-full border hover:bg-gray-100" onClick={() => weeklySliderRef.current?.slickNext()} aria-label="Next insight">
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+            )}
           </div>
           {insights.length === 0 ? (
-            <div className="text-sm text-gray-500">No insights available.</div>
+            <div className="flex flex-col items-center justify-center py-8 text-center">
+              <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-3">
+                <Lightbulb className="h-6 w-6 text-gray-400" />
+              </div>
+              <p className="text-sm text-gray-500 font-medium">No weekly insights yet</p>
+              <p className="text-xs text-gray-400 mt-1 max-w-[280px]">
+                Insights are automatically generated every Monday when there's enough student data from the previous week.
+              </p>
+            </div>
           ) : (
             <div className="relative pb-10">
               <Slider ref={weeklySliderRef} {...insightSliderSettings} className="weekly-insights-slider">
@@ -864,118 +891,34 @@ function Reports() {
             </div>
           )}
         </div>
-
-        <div className="bg-white rounded-2xl shadow-sm border p-4 min-h-[260px] flex flex-col">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className={styles.sectionTitle}>Behavioral & Pattern Insights</h2>
-            <div className="flex items-center gap-2">
-              <button className="p-1 rounded-full border hover:bg-gray-100" onClick={() => behaviorSliderRef.current?.slickPrev()} aria-label="Previous behavior insight">
-                <ChevronLeft className="h-4 w-4" />
-              </button>
-              <button className="p-1 rounded-full border hover:bg-gray-100" onClick={() => behaviorSliderRef.current?.slickNext()} aria-label="Next behavior insight">
-                <ChevronRight className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-          {behaviorInsights.length === 0 ? (
-            <div className="text-sm text-gray-500 flex-1 flex items-center justify-center">No behavioral insights available.</div>
-          ) : (
-            <div className="relative pb-10 flex-1">
-              <Slider
-                ref={behaviorSliderRef}
-                dots
-                arrows={false}
-                infinite={behaviorInsights.length > 1}
-                autoplay={behaviorInsights.length > 1}
-                autoplaySpeed={7000}
-                adaptiveHeight={false}
-                appendDots={(dots: React.ReactNode) => (
-                  <div className="absolute bottom-3 left-0 right-0"><ul className="flex justify-center gap-2">{dots}</ul></div>
-                )}
-                customPaging={() => <span className="block h-2 w-2 rounded-full bg-gray-300" />}
-              >
-                {behaviorInsights.map((bi, idx) => (
-                  <div key={idx} className="px-1">
-                    <div className="rounded-2xl shadow-sm border bg-gray-50 p-4 text-sm space-y-3">
-                      {/* Header with risk badge */}
-                      <div className="flex items-start justify-between">
-                        <h3 className="text-base font-semibold text-[#111827]">{bi.title}</h3>
-                        {bi.metadata?.risk_level && (
-                          <RiskBadge level={bi.metadata.risk_level} size="sm" />
-                        )}
-                      </div>
-                      <p className="text-[#374151] leading-relaxed">{bi.description}</p>
-                      
-                      {/* Metrics grid */}
-                      {Array.isArray(bi.metrics) && bi.metrics.length > 0 && (
-                        <div className="grid grid-cols-2 gap-2">
-                          {bi.metrics.map((m, i) => (
-                            <div key={i} className="bg-white rounded-lg border p-2 text-center">
-                              <div className="text-[11px] text-[#6b7280]">{m.label}</div>
-                              <div className={`text-lg font-bold ${
-                                String(m.value).startsWith('+') ? 'text-green-600' : 
-                                String(m.value).startsWith('-') ? 'text-red-600' : 'text-[#111827]'
-                              }`}>{m.value}</div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      
-                      {/* Risk flags summary */}
-                      {bi.risk_flags && ((bi.risk_flags.high_stress_streak ?? 0) >= 3 || (bi.risk_flags.negative_mood_streak ?? 0) >= 3 || bi.risk_flags.late_night_journals >= 3) && (
-                        <div className="bg-amber-50 border border-amber-200 rounded-lg p-2 mt-2">
-                          <div className="flex items-center gap-1 text-amber-700 text-xs font-medium">
-                            <AlertTriangle className="h-3 w-3" /> Risk Indicators
-                          </div>
-                          <div className="text-xs text-amber-600 mt-1 space-y-0.5">
-                            {(bi.risk_flags.high_stress_streak ?? 0) >= 3 && (
-                              <div>• {bi.risk_flags.high_stress_streak}+ day high stress streak</div>
-                            )}
-                            {(bi.risk_flags.negative_mood_streak ?? 0) >= 3 && (
-                              <div>• {bi.risk_flags.negative_mood_streak}+ day negative mood streak</div>
-                            )}
-                            {bi.risk_flags.late_night_journals >= 3 && (
-                              <div>• {bi.risk_flags.late_night_journals} late night journals</div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Recommendation */}
-                      {bi.recommendation && (
-                        <div className="bg-white rounded-lg p-2 border border-dashed border-primary/40 mt-2">
-                          <div className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-primary font-semibold">
-                            <Lightbulb className="h-3 w-3" /> Action
-                          </div>
-                          <p className="text-xs text-[#0f172a] leading-relaxed mt-1">{bi.recommendation}</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </Slider>
-            </div>
-          )}
-        </div>
       </div>
 
       {/* Engagement Metrics (full width under paired sections) */}
-      <div className="bg-white rounded-2xl shadow p-4 min-h-[260px] flex flex-col">
-        <h3 className="text-[#333] font-semibold mb-3 text-sm">Engagement Metrics</h3>
+      <div className="bg-white rounded-2xl shadow p-4 min-h-[200px] flex flex-col">
+        <div className="flex items-center gap-2 mb-3">
+          <h3 className="text-[#333] font-semibold text-sm">Engagement Metrics</h3>
+          <span className="text-[10px] text-blue-500 cursor-help" title="Tracks student participation and activity levels. Higher engagement often correlates with better wellness outcomes.">ⓘ</span>
+        </div>
         {!engagement ? (
-          <div className="text-sm text-gray-500 flex-1 flex items-center justify-center">No engagement data available.</div>
+          <div className="flex flex-col items-center justify-center py-6 text-center flex-1">
+            <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center mb-2">
+              <Activity className="h-5 w-5 text-gray-400" />
+            </div>
+            <p className="text-sm text-gray-500">No engagement data yet</p>
+            <p className="text-xs text-gray-400 mt-1">Data will appear once students start using the app.</p>
+          </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-center flex-1">
-            <div className="bg-gray-50 rounded-xl p-3 flex flex-col justify-center">
+            <div className="bg-gray-50 rounded-xl p-3 flex flex-col justify-center cursor-help" title="Number of unique students who submitted at least one check-in this week.">
               <div className="text-[#6b7280] text-xs">Active Students (This Week)</div>
               <div className="text-xl font-bold text-[#111827]">{engagement.active_students_this_week}</div>
               <div className="text-xs text-[#6b7280]">Last Week: {engagement.active_students_last_week}</div>
             </div>
-            <div className="bg-gray-50 rounded-xl p-3 flex flex-col justify-center">
+            <div className="bg-gray-50 rounded-xl p-3 flex flex-col justify-center cursor-help" title="Average number of emotional check-ins submitted per active student this week.">
               <div className="text-[#6b7280] text-xs">Avg Check-ins / Student</div>
               <div className="text-xl font-bold text-[#111827]">{engagement.avg_checkins_per_student}</div>
             </div>
-            <div className="bg-gray-50 rounded-xl p-3 flex flex-col justify-center">
+            <div className="bg-gray-50 rounded-xl p-3 flex flex-col justify-center cursor-help" title="Percentage change in student participation compared to last week. Positive = more students engaging.">
               <div className="text-[#6b7280] text-xs">Participation Change</div>
               <div className={`text-xl font-bold ${String(engagement.participation_change).startsWith('-') ? 'text-red-600' : 'text-green-600'}`}>{engagement.participation_change}</div>
             </div>
@@ -985,20 +928,25 @@ function Reports() {
       {/* Concerns & Interventions */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="bg-white rounded-2xl shadow p-4">
-          <h3 className="text-[#333] font-semibold mb-2 text-sm">Top Student Concerns</h3>
+          <div className="flex items-center gap-2 mb-3">
+            <h3 className="text-[#333] font-semibold text-sm">Top Student Concerns</h3>
+            <span className="text-[10px] text-blue-500 cursor-help" title="AI-analyzed themes from student journals and check-in comments. Each concern shows unique student count (same student counted once per concern).">ⓘ</span>
+          </div>
           <div className="space-y-2">
             {concerns.length === 0 ? (
-              <div className="text-sm text-gray-500">{globalRange === 'this_week' ? 'No student concerns this week.' : 'No data for this period.'}</div>
+              <div className="flex flex-col items-center justify-center py-6 text-center">
+                <p className="text-sm text-gray-500">{globalRange === 'this_week' ? 'No concerns detected this week' : 'No data for this period'}</p>
+                <p className="text-xs text-gray-400 mt-1">Concerns are extracted from journal entries and check-in comments.</p>
+              </div>
             ) : (
               concerns.map((c, i) => (
-                <div key={i}>
+                <div key={i} className="cursor-help" title={`${c.students} unique students expressed concerns related to "${c.label}"`}>
                   <div className="flex justify-between text-xs flex-wrap gap-1">
-                    <span>{c.label}</span>
-                    <span>{c.students} students</span>
-                    <span>{c.percent}%</span>
+                    <span className="font-medium">{c.label}</span>
+                    <span className="text-gray-500">{c.students} students ({c.percent}%)</span>
                   </div>
-                  <div className="h-2 bg-[#e5e5e5] rounded">
-                    <div className="h-2 rounded" style={{ width: `${c.percent}%`, background: c.barColor }}></div>
+                  <div className="h-2 bg-[#e5e5e5] rounded mt-1">
+                    <div className="h-2 rounded transition-all" style={{ width: `${c.percent}%`, background: c.barColor }}></div>
                   </div>
                 </div>
               ))
@@ -1007,72 +955,85 @@ function Reports() {
         </div>
 
         <div className="bg-white rounded-2xl shadow p-4">
-          <h3 className="text-[#333] font-semibold mb-2 text-sm">Intervention Success Rates</h3>
+          <div className="flex items-center gap-2 mb-3">
+            <h3 className="text-[#333] font-semibold text-sm">Intervention Success</h3>
+            <span className="text-[10px] text-blue-500 cursor-help" title="Measures counselor intervention effectiveness. Success rate combines alert resolution (60%) and conversation completion (40%).">ⓘ</span>
+          </div>
           {chatKpi ? (
             <div className="mb-3 grid grid-cols-2 gap-2 text-xs">
-              <div className="bg-gray-50 rounded-xl p-3 text-center">
-                <div className="text-[#6b7280]">Chat Success</div>
-                <div className="text-lg font-bold text-[#111827]">{chatKpi.overall_success_rate}%</div>
+              <div className="bg-gray-50 rounded-xl p-3 text-center cursor-help" title="Overall success rate: weighted average of alert resolution (60%) and conversation completion (40%).">
+                <div className="text-[#6b7280]">Overall Success</div>
+                <div className="text-lg font-bold text-green-600">{chatKpi.overall_success_rate}%</div>
               </div>
-              <div className="bg-gray-50 rounded-xl p-3 text-center">
-                <div className="text-[#6b7280]">Avg. Duration</div>
-                <div className="text-lg font-bold text-[#111827]">{chatKpi.average_conversation_duration_minutes}m</div>
-              </div>
-              <div className="bg-gray-50 rounded-xl p-3 text-center">
-                <div className="text-[#6b7280]">Sessions</div>
+              <div className="bg-gray-50 rounded-xl p-3 text-center cursor-help" title="Total chat conversations between students and counselors.">
+                <div className="text-[#6b7280]">Total Sessions</div>
                 <div className="text-lg font-bold text-[#111827]">{chatKpi.total_sessions}</div>
               </div>
-              <div className="bg-gray-50 rounded-xl p-3 text-center">
+              <div className="bg-gray-50 rounded-xl p-3 text-center cursor-help" title="Percentage of alerts that have been resolved by counselors.">
+                <div className="text-[#6b7280]">Alerts Resolved</div>
+                <div className="text-lg font-bold text-[#111827]">{(chatKpi as any).resolved_alerts || 0}/{(chatKpi as any).total_alerts || 0}</div>
+              </div>
+              <div className="bg-gray-50 rounded-xl p-3 text-center cursor-help" title="Average number of messages exchanged per conversation.">
                 <div className="text-[#6b7280]">Avg. Messages</div>
                 <div className="text-lg font-bold text-[#111827]">{chatKpi.average_messages_per_conversation}</div>
               </div>
             </div>
           ) : (
-            <div className="mb-3 text-sm text-gray-500">No chat sessions ended during this period.</div>
+            <div className="flex flex-col items-center justify-center py-4 text-center mb-3">
+              <p className="text-sm text-gray-500">No intervention data yet</p>
+              <p className="text-xs text-gray-400 mt-1">Metrics will appear after counselor-student interactions.</p>
+            </div>
           )}
-          <div className="space-y-2">
-            {interventions.length === 0 ? (
-              <div className="text-sm text-gray-500">No interventions recorded for this period.</div>
-            ) : (
-              interventions.map((i, idx) => (
+          {interventions.length > 0 && (
+            <div className="space-y-2 border-t pt-3">
+              <div className="text-xs text-gray-500 font-medium mb-2">By Intervention Type</div>
+              {interventions.map((i, idx) => (
                 <div key={idx}>
                   <div className="flex justify-between text-xs flex-wrap gap-1">
-                    <span>{i.label}</span>
-                    <span>{i.participants} participants</span>
-                    <span>{i.percent}%</span>
+                    <span className="font-medium">{i.label}</span>
+                    <span className="text-gray-500">{i.participants} ({i.percent}%)</span>
                   </div>
-                  <div className="h-2 bg-[#e5e5e5] rounded">
-                    <div className="h-2 rounded" style={{ width: `${i.percent}%`, background: i.barColor }}></div>
+                  <div className="h-2 bg-[#e5e5e5] rounded mt-1">
+                    <div className="h-2 rounded transition-all" style={{ width: `${i.percent}%`, background: i.barColor }}></div>
                   </div>
                 </div>
-              ))
-            )}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
       {/* Students Requiring Attention Table */}
       <div className="bg-white rounded-2xl shadow p-4 overflow-x-auto">
-        <h3 className={styles.tableTitle}>
-          <span className="mr-2">Students Requiring Attention</span>
-          <span className="bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-medium">!</span>
-        </h3>
+        <div className="flex items-center gap-2 mb-3">
+          <h3 className={styles.tableTitle}>
+            <span className="mr-2">Students Requiring Attention</span>
+            <span className="bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-medium">{attentionStudents.length}</span>
+          </h3>
+          <span className="text-[10px] text-blue-500 cursor-help" title="Students with open high-severity alerts. Click the envelope icon to send a wellness check notification to their mobile app.">ⓘ</span>
+        </div>
         {attentionStudents.length === 0 ? (
-          <div className="text-sm text-gray-500">No students require attention for this period.</div>
+          <div className="flex flex-col items-center justify-center py-8 text-center">
+            <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center mb-3">
+              <UserRound className="h-6 w-6 text-green-600" />
+            </div>
+            <p className="text-sm text-gray-600 font-medium">All students are doing well!</p>
+            <p className="text-xs text-gray-400 mt-1">No high-risk alerts requiring immediate attention.</p>
+          </div>
         ) : (
           <table className="w-full text-xs min-w-[600px]">
             <thead>
               <tr className="text-[#6b7280] border-b">
-                <th className="py-2 text-left">Student</th>
-                <th className="py-2 text-left">Risk Level</th>
-                <th className="py-2 text-left">Score</th>
-                <th className="py-2 text-left">Primary Concerns</th>
-                <th className="py-2 text-left">Actions</th>
+                <th className="py-2 text-left" title="Student's display name">Student</th>
+                <th className="py-2 text-left" title="Current risk assessment level">Risk Level</th>
+                <th className="py-2 text-left" title="Calculated risk score (0-100)">Score</th>
+                <th className="py-2 text-left" title="Main issues identified from check-ins and journals">Primary Concerns</th>
+                <th className="py-2 text-left" title="Available actions for this student">Actions</th>
               </tr>
             </thead>
             <tbody>
               {attentionStudents.map((student, i) => (
-                <tr key={i} className="border-b">
+                <tr key={i} className="border-b hover:bg-gray-50 transition-colors">
                   <td className="py-2 font-medium text-[#333]">{student.name}</td>
                   <td>
                     <span className={`px-2 py-1 rounded text-xs font-medium ${student.riskClass}`}>{student.risk}</span>
@@ -1086,8 +1047,8 @@ function Reports() {
                   <td className="flex gap-2">
                     <span
                       role="button"
-                      title="Notify student"
-                      className="cursor-pointer text-lg"
+                      title="Send wellness check notification to student's mobile app"
+                      className="cursor-pointer text-lg hover:scale-110 transition-transform"
                       onClick={async () => {
                         try {
                           const message = `Hi ${student.name}, we noticed a few signs that you might benefit from a quick chat. When you're ready, please consider speaking with a counselor — we're here to help.`;

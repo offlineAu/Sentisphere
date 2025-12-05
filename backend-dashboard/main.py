@@ -1,3 +1,7 @@
+# Load .env file FIRST before any other imports that use os.getenv
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI, Query, HTTPException, Depends, status, UploadFile, Header, WebSocket, WebSocketDisconnect, Request, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -1627,17 +1631,26 @@ def mobile_mark_read(
 ):
     uid = _extract_user_id(token)
     owner = mdb.execute(
-        text("SELECT initiator_user_id FROM conversations WHERE conversation_id = :cid"),
+        text("SELECT initiator_user_id, counselor_id FROM conversations WHERE conversation_id = :cid"),
         {"cid": conversation_id},
     ).mappings().first()
     if not owner or int(owner["initiator_user_id"]) != int(uid):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
     res = mdb.execute(
-        text("UPDATE messages SET is_read = 1 WHERE conversation_id = :cid AND sender_id <> :uid"),
+        text("UPDATE messages SET is_read = 1 WHERE conversation_id = :cid AND sender_id <> :uid AND is_read = 0"),
         {"cid": conversation_id, "uid": uid},
     )
     mdb.commit()
-    return {"updated": res.rowcount or 0}
+    updated_count = res.rowcount or 0
+    
+    # Broadcast read status via Pusher so counselor sees read receipts
+    if updated_count > 0:
+        try:
+            pusher_service.broadcast_messages_read(conversation_id, uid, updated_count)
+        except Exception:
+            pass
+    
+    return {"updated": updated_count}
 
 
 @app.patch("/api/mobile/conversations/{conversation_id}")
@@ -1814,6 +1827,30 @@ async def broadcast_new_message(conversation_id: int, message: dict):
 
 
 # --- Counselor Conversation Endpoints (for web dashboard, uses mobile DB) ---
+
+@app.get("/api/counselor/conversations/unread-count")
+def counselor_unread_count(
+    current_user: User = Depends(require_counselor),
+    mdb: Session = Depends(get_mobile_db),
+):
+    """Get total unread message count across all conversations for sidebar badge."""
+    counselor_id = current_user.user_id
+    result = mdb.execute(
+        text(
+            """
+            SELECT COUNT(*) as total_unread
+            FROM messages m
+            JOIN conversations c ON m.conversation_id = c.conversation_id
+            WHERE c.counselor_id = :counselor_id
+              AND m.sender_id != :counselor_id
+              AND m.is_read = 0
+            """
+        ),
+        {"counselor_id": counselor_id},
+    ).mappings().first()
+    total = result["total_unread"] if result else 0
+    return {"total_unread": total}
+
 
 @app.get("/api/counselor/conversations")
 def counselor_list_conversations(
@@ -2006,17 +2043,26 @@ def counselor_mark_read(
     """Mark all messages from student as read for a counselor."""
     counselor_id = current_user.user_id
     owner = mdb.execute(
-        text("SELECT counselor_id FROM conversations WHERE conversation_id = :cid"),
+        text("SELECT counselor_id, initiator_user_id FROM conversations WHERE conversation_id = :cid"),
         {"cid": conversation_id},
     ).mappings().first()
     if not owner or owner["counselor_id"] != counselor_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found or not assigned to you")
     res = mdb.execute(
-        text("UPDATE messages SET is_read = 1 WHERE conversation_id = :cid AND sender_id <> :counselor_id"),
+        text("UPDATE messages SET is_read = 1 WHERE conversation_id = :cid AND sender_id <> :counselor_id AND is_read = 0"),
         {"cid": conversation_id, "counselor_id": counselor_id},
     )
     mdb.commit()
-    return {"updated": res.rowcount or 0}
+    updated_count = res.rowcount or 0
+    
+    # Broadcast read status via Pusher so student sees read receipts
+    if updated_count > 0:
+        try:
+            pusher_service.broadcast_messages_read(conversation_id, counselor_id, updated_count)
+        except Exception:
+            pass
+    
+    return {"updated": updated_count}
 
 
 @app.patch("/api/counselor/conversations/{conversation_id}")
@@ -2326,7 +2372,7 @@ def checkin_breakdown(
     }
 
 
-@app.get("/api/ai/sentiment-summary")
+@app.get("/api/ai/sentiment-summary", tags=["Wellness Analytics"])
 def ai_sentiment_summary(
     period: str = Query("month", enum=["week", "month", "year"]),
     range: Optional[str] = Query(None),
@@ -2335,10 +2381,11 @@ def ai_sentiment_summary(
     _user: User = Depends(require_counselor),
     db: Session = Depends(get_db),
 ):
-    """Return a short natural-language summary of recent sentiment patterns.
+    """Generate a natural-language summary of sentiment patterns.
 
-    This is intentionally lightweight and uses existing aggregate data instead
-    of any heavy external AI dependencies.
+    Uses rule-based analysis of check-in and journal sentiment data.
+    No external AI/LLM dependencies - all processing is done locally
+    using aggregated statistics and predefined templates.
     """
     if range or start or end:
         start_dt, end_dt = parse_global_range(range or "this_week", start, end)
@@ -2365,7 +2412,7 @@ def ai_sentiment_summary(
     return {"summary": summary}
 
 
-@app.get("/api/ai/mood-summary")
+@app.get("/api/ai/mood-summary", tags=["Wellness Analytics"])
 def ai_mood_summary(
     period: str = Query("month", enum=["week", "month", "year"]),
     range: Optional[str] = Query(None),
@@ -2374,7 +2421,12 @@ def ai_mood_summary(
     _user: User = Depends(require_counselor),
     db: Session = Depends(get_db),
 ):
-    """Return a short wellness-focused summary for the counselor dashboard."""
+    """Generate a wellness-focused summary for the counselor dashboard.
+    
+    Computes wellness index from mood, energy, and stress data using
+    weighted averages. Summary text is generated using rule-based templates,
+    not external AI/LLM services.
+    """
     if range or start or end:
         start_dt, end_dt = parse_global_range(range or "this_week", start, end)
         current = int(CounselorReportService._wellness_index(db, start_dt, end_dt))
@@ -4531,7 +4583,7 @@ def reports_summary(current_user: str = Depends(get_current_user)):
         event_name=current_record["insight"].event_name,
         event_type=current_record["insight"].event_type,
         insight=current_record["insight"].description,
-        insights=insights,
+        insights=[],  # Insights now come from /reports/weekly-insights (ai_insights table only)
     )
 
 def _collect_weekly_trends(weeks: int = 12) -> List[Dict[str, Any]]:
@@ -4651,13 +4703,22 @@ def _collect_week_windows(start_dt: datetime, end_dt: datetime) -> list[tuple[da
 
 
 def _get_or_compute_weekly_insight(db: Session, tf_start: date, tf_end: date) -> Dict[str, Any]:
+    """Get or compute weekly insight, updating current week if more data is available."""
+    from datetime import timedelta
+    
+    # Check if this is the current ISO week
+    today = date.today()
+    current_week_start = today - timedelta(days=today.weekday())
+    current_week_end = current_week_start + timedelta(days=6)
+    is_current_week = (tf_start == current_week_start and tf_end == current_week_end)
+    
     # Try reading from ai_insights first
     row = None
     with engine.connect() as conn:
         row = conn.execute(
             text(
                 """
-                SELECT data FROM ai_insights
+                SELECT data, generated_at FROM ai_insights
                 WHERE user_id IS NULL AND type = 'weekly'
                   AND timeframe_start = :ts AND timeframe_end = :te
                 LIMIT 1
@@ -4665,10 +4726,31 @@ def _get_or_compute_weekly_insight(db: Session, tf_start: date, tf_end: date) ->
             ),
             {"ts": tf_start, "te": tf_end},
         ).mappings().first()
+    
     if row and row.get("data"):
         try:
             stored = row["data"] if isinstance(row["data"], dict) else json.loads(row["data"])
-            return stored
+            
+            # For current week, check if we should update with new data
+            if is_current_week:
+                stored_count = (
+                    stored.get("metadata", {}).get("checkin_count", 0) +
+                    stored.get("metadata", {}).get("journal_count", 0)
+                )
+                current_checkins = _count_checkins_in_range(tf_start, tf_end)
+                current_journals = _count_journals_in_range(tf_start, tf_end)
+                current_count = current_checkins + current_journals
+                
+                # Update if we have at least 2 more entries
+                if current_count > stored_count + 1:
+                    logging.info(
+                        f"[WeeklyInsight] Updating current week insight "
+                        f"(was {stored_count} entries, now {current_count})"
+                    )
+                else:
+                    return stored  # Use cached version
+            else:
+                return stored  # Past weeks don't need updates
         except Exception:
             pass
 
@@ -4689,8 +4771,30 @@ def _get_or_compute_weekly_insight(db: Session, tf_start: date, tf_end: date) ->
 
 def _reports_weekly_insights(db: Session, range: str | None, start: Optional[str], end: Optional[str]) -> List[Dict[str, Any]]:
     start_dt, end_dt = parse_global_range(range or "this_week", start, end)
+    
+    # Limit to maximum 3 weeks of insights
+    MAX_WEEKS = 3
+    week_windows = _collect_week_windows(start_dt, end_dt)
+    # Take only the most recent 3 weeks
+    week_windows = week_windows[-MAX_WEEKS:] if len(week_windows) > MAX_WEEKS else week_windows
+    
     insights: List[Dict[str, Any]] = []
-    for ws, we in _collect_week_windows(start_dt, end_dt):
+    for ws, we in week_windows:
+        # Check if there's enough data for this week before computing
+        checkin_count = _count_checkins_in_range(ws, we)
+        if checkin_count < 3:  # Minimum 3 check-ins needed for meaningful insight
+            insights.append({
+                "week_start": ws.isoformat(),
+                "week_end": we.isoformat(),
+                "event_name": None,
+                "event_type": None,
+                "title": "Insufficient Data",
+                "description": f"Only {checkin_count} check-in(s) recorded this week. Need at least 3 for insights.",
+                "recommendation": "Encourage students to complete daily emotional check-ins for better insights.",
+                "has_data": False,
+            })
+            continue
+            
         data = _get_or_compute_weekly_insight(db, ws, we)
         insights.append(
             {
@@ -4704,15 +4808,62 @@ def _reports_weekly_insights(db: Session, range: str | None, start: Optional[str
                     data.get("recommendation")
                     or (data.get("recommendations", [""]) or [""])[0]
                 ),
+                "has_data": True,
             }
         )
     return insights
+
+
+def _count_checkins_in_range(start_date: date, end_date: date) -> int:
+    """Count check-ins within a date range."""
+    with engine.connect() as conn:
+        result = conn.execute(
+            text("""
+                SELECT COUNT(*) as cnt FROM emotional_checkin
+                WHERE DATE(created_at) BETWEEN :start AND :end
+            """),
+            {"start": start_date, "end": end_date}
+        ).mappings().first()
+        return int(result["cnt"]) if result else 0
+
+
+def _count_journals_in_range(start_date: date, end_date: date) -> int:
+    """Count journals within a date range."""
+    with engine.connect() as conn:
+        result = conn.execute(
+            text("""
+                SELECT COUNT(*) as cnt FROM journal
+                WHERE DATE(created_at) BETWEEN :start AND :end
+                  AND deleted_at IS NULL
+            """),
+            {"start": start_date, "end": end_date}
+        ).mappings().first()
+        return int(result["cnt"]) if result else 0
 
 
 def _reports_behavior_insights(db: Session, range: str | None, start: Optional[str], end: Optional[str]) -> List[Dict[str, Any]]:
     this_start, this_end = parse_global_range(range or "this_week", start, end)
     tf_start = this_start.date()
     tf_end = this_end.date()
+    
+    # Check if there's enough data for behavioral insights
+    MIN_CHECKINS_FOR_BEHAVIORAL = 5  # Need at least 5 check-ins for behavioral patterns
+    MIN_JOURNALS_FOR_BEHAVIORAL = 2  # Need at least 2 journals
+    
+    checkin_count = _count_checkins_in_range(tf_start, tf_end)
+    journal_count = _count_journals_in_range(tf_start, tf_end)
+    
+    if checkin_count < MIN_CHECKINS_FOR_BEHAVIORAL and journal_count < MIN_JOURNALS_FOR_BEHAVIORAL:
+        return [{
+            "title": "Insufficient Data for Behavioral Analysis",
+            "description": f"Found {checkin_count} check-in(s) and {journal_count} journal(s). "
+                          f"Need at least {MIN_CHECKINS_FOR_BEHAVIORAL} check-ins or {MIN_JOURNALS_FOR_BEHAVIORAL} journals for behavioral insights.",
+            "metrics": [
+                {"label": "Check-ins", "value": checkin_count},
+                {"label": "Journals", "value": journal_count},
+            ],
+            "has_data": False,
+        }]
 
     # Try read from ai_insights
     row = None

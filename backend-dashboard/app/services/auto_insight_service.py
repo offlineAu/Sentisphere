@@ -64,8 +64,23 @@ class AutoInsightService:
                     )
                 )
                 
+                # For current week, update if more data is available
                 if existing:
-                    continue  # Already generated
+                    # Check if we have more data now than when insight was generated
+                    current_data_count = cls._get_data_count(db, student.user_id, week_start_dt, week_end_dt)
+                    stored_count = (
+                        (existing.data or {}).get('metadata', {}).get('checkin_count', 0) +
+                        (existing.data or {}).get('metadata', {}).get('journal_count', 0)
+                    )
+                    
+                    # Only update if we have significantly more data (at least 2 more entries)
+                    if current_data_count <= stored_count + 1:
+                        continue  # No significant new data
+                    
+                    logging.info(
+                        f"[AutoInsight] Updating insight for user {student.user_id} "
+                        f"(was {stored_count} entries, now {current_data_count})"
+                    )
                 
                 # Check data availability
                 if cls._has_sufficient_data(db, student.user_id, week_start_dt, week_end_dt):
@@ -75,29 +90,73 @@ class AutoInsightService:
                     )
                     
                     if insight_data:
-                        # Create AI insight record
-                        new_insight = AIInsight(
-                            user_id=student.user_id,
-                            type='weekly',
-                            timeframe_start=week_start,
-                            timeframe_end=week_end,
-                            data=insight_data['data'],
-                            risk_level=insight_data['risk_level'],
-                            generated_by='auto_insight_service'
-                        )
-                        db.add(new_insight)
-                        db.commit()
-                        generated_count += 1
-                        logging.info(
-                            f"[AutoInsight] Generated weekly insight for user {student.user_id} "
-                            f"({week_start} to {week_end})"
-                        )
+                        if existing:
+                            # Update existing insight
+                            existing.data = insight_data['data']
+                            existing.risk_level = insight_data['risk_level']
+                            existing.generated_at = datetime.utcnow()
+                            db.commit()
+                            generated_count += 1
+                            logging.info(
+                                f"[AutoInsight] Updated weekly insight for user {student.user_id} "
+                                f"({week_start} to {week_end})"
+                            )
+                        else:
+                            # Create new AI insight record
+                            new_insight = AIInsight(
+                                user_id=student.user_id,
+                                type='weekly',
+                                timeframe_start=week_start,
+                                timeframe_end=week_end,
+                                data=insight_data['data'],
+                                risk_level=insight_data['risk_level'],
+                                generated_by='auto_insight_service'
+                            )
+                            db.add(new_insight)
+                            db.commit()
+                            generated_count += 1
+                            logging.info(
+                                f"[AutoInsight] Generated weekly insight for user {student.user_id} "
+                                f"({week_start} to {week_end})"
+                            )
             except Exception as e:
                 logging.error(f"[AutoInsight] Error generating insight for user {student.user_id}: {e}")
                 db.rollback()
                 continue
         
         return generated_count
+    
+    @classmethod
+    def _get_data_count(
+        cls,
+        db: Session,
+        user_id: int,
+        start_dt: datetime,
+        end_dt: datetime
+    ) -> int:
+        """Get total count of check-ins + journals for a user in a time range."""
+        checkin_count = db.scalar(
+            select(func.count(EmotionalCheckin.checkin_id)).where(
+                and_(
+                    EmotionalCheckin.user_id == user_id,
+                    EmotionalCheckin.created_at >= start_dt,
+                    EmotionalCheckin.created_at <= end_dt
+                )
+            )
+        ) or 0
+        
+        journal_count = db.scalar(
+            select(func.count(Journal.journal_id)).where(
+                and_(
+                    Journal.user_id == user_id,
+                    Journal.created_at >= start_dt,
+                    Journal.created_at <= end_dt,
+                    Journal.deleted_at.is_(None)
+                )
+            )
+        ) or 0
+        
+        return checkin_count + journal_count
     
     @classmethod
     def _has_sufficient_data(

@@ -49,3 +49,9 @@ Thumbs.db
 # Ignore Python compiled files
 *.pyc
 __pycache__/
+
+# Large ML model files - hosted on Hugging Face Hub
+backend-dashboard/models/
+*.safetensors
+*.pt
+*.pth

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useSidebar } from "./SidebarContext";
 import { router, usePage } from '@inertiajs/react';
 import { logoutFastApi, sessionStatus } from '../lib/auth';
@@ -6,6 +6,8 @@ import { Home as HomeOutline, MessageDots as MessageDotsOutline, FileLines as Fi
 import { Home as HomeSolid, MessageDots as MessageDotsSolid, FileLines as FileLinesSolid, User as UserSolid } from "flowbite-react-icons/solid";
 import { motion, AnimatePresence } from "framer-motion";
 import styles from "./Sidebar.module.css";
+import api from '../lib/api';
+import Pusher from 'pusher-js';
 
 const mainNavLinks: Array<{
   href: string;
@@ -24,6 +26,8 @@ export default function Sidebar() {
   const currentPath = window.location.pathname;
   const [isAuthed, setIsAuthed] = useState<boolean>(false);
   const [checked, setChecked] = useState<boolean>(false);
+  const [unreadCount, setUnreadCount] = useState<number>(0);
+  const pusherRef = useRef<Pusher | null>(null);
   const page: any = usePage();
   const hideSidebar = Boolean(page?.props?.hideSidebar);
 
@@ -43,6 +47,56 @@ export default function Sidebar() {
     });
     return () => { mounted = false; };
   }, []);
+  
+  // Fetch unread count for chat badge
+  useEffect(() => {
+    if (!isAuthed) return;
+    
+    const fetchUnreadCount = async () => {
+      try {
+        const res = await api.get<{ total_unread: number }>('/counselor/conversations/unread-count');
+        setUnreadCount(res.data.total_unread || 0);
+      } catch {
+        // Ignore errors
+      }
+    };
+    
+    // Initial fetch
+    fetchUnreadCount();
+    
+    // Poll every 30 seconds
+    const interval = setInterval(fetchUnreadCount, 30000);
+    
+    // Also set up Pusher for real-time updates
+    const pusherKey = (import.meta as any).env?.VITE_PUSHER_APP_KEY;
+    const pusherCluster = (import.meta as any).env?.VITE_PUSHER_APP_CLUSTER || 'ap1';
+    
+    if (pusherKey) {
+      try {
+        const pusher = new Pusher(pusherKey, { cluster: pusherCluster });
+        pusherRef.current = pusher;
+        
+        const channel = pusher.subscribe('conversations');
+        channel.bind('new_message', () => {
+          // Refetch unread count when new message arrives
+          fetchUnreadCount();
+        });
+        channel.bind('status_changed', () => {
+          fetchUnreadCount();
+        });
+      } catch {
+        // Ignore Pusher errors
+      }
+    }
+    
+    return () => {
+      clearInterval(interval);
+      if (pusherRef.current) {
+        pusherRef.current.disconnect();
+        pusherRef.current = null;
+      }
+    };
+  }, [isAuthed]);
 
   // Only render after we checked the session; and only if authenticated
   if (!checked || !isAuthed) return null;
@@ -99,18 +153,19 @@ export default function Sidebar() {
       <nav className={styles.nav} aria-label="Main navigation">
         {mainNavLinks.map((link) => {
           const isActive = currentPath === link.href;
+          const showBadge = link.href === '/chat' && unreadCount > 0;
 
           return (
             <motion.a
               key={link.href}
               href={link.href}
-              className={`${styles.navLink} ${isActive ? styles.active : ""}`}
+              className={`${styles.navLink} ${isActive ? styles.active : ""} relative`}
               whileHover={{ scale: 1.03 }}
               transition={{ duration: 0.15 }}
               tabIndex={open ? 0 : -1}
               aria-current={isActive ? 'page' : undefined}
             >
-              <div className={`${styles.iconWrap} ${isActive ? styles.iconActive : ""}`}>
+              <div className={`${styles.iconWrap} ${isActive ? styles.iconActive : ""} relative`}>
                 {(() => {
                   const Icon = isActive ? link.iconSolid : link.iconOutline;
                   return (
@@ -119,6 +174,12 @@ export default function Sidebar() {
                     />
                   );
                 })()}
+                {/* Unread badge for collapsed sidebar */}
+                {showBadge && !open && (
+                  <span className="absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[10px] font-bold text-white bg-red-500 rounded-full">
+                    {unreadCount > 99 ? '99+' : unreadCount}
+                  </span>
+                )}
               </div>
               <AnimatePresence>
                 {open && (
@@ -127,8 +188,15 @@ export default function Sidebar() {
                     animate={{ opacity: 1, x: 0 }}
                     exit={{ opacity: 0, x: -10 }}
                     transition={{ duration: 0.2 }}
+                    className="flex items-center gap-2"
                   >
                     {link.label}
+                    {/* Unread badge for expanded sidebar */}
+                    {showBadge && (
+                      <span className="flex items-center justify-center min-w-[20px] h-[20px] px-1.5 text-[11px] font-bold text-white bg-red-500 rounded-full">
+                        {unreadCount > 99 ? '99+' : unreadCount}
+                      </span>
+                    )}
                   </motion.span>
                 )}
               </AnimatePresence>

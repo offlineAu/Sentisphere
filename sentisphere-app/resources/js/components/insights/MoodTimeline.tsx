@@ -95,29 +95,35 @@ export function MoodTimeline({
       {/* Trend Badge */}
       {showTrendBadge && (
         <div className="flex items-center justify-between">
-          <span className="text-sm font-medium text-gray-600">Mood Trend</span>
+          <span className="text-sm font-medium text-gray-600 flex items-center gap-1">
+            Mood Trend
+            <span className="text-[10px] text-blue-500 cursor-help" title="Daily mood scores (0-100) based on student check-ins. The trend shows if mood is improving, declining, or stable compared to the previous week.">ⓘ</span>
+          </span>
           <div className="flex items-center gap-2">
             <span
               className={`
-                inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold
+                inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold cursor-help
                 ${config.bg} ${config.color}
               `}
+              title={`Mood is ${config.label.toLowerCase()} compared to the previous week`}
             >
               <TrendIcon className="h-3 w-3" />
               {config.label}
             </span>
             {change_percent !== null && change_percent !== undefined && (
               <span
-                className={`text-sm font-semibold ${
+                className={`text-sm font-semibold cursor-help ${
                   change_percent > 0
                     ? 'text-green-600'
                     : change_percent < 0
                     ? 'text-red-600'
                     : 'text-gray-600'
                 }`}
+                title={`${change_percent > 0 ? 'Improved' : change_percent < 0 ? 'Declined' : 'No change'} by ${Math.abs(change_percent).toFixed(1)}% from previous week`}
               >
                 {change_percent > 0 ? '+' : ''}
-                {change_percent.toFixed(1)}%
+                {/* Cap display at ±100% for sanity */}
+                {Math.max(-100, Math.min(100, change_percent)).toFixed(1)}%
               </span>
             )}
           </div>
@@ -158,12 +164,18 @@ export function MoodTimeline({
             <Tooltip
               contentStyle={{
                 backgroundColor: 'white',
-                border: '1px solid #e5e7eb',
-                borderRadius: '8px',
-                boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
+                border: 'none',
+                borderRadius: '12px',
+                boxShadow: '0 10px 40px -5px rgba(0, 0, 0, 0.15)',
+                padding: '10px 14px',
               }}
-              formatter={(value: number) => [`${value}/100`, 'Mood Score']}
-              labelFormatter={(label) => `Day: ${label}`}
+              labelStyle={{ fontWeight: 600, marginBottom: '4px', color: '#111827', fontSize: '12px' }}
+              formatter={(value: number) => [
+                <span className="font-semibold text-indigo-600">{value}/100</span>,
+                <span className="text-gray-600">Mood Score</span>
+              ]}
+              labelFormatter={(label) => `${label}`}
+              cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }}
             />
             <Area
               type="monotone"
@@ -181,12 +193,12 @@ export function MoodTimeline({
       {/* Week Average */}
       {showAverage && week_avg !== undefined && (
         <div className="flex items-center justify-between text-xs text-gray-500">
-          <span>
-            Week Average: <strong className="text-gray-700">{week_avg.toFixed(0)}</strong>
+          <span className="cursor-help" title="Average mood score for this week (0-100). Higher is better.">
+            Week Average: <strong className="text-gray-700">{week_avg.toFixed(0)}/100</strong>
           </span>
           {moodTrends.prev_week_avg !== null && moodTrends.prev_week_avg !== undefined && (
-            <span>
-              Previous: <strong className="text-gray-700">{moodTrends.prev_week_avg.toFixed(0)}</strong>
+            <span className="cursor-help" title="Average mood score from the previous week for comparison.">
+              Previous: <strong className="text-gray-700">{moodTrends.prev_week_avg.toFixed(0)}/100</strong>
             </span>
           )}
         </div>

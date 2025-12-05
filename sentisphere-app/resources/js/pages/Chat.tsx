@@ -399,6 +399,23 @@ export default function Chat() {
       }
     });
     
+    // Listen for read receipts
+    channel.bind('messages_read', (data: any) => {
+      console.log('[Chat] Messages read:', data);
+      if (data?.reader_id && data?.reader_id !== userId) {
+        // Update messages to show as read
+        setMessages(prev => prev.map(m => 
+          m.sender_id === userId ? { ...m, is_read: true } : m
+        ));
+        setMessagesByConversation(prev => ({
+          ...prev,
+          [activeConversation]: (prev[activeConversation] || []).map(m =>
+            m.sender_id === userId ? { ...m, is_read: true } : m
+          )
+        }));
+      }
+    });
+    
     prevSubRef.current = activeConversation;
     
     return () => {
@@ -588,21 +605,38 @@ export default function Chat() {
 
                     {/* Messages */}
                     <div ref={messagesScrollRef} className="flex-1 min-h-0 min-w-0 w-full max-w-full p-4 overflow-y-scroll space-y-3" style={{ scrollbarGutter: 'stable both-edges', scrollBehavior: 'smooth' }}>
-                      {messages.map((m) => (
-                        <div
-                          key={String(m.message_id ?? m.id ?? `c:${m.client_msg_id ?? Math.random()}`)}
-                          className={`w-fit max-w-[600px] sm:max-w-[68%] px-4 py-2 rounded-2xl shadow-sm whitespace-pre-wrap break-words leading-relaxed overflow-hidden ${
-                            m.sender_id === userId
-                              ? "bg-[#2563eb] text-white ml-auto rounded-br-md"
-                              : "bg-gray-100 text-[#333] mr-auto rounded-bl-md"
-                          }`}
-                        >
-                          <p className="whitespace-pre-wrap break-words" style={{ wordBreak: 'break-word' }}>{m.content}</p>
-                          <small className="block text-xs opacity-75 mt-1">
-                            {formatTimePHT(m.timestamp)}
-                          </small>
-                        </div>
-                      ))}
+                      {messages.map((m, idx) => {
+                        const isOwn = m.sender_id === userId;
+                        const isRead = Boolean(m.is_read);
+                        // Show read receipt only on last own message that's read
+                        const isLastOwnMessage = isOwn && messages.slice(idx + 1).every(msg => msg.sender_id !== userId);
+                        
+                        return (
+                          <div
+                            key={String(m.message_id ?? m.id ?? `c:${m.client_msg_id ?? Math.random()}`)}
+                            className={`w-fit max-w-[600px] sm:max-w-[68%] ${isOwn ? "ml-auto" : "mr-auto"}`}
+                          >
+                            <div
+                              className={`px-4 py-2 rounded-2xl shadow-sm whitespace-pre-wrap break-words leading-relaxed overflow-hidden ${
+                                isOwn
+                                  ? "bg-[#2563eb] text-white rounded-br-md"
+                                  : "bg-gray-100 text-[#333] rounded-bl-md"
+                              }`}
+                            >
+                              <p className="whitespace-pre-wrap break-words" style={{ wordBreak: 'break-word' }}>{m.content}</p>
+                              <small className="block text-xs opacity-75 mt-1">
+                                {formatTimePHT(m.timestamp)}
+                              </small>
+                            </div>
+                            {/* Read receipt indicator for own messages */}
+                            {isOwn && isLastOwnMessage && (
+                              <div className="text-right text-[10px] text-gray-400 mt-0.5 pr-1">
+                                {isRead ? "✓✓ Read" : "✓ Sent"}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
 
                     {/* Input */}

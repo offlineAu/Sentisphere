@@ -306,18 +306,7 @@ class CounselorReportService:
             "event_name": current["event_name"],
             "event_type": current["event_type"],
             "insight": current["description"],
-            "insights": [
-                {
-                    "week_start": item["week_start"],
-                    "week_end": item["week_end"],
-                    "event_name": item["event_name"],
-                    "event_type": item["event_type"],
-                    "title": item["title"],
-                    "description": item["description"],
-                    "recommendation": item["recommendation"],
-                }
-                for item in insights
-            ],
+            "insights": [],  # Insights now come from weekly_insights() which reads from ai_insights table
         }
 
     @classmethod
@@ -417,14 +406,17 @@ class CounselorReportService:
         weeks: int = 6,
         min_checkins: int = 3,  # Minimum check-ins required for insight
     ) -> List[Dict[str, Any]]:
-        """Generate weekly insights using ISO weeks, with minimum data requirement.
+        """Return weekly insights ONLY from ai_insights table (auto-generated).
         
+        This ensures only real, auto-generated insights are shown - no static/fake data.
         Auto-deletes insights older than 3 weeks.
         """
+        import json
+        from app.models.ai_insight import AIInsight
+        
         # Auto-delete old insights (3+ weeks old)
         three_weeks_ago = datetime.utcnow() - timedelta(weeks=3)
         try:
-            from app.models.ai_insight import AIInsight
             db.query(AIInsight).filter(
                 AIInsight.type == 'weekly',
                 AIInsight.generated_at < three_weeks_ago
@@ -433,67 +425,95 @@ class CounselorReportService:
         except Exception:
             db.rollback()
         
+        # Load academic events for matching
         events = list(academic_events or cls.load_academic_events())
-        today = datetime.utcnow().date()
         
-        # If start/end provided, use them to determine base_start as datetime
-        if start and end:
-            anchor_date = start.date() if isinstance(start, datetime) else start
-            # Adjust to ISO week boundary (Monday)
-            adjusted_date = anchor_date - timedelta(days=anchor_date.weekday())
-            base_start = datetime.combine(adjusted_date, datetime.min.time())
-        else:
-            base_start, _ = cls._week_bounds(today)
+        # Query ONLY from ai_insights table - no dynamic generation
+        # Build filters first, then apply order and limit
+        filters = [
+            AIInsight.type == 'weekly',
+            AIInsight.user_id.is_(None),  # Global insights (not per-user)
+        ]
+        
+        # If date range provided, add to filters
+        if start:
+            start_date = start.date() if isinstance(start, datetime) else start
+            filters.append(AIInsight.timeframe_start >= start_date)
+        if end:
+            end_date = end.date() if isinstance(end, datetime) else end
+            filters.append(AIInsight.timeframe_end <= end_date)
+        
+        stored_insights = db.query(AIInsight).filter(
+            *filters
+        ).order_by(AIInsight.timeframe_start.desc()).limit(weeks).all()
         
         records: List[Dict[str, Any]] = []
-
-        for offset in range(weeks - 1, -1, -1):
-            start_dt, end_dt = cls._window(base_start, weeks, offset)
+        
+        for insight in stored_insights:
+            # Parse stored JSON data
+            try:
+                data = insight.data if isinstance(insight.data, dict) else json.loads(insight.data or '{}')
+            except Exception:
+                data = {}
             
-            # Check if there's enough data for this week
-            checkin_count = db.scalar(
-                select(func.count(EmotionalCheckin.checkin_id)).where(
-                    and_(
-                        EmotionalCheckin.created_at >= start_dt,
-                        EmotionalCheckin.created_at <= end_dt
-                    )
-                )
-            ) or 0
+            # Extract mood trends data
+            mood_trends = data.get('mood_trends', {})
+            dominant_emotions = data.get('dominant_emotions', [])
+            streaks = data.get('streaks', {})
+            metadata = data.get('metadata', {})
             
-            # Skip weeks with insufficient data
-            if checkin_count < min_checkins:
-                continue
-            
-            index_val = cls._wellness_index(db, start_dt, end_dt)
-            prev_start, prev_end = cls._window(base_start, weeks, offset + 1) if offset + 1 < weeks else (start_dt, end_dt)
-            prev_index = cls._wellness_index(db, prev_start, prev_end)
-            change = index_val - prev_index
-
-            title = "Stable Wellness"
-            if change > 5:
-                title = "Wellness Surge"
-            elif change < -5:
-                title = "Wellness Dip"
-
-            recommendation = cls._build_recommendation(change, cls._sentiment_labels(db, start_dt, end_dt))
-            # Convert datetime to date for event matching
-            start_date = start_dt.date() if isinstance(start_dt, datetime) else start_dt
-            end_date = end_dt.date() if isinstance(end_dt, datetime) else end_dt
+            # Match academic event
+            start_date = insight.timeframe_start
+            end_date = insight.timeframe_end
             matched_event = next((ev for ev in events if cls._event_overlaps(ev, start_date, end_date)), None)
-
-            records.append(
-                {
-                    "week_start": start_dt.strftime("%Y-%m-%d"),
-                    "week_end": end_dt.strftime("%Y-%m-%d"),
-                    "event_name": matched_event.get("name") if matched_event else None,
-                    "event_type": matched_event.get("type") if matched_event else None,
-                    "title": title,
-                    "description": f"Wellness index {('rose' if change >= 0 else 'fell')} by {abs(change)} points to {index_val}.",
-                    "recommendation": recommendation,
-                    "checkin_count": checkin_count,  # Include for transparency
-                }
+            
+            # Build title based on trend
+            trend = mood_trends.get('trend', 'stable')
+            change_percent = mood_trends.get('change_percent', 0)
+            
+            if trend == 'improving':
+                title = "Wellness Improving"
+            elif trend == 'worsening':
+                title = "Wellness Declining"
+            else:
+                title = "Stable Wellness"
+            
+            # Build description
+            week_avg = mood_trends.get('week_avg', 0)
+            description = f"Average wellness score: {week_avg:.1f}/5"
+            if change_percent:
+                direction = "improved" if change_percent > 0 else "declined"
+                description += f" ({direction} {abs(change_percent):.1f}% from previous week)"
+            
+            # Build recommendation based on data
+            recommendation = cls._build_recommendation(
+                int(change_percent) if change_percent else 0,
+                [e.get('emotion', '') for e in dominant_emotions[:3]] if dominant_emotions else []
             )
-
+            
+            records.append({
+                "week_start": start_date.isoformat() if start_date else None,
+                "week_end": end_date.isoformat() if end_date else None,
+                "event_name": matched_event.get("name") if matched_event else None,
+                "event_type": matched_event.get("type") if matched_event else None,
+                "title": title,
+                "description": description,
+                "recommendation": recommendation,
+                "mood_trends": mood_trends,
+                "dominant_emotions": dominant_emotions,
+                "streaks": streaks,
+                "metadata": {
+                    **metadata,
+                    "risk_level": insight.risk_level,
+                    "generated_at": insight.generated_at.isoformat() if insight.generated_at else None,
+                },
+                "checkin_count": metadata.get('checkin_count', 0),
+                "journal_count": metadata.get('journal_count', 0),
+            })
+        
+        # Sort by week_start ascending (oldest first) for display
+        records.sort(key=lambda x: x.get('week_start') or '', reverse=False)
+        
         return records
 
     @classmethod
@@ -585,15 +605,17 @@ class CounselorReportService:
         total_students_stmt = select(func.count(User.user_id)).where(User.role == UserRole.STUDENT)
         total_students = int(db.scalar(total_students_stmt) or 0)
 
-        # Active users: distinct students with at least one emotional check-in
-        # in the given window.
+        # Active users: distinct STUDENTS with at least one emotional check-in
+        # in the given window. Explicitly exclude counselors.
         def _active_users(start_dt: datetime, end_dt: datetime) -> int:
             stmt = (
                 select(func.count(func.distinct(EmotionalCheckin.user_id)))
+                .join(User, EmotionalCheckin.user_id == User.user_id)
                 .where(
                     and_(
                         EmotionalCheckin.created_at >= start_dt,
                         EmotionalCheckin.created_at <= end_dt,
+                        User.role == UserRole.STUDENT,  # Exclude counselors
                     )
                 )
             )
@@ -921,22 +943,76 @@ class CounselorReportService:
 
     @classmethod
     def intervention_success(cls, db: Session) -> Dict[str, Any]:
-        stmt_conversations = select(func.count(func.distinct(UserActivity.target_id))).where(
-            UserActivity.target_type == "conversation",
-            UserActivity.action == "end",
-        )
-        total_sessions = db.scalar(stmt_conversations) or 0
-
-        # Placeholder heuristics without exposing message text
-        resolved_alerts = db.scalar(select(func.count(Alert.alert_id)).where(Alert.status == AlertStatus.RESOLVED)) or 0
-        success_rate = round((resolved_alerts / total_sessions) * 100, 2) if total_sessions else 0.0
+        """Calculate intervention success metrics based on alerts and conversations.
+        
+        Success is measured by:
+        1. Alert resolution rate (resolved / total alerts)
+        2. Conversation completion rate (ended / total conversations)
+        3. Average conversation metrics
+        """
+        from sqlalchemy import text as sa_text
+        from app.db.database import engine
+        
+        # Get alert-based metrics
+        total_alerts = db.scalar(select(func.count(Alert.alert_id))) or 0
+        resolved_alerts = db.scalar(
+            select(func.count(Alert.alert_id)).where(Alert.status == AlertStatus.RESOLVED)
+        ) or 0
+        
+        # Get conversation-based metrics from mobile DB
+        try:
+            with engine.connect() as conn:
+                # Total conversations
+                total_conv = conn.execute(
+                    sa_text("SELECT COUNT(*) as cnt FROM conversations")
+                ).mappings().first()
+                total_conversations = int(total_conv["cnt"]) if total_conv else 0
+                
+                # Ended conversations (successfully closed)
+                ended_conv = conn.execute(
+                    sa_text("SELECT COUNT(*) as cnt FROM conversations WHERE status = 'ended'")
+                ).mappings().first()
+                ended_conversations = int(ended_conv["cnt"]) if ended_conv else 0
+                
+                # Average messages per conversation
+                avg_msgs = conn.execute(
+                    sa_text("""
+                        SELECT AVG(msg_count) as avg_msgs FROM (
+                            SELECT conversation_id, COUNT(*) as msg_count 
+                            FROM messages 
+                            GROUP BY conversation_id
+                        ) as msg_counts
+                    """)
+                ).mappings().first()
+                avg_messages = float(avg_msgs["avg_msgs"] or 0) if avg_msgs else 0.0
+        except Exception:
+            total_conversations = 0
+            ended_conversations = 0
+            avg_messages = 0.0
+        
+        # Calculate success rates
+        alert_success_rate = round((resolved_alerts / total_alerts) * 100, 1) if total_alerts > 0 else 0.0
+        conversation_success_rate = round((ended_conversations / total_conversations) * 100, 1) if total_conversations > 0 else 0.0
+        
+        # Overall success rate: weighted average (alerts are more important)
+        if total_alerts > 0 and total_conversations > 0:
+            overall_success_rate = round((alert_success_rate * 0.6 + conversation_success_rate * 0.4), 1)
+        elif total_alerts > 0:
+            overall_success_rate = alert_success_rate
+        elif total_conversations > 0:
+            overall_success_rate = conversation_success_rate
+        else:
+            overall_success_rate = 0.0
 
         return {
-            "overall_success_rate": success_rate,
-            "total_sessions": total_sessions,
-            "successful_sessions": resolved_alerts,
-            "average_conversation_duration_minutes": 0.0,
-            "average_messages_per_conversation": 0.0,
+            "overall_success_rate": min(overall_success_rate, 100.0),  # Cap at 100%
+            "total_sessions": total_conversations,
+            "successful_sessions": ended_conversations,
+            "total_alerts": total_alerts,
+            "resolved_alerts": resolved_alerts,
+            "alert_resolution_rate": alert_success_rate,
+            "conversation_completion_rate": conversation_success_rate,
+            "average_messages_per_conversation": round(avg_messages, 1),
         }
 
     @staticmethod

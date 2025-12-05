@@ -1,7 +1,31 @@
 import React, { useState, useEffect } from 'react';
 import { Head, router } from '@inertiajs/react';
-import { Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff, AlertCircle, Clock, ShieldOff } from 'lucide-react';
 import { loginFastApi, signupFastApi } from '../lib/auth';
+
+// Map logout reasons to user-friendly messages
+const LOGOUT_REASON_MESSAGES: Record<string, { message: string; icon: React.ReactNode }> = {
+  inactivity: {
+    message: 'You were logged out due to 60 minutes of inactivity.',
+    icon: <Clock className="w-5 h-5" />,
+  },
+  token_expired: {
+    message: 'Your session has expired. Please sign in again.',
+    icon: <ShieldOff className="w-5 h-5" />,
+  },
+  session_invalid: {
+    message: 'Your session is no longer valid. Please sign in again.',
+    icon: <ShieldOff className="w-5 h-5" />,
+  },
+  unauthorized: {
+    message: 'You were logged out due to an authentication error.',
+    icon: <AlertCircle className="w-5 h-5" />,
+  },
+  no_token: {
+    message: 'Please sign in to continue.',
+    icon: <AlertCircle className="w-5 h-5" />,
+  },
+};
 
 export default function Login() {
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
@@ -12,16 +36,26 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [logoutReason, setLogoutReason] = useState<string | null>(null);
   const [showPwd, setShowPwd] = useState(false);
   const [showPwd2, setShowPwd2] = useState(false);
   const [remember, setRemember] = useState(false);
 
-  // Load remembered email on mount
+  // Load remembered email and check for logout reason on mount
   useEffect(() => {
     const savedEmail = localStorage.getItem('remembered_email');
     if (savedEmail) {
       setEmail(savedEmail);
       setRemember(true);
+    }
+    
+    // Check for logout reason in URL
+    const params = new URLSearchParams(window.location.search);
+    const reason = params.get('reason');
+    if (reason && LOGOUT_REASON_MESSAGES[reason]) {
+      setLogoutReason(reason);
+      // Clean up URL
+      window.history.replaceState({}, '', '/login');
     }
   }, []);
 
@@ -107,6 +141,24 @@ export default function Login() {
               >Sign Up</button>
             </div>
           </div>
+
+          {/* Logout reason banner */}
+          {logoutReason && LOGOUT_REASON_MESSAGES[logoutReason] && (
+            <div className="mb-4 p-3 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 flex items-center gap-3">
+              <div className="text-amber-600 dark:text-amber-400">
+                {LOGOUT_REASON_MESSAGES[logoutReason].icon}
+              </div>
+              <p className="text-sm text-amber-800 dark:text-amber-200">
+                {LOGOUT_REASON_MESSAGES[logoutReason].message}
+              </p>
+              <button
+                onClick={() => setLogoutReason(null)}
+                className="ml-auto text-amber-600 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-200"
+              >
+                ×
+              </button>
+            </div>
+          )}
 
           {error && <div className="mb-3 text-sm text-red-600">{error}</div>}
           {success && <div className="mb-3 text-sm text-emerald-600">{success}</div>}
