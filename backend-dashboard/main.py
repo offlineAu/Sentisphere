@@ -2910,6 +2910,73 @@ def get_journal(journal_id: int, token: str = Depends(oauth2_scheme)):
         }
 
 
+@app.patch("/api/journals/{journal_id}")
+def update_journal_mobile(
+    journal_id: int,
+    body: dict = Body(...),
+    token: str = Depends(oauth2_scheme),
+):
+    """Update a journal entry for mobile app."""
+    try:
+        data = decode_token(token)
+        uid = int(data.get("sub"))
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    # Check ownership first
+    check_q = text(
+        """
+        SELECT journal_id, title, content, created_at
+        FROM journal
+        WHERE journal_id = :jid AND user_id = :uid AND (deleted_at IS NULL)
+        LIMIT 1
+        """
+    )
+    with mobile_engine.connect() as conn:
+        row = conn.execute(check_q, {"jid": journal_id, "uid": uid}).mappings().first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Journal not found")
+
+    # Build update query based on provided fields
+    updates = []
+    params = {"jid": journal_id, "uid": uid}
+    
+    if "content" in body:
+        updates.append("content = :content")
+        params["content"] = body["content"]
+    
+    if "title" in body:
+        updates.append("title = :title")
+        params["title"] = body["title"]
+    
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    
+    # Add updated_at timestamp
+    updates.append("updated_at = NOW()")
+    
+    update_q = text(
+        f"""
+        UPDATE journal
+        SET {', '.join(updates)}
+        WHERE journal_id = :jid AND user_id = :uid AND (deleted_at IS NULL)
+        """
+    )
+    
+    with mobile_engine.begin() as conn:
+        conn.execute(update_q, params)
+    
+    # Fetch updated journal
+    with mobile_engine.connect() as conn:
+        updated = conn.execute(check_q, {"jid": journal_id, "uid": uid}).mappings().first()
+        return {
+            "journal_id": updated["journal_id"],
+            "title": updated["title"],
+            "content": updated["content"],
+            "created_at": updated["created_at"].strftime("%Y-%m-%dT%H:%M:%S") if updated["created_at"] else None,
+        }
+
+
 @app.delete("/api/journals/{journal_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_journal_mobile(
     journal_id: int,

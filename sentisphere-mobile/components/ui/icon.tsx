@@ -46,6 +46,9 @@ import {
   Quote,
   Settings,
   Lightbulb,
+  AlertCircle,
+  X,
+  Edit2,
 } from 'lucide-react-native';
 
 type IconProps = {
@@ -94,7 +97,10 @@ type IconProps = {
     | 'info'
     | 'quote'
     | 'settings'
-    | 'lightbulb';
+    | 'lightbulb'
+    | 'alert-circle'
+    | 'x'
+    | 'edit-2';
   size?: number;
   color?: string;
   fill?: string;
@@ -147,6 +153,9 @@ const icons: Record<string, any> = {
   'quote': Quote,
   'settings': Settings,
   'lightbulb': Lightbulb,
+  'alert-circle': AlertCircle,
+  'x': X,
+  'edit-2': Edit2,
 };
 
 export function Icon({ name, size = 20, color, fill }: IconProps) {
