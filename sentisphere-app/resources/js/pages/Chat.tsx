@@ -201,19 +201,35 @@ export default function Chat() {
     fetchConversations();
   }, [userId, authenticated]);
 
-  // Fetch messages when active conversation changes
+  // Fetch messages when active conversation changes - with immediate refresh
   useEffect(() => {
     if (!activeConversation || !authenticated) return;
-    api
-      .get<ChatMessage[]>(`/conversations/${activeConversation}/messages`)
-      .then((res) => {
+    
+    const fetchMessages = async () => {
+      try {
+        const res = await api.get<ChatMessage[]>(`/conversations/${activeConversation}/messages`);
         const data = (res.data || []).map(normalizeMessage);
         setMessages(data);
         setMessagesByConversation((prev) => ({ ...prev, [activeConversation]: data }));
         const unread = res.data.filter((m) => !Boolean((m as any).is_read) && m.sender_id !== userId).length;
         setUnreadCounts((prev) => ({ ...prev, [activeConversation]: unread }));
-      })
-      .catch((err) => console.error("Error fetching messages:", err));
+        
+        // Mark messages as read when opening conversation
+        if (unread > 0) {
+          try {
+            await api.post(`/conversations/${activeConversation}/read`);
+            setUnreadCounts((prev) => ({ ...prev, [activeConversation]: 0 }));
+          } catch {
+            // Ignore read marking errors
+          }
+        }
+      } catch (err) {
+        console.error("Error fetching messages:", err);
+      }
+    };
+    
+    // Fetch immediately
+    fetchMessages();
   }, [activeConversation, authenticated, userId]);
 
   // Fetch participant nickname when conversation changes
@@ -350,16 +366,46 @@ export default function Chat() {
       });
       
       // Listen for new conversations (e.g., student starts new chat)
-      globalChannel.bind('new_conversation', (data: any) => {
+      globalChannel.bind('new_conversation', async (data: any) => {
         console.log('[Chat] New conversation received:', data);
-        // Refresh conversation list to get the new conversation
+        // Refresh conversation list to get the new conversation with enriched data
         if (data?.conversation_id) {
-          api.get("/counselor/conversations")
-            .then((res) => {
-              const list = Array.isArray(res.data) ? res.data : [];
-              setConversations(list);
-            })
-            .catch((err) => console.error("Error refreshing conversations:", err));
+          try {
+            const res = await api.get<Conversation[]>("/counselor/conversations");
+            const unique = Array.from(new Map(res.data.map(c => [c.conversation_id, c])).values());
+            
+            // Enrich with initiator nickname and email
+            const withNicknames = await Promise.all(
+              unique.map(async (c) => {
+                try {
+                  const { data: userData } = await api.get<{ nickname: string; email?: string }>(`/users/${c.initiator_user_id}`);
+                  return { 
+                    ...c, 
+                    initiator_nickname: userData.nickname || c.initiator_nickname,
+                    initiator_email: userData.email || undefined,
+                  };
+                } catch {
+                  return c;
+                }
+              })
+            );
+            
+            setConversations(withNicknames);
+          } catch (err) {
+            console.error("Error refreshing conversations:", err);
+          }
+        }
+      });
+      
+      // Listen for new messages on any conversation (for unread badge updates)
+      globalChannel.bind('new_message', (data: any) => {
+        console.log('[Chat] New message on global channel:', data);
+        if (data?.conversation_id && data?.sender_id !== userId) {
+          // Update unread count for this conversation
+          setUnreadCounts(prev => ({
+            ...prev,
+            [data.conversation_id]: (prev[data.conversation_id] || 0) + 1
+          }));
         }
       });
       

@@ -237,6 +237,11 @@ export default function Sidebar() {
         className={styles.signoutBtn}
         tabIndex={open ? 0 : -1}
         onClick={async () => {
+          // Disconnect Pusher before logout (don't reset count - it's based on actual is_read status)
+          if (pusherRef.current) {
+            pusherRef.current.disconnect();
+            pusherRef.current = null;
+          }
           const res = await logoutFastApi();
           if (res?.ok) {
             router.visit('/login');

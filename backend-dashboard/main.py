@@ -2302,30 +2302,22 @@ def high_risk_flags(
     _user: User = Depends(require_counselor),
     db: Session = Depends(get_db),
 ):
+    """Count unique students with HIGH severity open alerts only.
+    
+    This counts students who need immediate attention.
+    """
     start_dt, end_dt = parse_global_range(range, start, end)
-    alert_count = db.scalar(
-        select(func.count(Alert.alert_id)).where(
+    
+    # Count unique students with open HIGH severity alerts only
+    count = db.scalar(
+        select(func.count(func.distinct(Alert.user_id))).where(
             Alert.severity == AlertSeverity.HIGH,
             Alert.status.in_([AlertStatus.OPEN, AlertStatus.IN_PROGRESS]),
             Alert.created_at >= start_dt,
             Alert.created_at <= end_dt,
         )
     ) or 0
-    journal_count = db.scalar(
-        select(func.count(JournalSentiment.journal_id)).where(
-            JournalSentiment.sentiment == "negative",
-            JournalSentiment.analyzed_at >= start_dt,
-            JournalSentiment.analyzed_at <= end_dt,
-        )
-    ) or 0
-    checkin_count = db.scalar(
-        select(func.count(CheckinSentiment.checkin_id)).where(
-            CheckinSentiment.sentiment == "negative",
-            CheckinSentiment.analyzed_at >= start_dt,
-            CheckinSentiment.analyzed_at <= end_dt,
-        )
-    ) or 0
-    return {"count": int(alert_count + journal_count + checkin_count)}
+    return {"count": int(count)}
 
 
 @app.get("/api/sentiments")
