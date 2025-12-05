@@ -32,6 +32,8 @@ class CounselorReportService:
 
     @staticmethod
     def _week_bounds(anchor: date) -> tuple[datetime, datetime]:
+        """Get ISO week bounds (Monday to Sunday)."""
+        # ISO week: Monday = 0, Sunday = 6
         start = datetime.combine(anchor - timedelta(days=anchor.weekday()), datetime.min.time())
         end = start + timedelta(days=6, hours=23, minutes=59, seconds=59)
         return start, end
@@ -413,15 +415,31 @@ class CounselorReportService:
         end: Optional[datetime] = None,
         academic_events: Optional[Sequence[Dict[str, Any]]] = None,
         weeks: int = 6,
+        min_checkins: int = 3,  # Minimum check-ins required for insight
     ) -> List[Dict[str, Any]]:
-        """Generate weekly insights, optionally filtered by date range."""
+        """Generate weekly insights using ISO weeks, with minimum data requirement.
+        
+        Auto-deletes insights older than 3 weeks.
+        """
+        # Auto-delete old insights (3+ weeks old)
+        three_weeks_ago = datetime.utcnow() - timedelta(weeks=3)
+        try:
+            from app.models.ai_insight import AIInsight
+            db.query(AIInsight).filter(
+                AIInsight.type == 'weekly',
+                AIInsight.generated_at < three_weeks_ago
+            ).delete(synchronize_session=False)
+            db.commit()
+        except Exception:
+            db.rollback()
+        
         events = list(academic_events or cls.load_academic_events())
         today = datetime.utcnow().date()
         
         # If start/end provided, use them to determine base_start as datetime
         if start and end:
             anchor_date = start.date() if isinstance(start, datetime) else start
-            # Adjust to week boundary and convert to datetime
+            # Adjust to ISO week boundary (Monday)
             adjusted_date = anchor_date - timedelta(days=anchor_date.weekday())
             base_start = datetime.combine(adjusted_date, datetime.min.time())
         else:
@@ -431,6 +449,21 @@ class CounselorReportService:
 
         for offset in range(weeks - 1, -1, -1):
             start_dt, end_dt = cls._window(base_start, weeks, offset)
+            
+            # Check if there's enough data for this week
+            checkin_count = db.scalar(
+                select(func.count(EmotionalCheckin.checkin_id)).where(
+                    and_(
+                        EmotionalCheckin.created_at >= start_dt,
+                        EmotionalCheckin.created_at <= end_dt
+                    )
+                )
+            ) or 0
+            
+            # Skip weeks with insufficient data
+            if checkin_count < min_checkins:
+                continue
+            
             index_val = cls._wellness_index(db, start_dt, end_dt)
             prev_start, prev_end = cls._window(base_start, weeks, offset + 1) if offset + 1 < weeks else (start_dt, end_dt)
             prev_index = cls._wellness_index(db, prev_start, prev_end)
@@ -457,6 +490,7 @@ class CounselorReportService:
                     "title": title,
                     "description": f"Wellness index {('rose' if change >= 0 else 'fell')} by {abs(change)} points to {index_val}.",
                     "recommendation": recommendation,
+                    "checkin_count": checkin_count,  # Include for transparency
                 }
             )
 
