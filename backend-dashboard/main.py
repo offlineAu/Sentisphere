@@ -2932,49 +2932,54 @@ def update_journal_mobile(
         LIMIT 1
         """
     )
-    with mobile_engine.connect() as conn:
-        row = conn.execute(check_q, {"jid": journal_id, "uid": uid}).mappings().first()
-        if not row:
-            raise HTTPException(status_code=404, detail="Journal not found")
+    
+    try:
+        with mobile_engine.connect() as conn:
+            row = conn.execute(check_q, {"jid": journal_id, "uid": uid}).mappings().first()
+            if not row:
+                raise HTTPException(status_code=404, detail="Journal not found")
 
-    # Build update query based on provided fields
-    updates = []
-    params = {"jid": journal_id, "uid": uid}
-    
-    if "content" in body:
-        updates.append("content = :content")
-        params["content"] = body["content"]
-    
-    if "title" in body:
-        updates.append("title = :title")
-        params["title"] = body["title"]
-    
-    if not updates:
-        raise HTTPException(status_code=400, detail="No fields to update")
-    
-    # Add updated_at timestamp
-    updates.append("updated_at = NOW()")
-    
-    update_q = text(
-        f"""
-        UPDATE journal
-        SET {', '.join(updates)}
-        WHERE journal_id = :jid AND user_id = :uid AND (deleted_at IS NULL)
-        """
-    )
-    
-    with mobile_engine.begin() as conn:
-        conn.execute(update_q, params)
-    
-    # Fetch updated journal
-    with mobile_engine.connect() as conn:
-        updated = conn.execute(check_q, {"jid": journal_id, "uid": uid}).mappings().first()
-        return {
-            "journal_id": updated["journal_id"],
-            "title": updated["title"],
-            "content": updated["content"],
-            "created_at": updated["created_at"].strftime("%Y-%m-%dT%H:%M:%S") if updated["created_at"] else None,
-        }
+        # Build update query based on provided fields
+        updates = []
+        params = {"jid": journal_id, "uid": uid}
+        
+        if "content" in body:
+            updates.append("content = :content")
+            params["content"] = body["content"]
+        
+        if "title" in body:
+            updates.append("title = :title")
+            params["title"] = body["title"]
+        
+        if not updates:
+            raise HTTPException(status_code=400, detail="No fields to update")
+        
+        # Note: journal table does not have updated_at column
+        update_q = text(
+            f"""
+            UPDATE journal
+            SET {', '.join(updates)}
+            WHERE journal_id = :jid AND user_id = :uid AND (deleted_at IS NULL)
+            """
+        )
+        
+        with mobile_engine.begin() as conn:
+            conn.execute(update_q, params)
+        
+        # Fetch updated journal
+        with mobile_engine.connect() as conn:
+            updated = conn.execute(check_q, {"jid": journal_id, "uid": uid}).mappings().first()
+            return {
+                "journal_id": updated["journal_id"],
+                "title": updated["title"],
+                "content": updated["content"],
+                "created_at": updated["created_at"].strftime("%Y-%m-%dT%H:%M:%S") if updated["created_at"] else None,
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[PATCH /api/journals/{journal_id}] Error: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
 @app.delete("/api/journals/{journal_id}", status_code=status.HTTP_204_NO_CONTENT)
