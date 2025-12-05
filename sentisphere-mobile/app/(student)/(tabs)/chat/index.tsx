@@ -1,6 +1,5 @@
 import { StyleSheet, View, FlatList, TextInput, KeyboardAvoidingView, Platform, Pressable, useWindowDimensions, Modal, ActivityIndicator, Animated, Easing, ScrollView, Alert } from 'react-native';
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
 import { GlobalScreenWrapper } from '@/components/GlobalScreenWrapper';
 import { Icon } from '@/components/ui/icon';
@@ -13,59 +12,36 @@ import * as SecureStore from 'expo-secure-store';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-
-type Msg = { id: string; role: 'user' | 'ai'; text: string; time: string };
-
-const initialMessages: Msg[] = [
-  { id: 'm1', role: 'ai', text: "Thanks for sharing, Mark. Let's try breaking tasks into smaller steps.", time: '03:38 AM' },
-  { id: 'm2', role: 'user', text: "Yes, I'll try that out this week!", time: '04:38 AM' },
-  { id: 'm3', role: 'ai', text: 'Yes, Do that!', time: '12:11 PM' },
-];
-
-type ApiMessage = {
-  message_id: number;
-  conversation_id: number;
-  sender_id: number;
-  content: string;
-  is_read: boolean;
-  timestamp: string;
-};
-
-type ApiConversation = {
-  conversation_id: number;
-  initiator_user_id: number;
-  initiator_role: string;
-  subject?: string | null;
-  counselor_id?: number | null;
-  counselor_name?: string | null;
-  counselor_email?: string | null;
-  status: 'open' | 'ended';
-  created_at: string;
-  last_activity_at?: string | null;
-  messages?: ApiMessage[];
-};
+import { conversationStore, ApiConversation } from '@/stores/conversationStore';
+import { formatChatPreview, getTimestampMs } from '@/utils/time';
 
 type Counselor = { user_id: number; name?: string | null; nickname?: string | null; email?: string | null };
 
 export default function ChatScreen() {
-  const [messages, setMessages] = useState<Msg[]>(initialMessages);
-  const [input, setInput] = useState('');
-  const [chatOpen, setChatOpen] = useState(true);
   const scheme = useColorScheme() ?? 'light';
   const palette = Colors[scheme] as any;
-  const listRef = useRef<FlatList<Msg>>(null);
   const { width } = useWindowDimensions();
-  const isTablet = width >= 900;
   const insets = useSafeAreaInsets();
   const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://sentisphere-production.up.railway.app';
-  const [conversations, setConversations] = useState<ApiConversation[]>([]);
+  
+  // Use store for conversations with subscription for reactivity
+  const [conversations, setConversations] = useState<ApiConversation[]>(conversationStore.getConversations());
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [loading, setLoading] = useState<boolean>(conversationStore.getIsLoading());
   const [pickerOpen, setPickerOpen] = useState(false);
   const [counselors, setCounselors] = useState<Counselor[]>([]);
   const [cLoading, setCLoading] = useState(false);
   const [cSearch, setCSearch] = useState('');
   const [searchFocused, setSearchFocused] = useState(false);
+  
+  // Subscribe to store changes
+  useEffect(() => {
+    const unsubscribe = conversationStore.subscribe(() => {
+      setConversations(conversationStore.getConversations());
+      setLoading(conversationStore.getIsLoading());
+    });
+    return unsubscribe;
+  }, []);
 
   // Entrance animations
   const entrance = useRef({
@@ -91,7 +67,6 @@ export default function ChatScreen() {
   });
 
   useEffect(() => { runEntrance(); }, []);
-  useFocusEffect(useCallback(() => { runEntrance(); return () => {}; }, []));
 
   const getAuthToken = useCallback(async (): Promise<string | null> => {
     if (Platform.OS === 'web') {
@@ -109,40 +84,46 @@ export default function ChatScreen() {
     }
   }, []);
 
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
+  // Fetch conversations and sync with store
+  const fetchConversations = useCallback(async () => {
+    try {
+      const tok = await getAuthToken();
+      if (!tok) {
+        conversationStore.setLoading(false);
+        return;
+      }
       try {
-        const tok = await getAuthToken();
-        if (!tok) {
-          setLoading(false);
-          return;
-        }
-        try {
-          const meRes = await fetch(`${API_BASE_URL}/api/auth/mobile/me`, {
-            headers: { Authorization: `Bearer ${tok}` },
-          });
-          if (meRes.ok) {
-            const me = await meRes.json();
-            if (mounted) setCurrentUserId(me?.user_id ?? null);
-          }
-        } catch {}
-        const res = await fetch(`${API_BASE_URL}/api/mobile/conversations?include_messages=true`, {
+        const meRes = await fetch(`${API_BASE_URL}/api/auth/mobile/me`, {
           headers: { Authorization: `Bearer ${tok}` },
         });
-        if (res.ok) {
-          const data: ApiConversation[] = await res.json();
-          if (mounted) setConversations(data);
+        if (meRes.ok) {
+          const me = await meRes.json();
+          setCurrentUserId(me?.user_id ?? null);
         }
       } catch {}
-      finally {
-        if (mounted) setLoading(false);
+      const res = await fetch(`${API_BASE_URL}/api/mobile/conversations?include_messages=true`, {
+        headers: { Authorization: `Bearer ${tok}` },
+      });
+      if (res.ok) {
+        const data: ApiConversation[] = await res.json();
+        conversationStore.setConversations(data);
       }
-    })();
-    return () => {
-      mounted = false;
-    };
+    } catch {}
+    finally {
+      conversationStore.setLoading(false);
+    }
   }, [API_BASE_URL, getAuthToken]);
+
+  useEffect(() => {
+    fetchConversations();
+  }, [fetchConversations]);
+  
+  // Refresh on focus
+  useFocusEffect(useCallback(() => {
+    fetchConversations();
+    runEntrance();
+    return () => {};
+  }, [fetchConversations]));
 
   const doHaptic = async (kind: 'light' | 'selection' | 'success' = 'light') => {
     if (Platform.OS === 'web') return;
@@ -153,19 +134,9 @@ export default function ChatScreen() {
     } catch {}
   };
 
-  const toggleChat = async () => {
-    await doHaptic('selection');
-    setChatOpen((o) => !o);
-  };
-
   const formatTime = (iso?: string | null) => {
     if (!iso) return '';
-    const d = new Date(iso);
-    const today = new Date();
-    if (d.toDateString() === today.toDateString()) {
-      return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-    }
-    return d.toLocaleDateString();
+    return formatChatPreview(iso);
   };
 
   const handleCreate = async () => {
@@ -236,7 +207,7 @@ export default function ChatScreen() {
       console.log('Counselor ID in response:', convo.counselor_id);
       
       setPickerOpen(false);
-      setConversations((prev) => [convo, ...prev]);
+      conversationStore.addConversation(convo);
       router.push({ pathname: '/(student)/(tabs)/chat/[id]', params: { id: String(convo.conversation_id), name: subject } });
     } catch (e) {
       console.error('Error creating conversation:', e);
@@ -246,12 +217,12 @@ export default function ChatScreen() {
   const deleteConversation = async (conversationId: number) => {
     const confirmDelete = () => {
       if (Platform.OS === 'web') {
-        return window.confirm('Are you sure you want to delete this conversation? This action cannot be undone.');
+        return window.confirm('This action will permanently remove this chat history. Continue?');
       }
       return new Promise<boolean>((resolve) => {
         Alert.alert(
-          'Delete Conversation',
-          'Are you sure you want to delete this conversation? This action cannot be undone.',
+          'Delete Conversation?',
+          'This action will permanently remove this chat history. Continue?',
           [
             { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
             { text: 'Delete', style: 'destructive', onPress: () => resolve(true) },
@@ -263,6 +234,11 @@ export default function ChatScreen() {
     const confirmed = await confirmDelete();
     if (!confirmed) return;
 
+    // Optimistic update - remove immediately from UI
+    conversationStore.deleteConversation(conversationId);
+    await doHaptic('success');
+
+    // Then confirm with backend
     try {
       const tok = await getAuthToken();
       if (!tok) return;
@@ -272,93 +248,16 @@ export default function ChatScreen() {
         headers: { Authorization: `Bearer ${tok}` },
       });
       
-      if (res.ok) {
-        await doHaptic('success');
-        setConversations((prev) => prev.filter((c) => c.conversation_id !== conversationId));
+      if (!res.ok) {
+        // Revert on failure - refetch conversations
+        console.error('Failed to delete conversation on backend, refetching...');
+        fetchConversations();
       }
     } catch (e) {
       console.error('Error deleting conversation:', e);
+      // Revert on error - refetch conversations
+      fetchConversations();
     }
-  };
-
-  const StatusBadge = ({ open }: { open: boolean }) => (
-    <View
-      style={StyleSheet.flatten([
-        styles.badge,
-        open ? { backgroundColor: '#DCFCE7', borderColor: '#86EFAC' } : { backgroundColor: '#FEE2E2', borderColor: '#FECACA' },
-      ])}
-    >
-      <ThemedText style={[styles.badgeText, { color: open ? '#166534' : '#991B1B' }]}>{open ? 'Open' : 'Closed'}</ThemedText>
-    </View>
-  );
-
-  const ConversationItem = () => (
-    <Pressable
-      onPressIn={() => doHaptic('selection')}
-      style={({ pressed }) => [
-        styles.convItem,
-        { backgroundColor: pressed ? '#F3F4F6' : '#F8FAFC', borderColor: palette.border },
-      ]}
-      accessibilityRole="button"
-      accessibilityLabel="Conversation with Marky"
-    >
-      <View style={styles.convLeft}>
-        <View style={styles.avatar}><ThemedText style={{ color: '#FFFFFF', fontFamily: 'Inter_700Bold' }}>M</ThemedText></View>
-        <View style={{ gap: 2 }}>
-          <ThemedText style={{ fontFamily: 'Inter_600SemiBold' }}>Marky</ThemedText>
-          <ThemedText style={{ color: palette.muted, fontSize: 12 }}>Last active 3m ago</ThemedText>
-        </View>
-      </View>
-      <StatusBadge open={chatOpen} />
-    </Pressable>
-  );
-
-  const ChatHeader = () => (
-    <View style={styles.chatHeader}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-        <View style={styles.avatar}><ThemedText style={{ color: '#FFFFFF', fontFamily: 'Inter_700Bold' }}>M</ThemedText></View>
-        <View>
-          <ThemedText type="subtitle" style={{ fontSize: 18 }}>Marky</ThemedText>
-          <ThemedText style={{ color: palette.muted, fontSize: 12 }}>Counseling Conversation</ThemedText>
-        </View>
-      </View>
-      <Pressable onPress={toggleChat} onPressIn={() => doHaptic('selection')} style={({ pressed }) => [styles.toggleBtn, { opacity: pressed ? 0.9 : 1, borderColor: palette.border }]}> 
-        <StatusBadge open={chatOpen} />
-      </Pressable>
-    </View>
-  );
-
-  const renderItem = ({ item }: { item: Msg }) => {
-    const isUser = item.role === 'user';
-    return (
-      <View style={[styles.row, { justifyContent: isUser ? 'flex-end' : 'flex-start' }]}> 
-        <View style={[styles.messageWrap, { alignItems: isUser ? 'flex-end' : 'flex-start' }]}> 
-          <View
-            style={StyleSheet.flatten([
-              styles.bubble,
-              isUser
-                ? { backgroundColor: palette.tint, borderTopRightRadius: 4 }
-                : { backgroundColor: '#F3F4F6', borderTopLeftRadius: 4 },
-            ])}
-          >
-            <ThemedText style={{ color: isUser ? '#FFFFFF' : palette.text }}>{item.text}</ThemedText>
-          </View>
-          <ThemedText style={[styles.timeText, { textAlign: isUser ? 'right' : 'left', color: palette.muted }]}>{item.time}</ThemedText>
-        </View>
-      </View>
-    );
-  };
-
-  const send = async () => {
-    const trimmed = input.trim();
-    if (!trimmed || !chatOpen) return;
-    await doHaptic('light');
-    const tm = new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-    const userMsg: Msg = { id: `${Date.now()}`, role: 'user', text: trimmed, time: tm };
-    const next: Msg[] = [...messages, userMsg];
-    setMessages(next);
-    setInput('');
-    requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
   };
 
   return (
@@ -419,40 +318,97 @@ export default function ChatScreen() {
 
                 {conversations.map((c) => {
                   const msgs = c.messages || [];
-                  const last = msgs.length > 0 ? msgs[msgs.length - 1] : undefined;
-                  const unreadCount = currentUserId ? msgs.filter((m) => !m.is_read && m.sender_id !== currentUserId).length : 0;
+                  // Sort messages by timestamp to ensure we get the latest
+                  const sortedMsgs = [...msgs].sort((a, b) => 
+                    getTimestampMs(a.timestamp) - getTimestampMs(b.timestamp)
+                  );
+                  const last = sortedMsgs.length > 0 ? sortedMsgs[sortedMsgs.length - 1] : undefined;
+                  const hasUnread = currentUserId ? msgs.some((m) => !m.is_read && m.sender_id !== currentUserId) : false;
                   const name = c.subject || `Conversation #${c.conversation_id}`;
                   const isClosed = c.status === 'ended';
+                  
+                  // Handle conversation press with optimistic read marking
+                  const handleConversationPress = async () => {
+                    // 1. Optimistic update - mark as read immediately in store
+                    if (hasUnread) {
+                      conversationStore.markConversationAsRead(c.conversation_id);
+                    }
+                    
+                    // 2. Navigate to conversation detail
+                    router.push({ pathname: '/(student)/(tabs)/chat/[id]', params: { id: String(c.conversation_id), name } });
+                    
+                    // 3. Backend will mark as read when conversation detail loads (existing behavior)
+                  };
+                  
                   return (
                     <View key={c.conversation_id} style={styles.convItemWrapper}>
                       <Pressable
                         onPressIn={() => doHaptic('selection')}
-                        onPress={() => router.push({ pathname: '/(student)/(tabs)/chat/[id]', params: { id: String(c.conversation_id), name } })}
-                        style={({ pressed }) => [styles.convItem, { backgroundColor: palette.background, borderColor: palette.border, opacity: pressed ? 0.96 : 1, flex: 1 }]}
+                        onPress={handleConversationPress}
+                        style={({ pressed }) => [
+                          styles.convItem,
+                          // Unread: elevated card with soft shadow and tinted background
+                          hasUnread && !isClosed && styles.convItemUnread,
+                          // Closed: muted red styling
+                          isClosed && styles.convItemClosed,
+                          // Read: clean minimal styling
+                          !hasUnread && !isClosed && { backgroundColor: palette.background, borderColor: palette.border },
+                          { opacity: pressed ? 0.96 : 1, flex: 1 }
+                        ]}
                         accessibilityRole="button"
-                        accessibilityLabel={`Open chat ${name}`}
+                        accessibilityLabel={`Open chat ${name}${hasUnread ? ', unread messages' : ''}`}
                       >
+                        {/* Left accent bar for unread conversations */}
+                        {hasUnread && !isClosed && <View style={styles.unreadAccent} />}
+                        
                         <View style={styles.convLeft}>
-                          <View style={[styles.avatar, { backgroundColor: isClosed ? '#6B7280' : '#111827' }]}>
-                            <ThemedText style={{ color: '#FFFFFF', fontFamily: 'Inter_700Bold', fontSize: 15 }}>{(name[0] || 'C').toString().toUpperCase()}</ThemedText>
+                          <View style={[
+                            styles.avatar, 
+                            { 
+                              backgroundColor: isClosed ? '#9CA3AF' : (hasUnread ? '#0D8C4F' : '#111827'), 
+                              opacity: isClosed ? 0.8 : 1 
+                            }
+                          ]}>
+                            <ThemedText style={{ color: '#FFFFFF', fontFamily: 'Inter_700Bold', fontSize: 15 }}>
+                              {(name[0] || 'C').toString().toUpperCase()}
+                            </ThemedText>
                           </View>
                           <View style={styles.convTextWrap}>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                              <ThemedText style={{ fontFamily: 'Inter_600SemiBold', fontSize: 15, color: '#111827' }} numberOfLines={1}>{name}</ThemedText>
-                              {isClosed && (
-                                <View style={styles.closedBadge}>
-                                  <ThemedText style={styles.closedBadgeText}>Closed</ThemedText>
-                                </View>
-                              )}
-                            </View>
-                            <ThemedText style={{ color: '#6B7280', fontSize: 13 }} numberOfLines={1}>{last?.content || 'No messages yet'}</ThemedText>
+                            <ThemedText 
+                              style={{ 
+                                fontFamily: hasUnread ? 'Inter_700Bold' : 'Inter_600SemiBold', 
+                                fontSize: 15, 
+                                color: isClosed ? '#6B7280' : (hasUnread ? '#111827' : '#374151'),
+                                opacity: isClosed ? 0.8 : 1
+                              }} 
+                              numberOfLines={1}
+                            >
+                              {name}
+                            </ThemedText>
+                            <ThemedText 
+                              style={{ 
+                                color: isClosed ? '#9CA3AF' : (hasUnread ? '#4B5563' : '#6B7280'), 
+                                fontSize: 13,
+                                fontFamily: hasUnread ? 'Inter_500Medium' : undefined,
+                                opacity: isClosed ? 0.75 : 1
+                              }} 
+                              numberOfLines={1}
+                            >
+                              {last?.content || 'Start the conversation'}
+                            </ThemedText>
                           </View>
                         </View>
                         <View style={styles.rightMeta}>
-                          <ThemedText style={{ color: '#9CA3AF', fontSize: 12, fontFamily: 'Inter_500Medium' }}>{formatTime(last?.timestamp || c.last_activity_at)}</ThemedText>
-                          {unreadCount > 0 && (
-                            <View style={[styles.unreadBadge, { backgroundColor: palette.tint }]}>
-                              <ThemedText style={{ color: '#FFFFFF', fontSize: 11, fontFamily: 'Inter_600SemiBold' }}>{unreadCount}</ThemedText>
+                          <ThemedText style={{ 
+                            color: hasUnread ? '#0D8C4F' : '#9CA3AF', 
+                            fontSize: 12, 
+                            fontFamily: hasUnread ? 'Inter_600SemiBold' : 'Inter_500Medium' 
+                          }}>
+                            {formatTime(last?.timestamp || c.last_activity_at)}
+                          </ThemedText>
+                          {!isClosed && hasUnread && (
+                            <View style={styles.unreadBadge}>
+                              <View style={styles.unreadDot} />
                             </View>
                           )}
                         </View>
@@ -652,52 +608,12 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     maxWidth: 280,
   },
-  headerIcon: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
-  backButton: {
-    borderWidth: 1,
-    borderRadius: 12,
-    width: 42,
-    height: 42,
-    padding: 6,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerCenter: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, justifyContent: 'center' },
-  backButtonPlaceholder: { width: 42, height: 42 },
-  sidebar: { width: 320, maxWidth: 360 },
-  chatPanel: { flex: 1 },
-  chatPanelInner: { minHeight: 420 },
-
-  // Header & status
-  chatHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
-    backgroundColor: '#FFFFFF',
-  },
-  toggleBtn: {
-    borderWidth: 1,
-    borderRadius: 999,
-    padding: 4,
-    backgroundColor: 'transparent',
-  },
-  badge: {
-    borderWidth: 1,
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-    borderRadius: 999,
-  },
-  badgeText: { fontSize: 12, fontFamily: 'Inter_600SemiBold' },
-
-  // Sidebar conversation item
+  // Conversation item
   convItemWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    marginBottom: 2,
   },
   convItem: {
     borderWidth: 1,
@@ -707,16 +623,30 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
   },
-  closedBadge: {
-    backgroundColor: '#FEE2E2',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 6,
+  // Unread conversation: elevated card with soft shadow
+  convItemUnread: {
+    backgroundColor: '#F0FDF4',
+    borderColor: '#BBF7D0',
+    shadowColor: '#059669',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 3,
   },
-  closedBadgeText: {
-    fontSize: 11,
-    fontFamily: 'Inter_600SemiBold',
-    color: '#991B1B',
+  // Closed conversation: muted red styling
+  convItemClosed: {
+    backgroundColor: '#FCECEC',
+    borderColor: '#FECACA',
+  },
+  // Left accent bar for unread
+  unreadAccent: {
+    width: 3,
+    height: '80%',
+    backgroundColor: '#10B981',
+    borderRadius: 2,
+    position: 'absolute',
+    left: 0,
+    top: '10%',
   },
   deleteButton: {
     width: 40,
@@ -736,8 +666,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  rightMeta: { alignItems: 'flex-end', gap: 4, flexShrink: 0, marginLeft: 8 },
-  unreadBadge: { minWidth: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 },
+  rightMeta: { alignItems: 'flex-end', gap: 6, flexShrink: 0, marginLeft: 8 },
+  // Unread badge container with subtle background
+  unreadBadge: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#ECFDF5',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+  },
+  unreadDot: { 
+    width: 8, 
+    height: 8, 
+    borderRadius: 4, 
+    backgroundColor: '#10B981', // Sentisphere green
+  },
   iconPill: {
     width: 28,
     height: 28,
@@ -753,28 +699,4 @@ const styles = StyleSheet.create({
   sheetHeader: { paddingHorizontal: 8, paddingTop: 8, paddingBottom: 16, alignItems: 'center' },
   searchBar: { marginTop: 12, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: 8, width: '100%' },
   userRow: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 10 },
-  cancelBtn: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
-
-  // Messages
-  row: { flexDirection: 'row', marginVertical: 6 },
-  messageWrap: { maxWidth: '82%', alignItems: 'flex-start' },
-  bubble: { paddingHorizontal: 12, paddingVertical: 10, borderRadius: 12, maxWidth: '100%' },
-  timeText: { fontSize: 11, marginTop: 4 },
-
-  // Composer
-  inputBarWrap: { borderTopWidth: 1, backgroundColor: '#FFFFFF' },
-  inputBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    margin: 12,
-    gap: 8,
-  },
-  attachBtn: { padding: 8, borderRadius: 10 },
-  input: { flex: 1, padding: 8 },
-  sendBtn: { padding: 6 },
-  closedNotice: { paddingHorizontal: 16, paddingBottom: 12 },
 });

@@ -15,7 +15,8 @@ import { GlobalScreenWrapper } from "@/components/GlobalScreenWrapper"
 
 import * as Haptics from "expo-haptics"
 import * as SecureStore from "expo-secure-store"
-import { useFocusEffect } from '@react-navigation/native'
+import { useFocusEffect, useNavigation } from '@react-navigation/native'
+import { notificationStore } from '@/stores/notificationStore'
 
 const { width } = Dimensions.get("window")
 
@@ -51,6 +52,8 @@ export default function EnhancedDashboardScreen() {
   const API = process.env.EXPO_PUBLIC_API_URL || 'https://sentisphere-production.up.railway.app'
   const [displayName, setDisplayName] = useState<string>("")
   const [backendConnected, setBackendConnected] = useState<boolean | null>(null)
+  const [unreadCount, setUnreadCount] = useState<number>(0)
+  const navigation = useNavigation()
   const getAuthToken = useCallback(async (): Promise<string | null> => {
     if (Platform.OS === 'web') {
       try { return (window as any)?.localStorage?.getItem('auth_token') || null } catch { return null }
@@ -85,6 +88,41 @@ export default function EnhancedDashboardScreen() {
     } catch {}
   }, [API, getAuthToken, decodeJwtName])
   useEffect(() => { fetchCurrentUser() }, [fetchCurrentUser])
+
+  // Fetch unread notification count from backend
+  const fetchUnreadCount = useCallback(async () => {
+    try {
+      const tok = await getAuthToken()
+      if (!tok) return
+      const res = await fetch(`${API}/api/notifications/unread-count`, {
+        headers: { Authorization: `Bearer ${tok}` }
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setUnreadCount(data.unread_count || 0)
+      }
+    } catch (e) {
+      console.log('[Dashboard] Failed to fetch unread count:', e)
+    }
+  }, [API, getAuthToken])
+
+  // Fetch unread count on mount and when screen is focused
+  useEffect(() => { fetchUnreadCount() }, [fetchUnreadCount])
+  
+  useEffect(() => {
+    const unsub = navigation.addListener('focus', fetchUnreadCount)
+    return unsub
+  }, [navigation, fetchUnreadCount])
+
+  // Subscribe to notification store for instant updates when notifications are read
+  useEffect(() => {
+    const unsubscribe = notificationStore.subscribe(() => {
+      // Update unread count from store (instant update when marking as read)
+      const storeCount = notificationStore.getUnreadCount()
+      setUnreadCount(storeCount)
+    })
+    return unsubscribe
+  }, [])
 
   // Health check to verify backend connection on app startup
   useEffect(() => {
@@ -419,12 +457,14 @@ export default function EnhancedDashboardScreen() {
             </View>
             <View style={styles.headerActions}>
               <Pressable
-                accessibilityLabel="Notifications"
+                accessibilityLabel={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : 'Notifications'}
                 onPressIn={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} } }}
+                onPress={() => router.push('/(student)/notifications')}
                 hitSlop={8}
                 style={({ pressed }) => [styles.notifBtn, pressed && { opacity: 0.85 }]}
               >
                 <Icon name="bell" size={20} color={palette.text} />
+                {unreadCount > 0 && <View style={styles.unreadDot} />}
               </Pressable>
               <Pressable
                 accessibilityLabel="Log out"
@@ -819,6 +859,18 @@ const styles = StyleSheet.create({
   notifBtn: {
     padding: 8,
     borderRadius: 12,
+    position: 'relative' as const,
+  },
+  unreadDot: {
+    position: 'absolute' as const,
+    top: 6,
+    right: 6,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#22C55E', // Sentisphere green
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
   },
   logoutOverlay: {
     position: 'absolute',

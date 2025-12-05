@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { StyleSheet, View, FlatList, TextInput, KeyboardAvoidingView, Platform, Pressable, useWindowDimensions, Alert, type AlertButton, Animated, Easing } from 'react-native';
-import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
 import { GlobalScreenWrapper } from '@/components/GlobalScreenWrapper';
 import { Icon } from '@/components/ui/icon';
@@ -11,6 +10,8 @@ import * as SecureStore from 'expo-secure-store';
 import { Stack, useLocalSearchParams, router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
+import { conversationStore } from '@/stores/conversationStore';
+import { formatChatTime, formatDateLabel, getTimestampMs, getCurrentChatTime } from '@/utils/time';
 
  type Msg = { id: string; role: 'user' | 'ai'; text: string; time: string; createdAt: number; status?: 'sent' | 'delivered' | 'read' };
 
@@ -134,8 +135,8 @@ import { useFocusEffect } from '@react-navigation/native';
               } catch {}
             }
             const mapped: Msg[] = msgs.map((m) => {
-              const createdAt = new Date(m.timestamp).getTime();
-              const time = new Date(m.timestamp).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+              const createdAt = getTimestampMs(m.timestamp);
+              const time = formatChatTime(m.timestamp);
               const role: 'user' | 'ai' = meId && m.sender_id === meId ? 'user' : 'ai';
               const status: 'sent' | 'delivered' | 'read' | undefined = role === 'user' ? 'read' : undefined;
               return { id: String(m.message_id), role, text: m.content, time, createdAt, status };
@@ -178,8 +179,8 @@ import { useFocusEffect } from '@react-navigation/native';
         lastMessageIdRef.current = latestMsgId;
         
         const mapped: Msg[] = msgs.map((m) => {
-          const createdAt = new Date(m.timestamp).getTime();
-          const time = new Date(m.timestamp).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+          const createdAt = getTimestampMs(m.timestamp);
+          const time = formatChatTime(m.timestamp);
           const role: 'user' | 'ai' = currentUserId && m.sender_id === currentUserId ? 'user' : 'ai';
           const status: 'sent' | 'delivered' | 'read' | undefined = role === 'user' ? 'read' : undefined;
           return { id: String(m.message_id), role, text: m.content, time, createdAt, status };
@@ -265,8 +266,8 @@ import { useFocusEffect } from '@react-navigation/native';
             if (data.type === 'new_message' && data.message) {
               const m = data.message as ApiMessage;
               const role: 'user' | 'ai' = m.sender_id === currentUserId ? 'user' : 'ai';
-              const createdAt = new Date(m.timestamp).getTime();
-              const time = new Date(m.timestamp).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+              const createdAt = getTimestampMs(m.timestamp);
+              const time = formatChatTime(m.timestamp);
               const newMsg: Msg = { id: String(m.message_id), role, text: m.content, time, createdAt, status: 'read' };
               
               setMessages((prev) => {
@@ -305,17 +306,6 @@ import { useFocusEffect } from '@react-navigation/native';
     };
   }, [conv, id, API_BASE_URL, getAuthToken, currentUserId]);
 
-  const formatDateLabel = (ts: number) => {
-    const d = new Date(ts);
-    const today = new Date();
-    const yday = new Date();
-    yday.setDate(today.getDate() - 1);
-    const isSame = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-    if (isSame(d, today)) return 'Today';
-    if (isSame(d, yday)) return 'Yesterday';
-    return d.toLocaleDateString();
-  };
-
   const listData = useMemo(() => {
     const out: Array<any> = [];
     let lastLabel = '';
@@ -335,7 +325,7 @@ import { useFocusEffect } from '@react-navigation/native';
     if (!trimmed || !chatOpen) return;
     await doHaptic('light');
     const now = Date.now();
-    const tm = new Date(now).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    const tm = getCurrentChatTime();
     const tempId = `temp-${now}`;
     const userMsg: Msg = { id: tempId, role: 'user', text: trimmed, time: tm, createdAt: now, status: 'sent' };
     setMessages((prev) => [...prev, userMsg]);
@@ -351,8 +341,8 @@ import { useFocusEffect } from '@react-navigation/native';
       });
       if (res.ok) {
         const m: ApiMessage = await res.json();
-        const createdAt = new Date(m.timestamp).getTime();
-        const time = new Date(m.timestamp).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+        const createdAt = getTimestampMs(m.timestamp);
+        const time = formatChatTime(m.timestamp);
         setMessages((prev) => prev.map((x) => (x.id === tempId ? { id: String(m.message_id), role: 'user', text: m.content, time, createdAt, status: 'read' } : x)));
       }
     } catch {}
@@ -361,17 +351,50 @@ import { useFocusEffect } from '@react-navigation/native';
   const toggleChat = async () => {
     await doHaptic('selection');
     const next = !chatOpen;
+    const newStatus = next ? 'open' : 'ended';
+    
+    // Optimistic update - update UI immediately
     setChatOpen(next);
+    setConv((prev) => prev ? { ...prev, status: newStatus } : prev);
+    
+    // Update global store for immediate sync with conversation list
+    if (conv) {
+      if (next) {
+        conversationStore.reopenConversation(conv.conversation_id);
+      } else {
+        conversationStore.closeConversation(conv.conversation_id);
+      }
+    }
+    
+    // Then sync with backend
     try {
       const tok = await getAuthToken();
       if (!tok || !conv) return;
-      await fetch(`${API_BASE_URL}/api/mobile/conversations/${conv.conversation_id}`, {
+      const res = await fetch(`${API_BASE_URL}/api/mobile/conversations/${conv.conversation_id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` },
-        body: JSON.stringify({ status: next ? 'open' : 'ended' }),
+        body: JSON.stringify({ status: newStatus }),
       });
-      setConv({ ...conv, status: next ? 'open' : 'ended' });
-    } catch {}
+      
+      if (!res.ok) {
+        // Revert on failure
+        console.error('Failed to update conversation status');
+        setChatOpen(!next);
+        setConv((prev) => prev ? { ...prev, status: next ? 'ended' : 'open' } : prev);
+        if (conv) {
+          if (next) {
+            conversationStore.closeConversation(conv.conversation_id);
+          } else {
+            conversationStore.reopenConversation(conv.conversation_id);
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Error toggling chat status:', e);
+      // Revert on error
+      setChatOpen(!next);
+      setConv((prev) => prev ? { ...prev, status: next ? 'ended' : 'open' } : prev);
+    }
   };
 
   const StatusBadge = ({ open }: { open: boolean }) => (
@@ -449,9 +472,9 @@ import { useFocusEffect } from '@react-navigation/native';
     <GlobalScreenWrapper backgroundColor={palette.background}>
       <KeyboardAvoidingView style={{ flex: 1, backgroundColor: palette.background }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <Stack.Screen options={{ title: (name as string) || 'Chat' }} />
-        {/* In-app header */}
+        {/* In-app header - Fixed layout to ensure status badge is always visible */}
         <Animated.View style={[styles.chatHeader, { backgroundColor: palette.background, borderBottomColor: palette.border }, makeFadeUp(entrance.header)]}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          <View style={styles.headerLeft}>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Go back"
@@ -462,13 +485,24 @@ import { useFocusEffect } from '@react-navigation/native';
             >
               <Icon name="chevron-left" size={20} color="#111827" />
             </Pressable>
-            <View style={[styles.avatar, { backgroundColor: '#111827' }]}><ThemedText style={{ color: '#FFFFFF', fontFamily: 'Inter_700Bold', fontSize: 17 }}>{(name || 'C')?.[0]?.toString().toUpperCase()}</ThemedText></View>
-            <View>
-              <ThemedText style={{ fontSize: 16, fontFamily: 'Inter_600SemiBold', color: '#111827', lineHeight: 20 }}>{name || 'Counselor'}</ThemedText>
-              <ThemedText style={{ color: '#9CA3AF', fontSize: 12, marginTop: -1 }}>Counseling Conversation</ThemedText>
+            <View style={[styles.avatar, { backgroundColor: '#111827' }]}>
+              <ThemedText style={{ color: '#FFFFFF', fontFamily: 'Inter_700Bold', fontSize: 17 }}>
+                {(name || 'C')?.[0]?.toString().toUpperCase()}
+              </ThemedText>
+            </View>
+            <View style={styles.headerTextWrap}>
+              <ThemedText style={styles.headerTitle} numberOfLines={1}>{name || 'Counselor'}</ThemedText>
+              <ThemedText style={styles.headerSubtitle}>Counseling Conversation</ThemedText>
             </View>
           </View>
-          <Pressable onPress={toggleChat} onPressIn={() => doHaptic('selection')} style={({ pressed }) => ({ opacity: pressed ? 0.8 : 1 })}> 
+          <Pressable 
+            onPress={toggleChat} 
+            onPressIn={() => doHaptic('selection')} 
+            style={({ pressed }) => [styles.statusBadgeBtn, { opacity: pressed ? 0.8 : 1 }]}
+            accessibilityRole="button"
+            accessibilityLabel={chatOpen ? 'Chat is open, tap to close' : 'Chat is closed, tap to reopen'}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          > 
             <StatusBadge open={chatOpen} />
           </Pressable>
         </Animated.View>
@@ -567,10 +601,37 @@ import { useFocusEffect } from '@react-navigation/native';
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#E5E7EB',
     backgroundColor: '#FFFFFF',
+    minHeight: 64,
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+    minWidth: 0,
+  },
+  headerTextWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  headerTitle: {
+    fontSize: 16,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#111827',
+    lineHeight: 20,
+  },
+  headerSubtitle: {
+    color: '#9CA3AF',
+    fontSize: 12,
+    marginTop: -1,
+  },
+  statusBadgeBtn: {
+    flexShrink: 0,
+    marginLeft: 8,
   },
   backBtn: {
     width: 36,
@@ -579,6 +640,7 @@ import { useFocusEffect } from '@react-navigation/native';
     backgroundColor: '#F3F4F6',
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
   badge: {
     borderWidth: 1,

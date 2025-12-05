@@ -9,7 +9,6 @@ import { Icon } from '@/components/ui/icon';
 import * as SecureStore from 'expo-secure-store';
 import { router } from 'expo-router';
 import { cleanupOnLogout } from '@/utils/notifications';
-import { logoutPush } from '@/utils/push-hybrid';
 
 export default function LogoutScreen() {
   // Match success overlays: fade + scale in (0.96 -> 1) with cubic timing
@@ -21,9 +20,6 @@ export default function LogoutScreen() {
 
   const doLogout = async () => {
     try {
-      // Cleanup platform-specific push state (Android: Pusher Beams, iOS: Expo token)
-      await logoutPush();
-      
       // Cleanup push notifications (unregister from backend, clear cache, remove listeners)
       await cleanupOnLogout();
       

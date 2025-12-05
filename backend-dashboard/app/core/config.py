@@ -58,10 +58,6 @@ class Settings(BaseSettings):
     INTERNAL_API_TOKEN: str = os.getenv("INTERNAL_API_TOKEN", "")
     INSIGHTS_FEATURE_ENABLED: bool = os.getenv("INSIGHTS_FEATURE_ENABLED", "1") in ("1", "true", "True")
     
-    # Pusher Beams (Android push notifications)
-    PUSHER_INSTANCE_ID: str = os.getenv("PUSHER_INSTANCE_ID", "")
-    PUSHER_SECRET_KEY: str = os.getenv("PUSHER_SECRET_KEY", "")
-    
     # Pydantic v2 settings config
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
 

@@ -3,10 +3,10 @@ import { Platform, BackHandler } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { 
+  initializePushNotifications,
   setupGlobalNotificationListeners,
   cleanupGlobalNotificationListeners
 } from '@/utils/notifications';
-import { initializePush, logoutPush } from '@/utils/push-hybrid';
 
 export default function StudentLayout() {
   const router = useRouter();
@@ -150,8 +150,8 @@ export default function StudentLayout() {
 
     console.log('[Push] === PUSH SETUP START ===');
     
-    // Initialize platform-specific push notifications (Android: Pusher Beams, iOS: Expo)
-    initializePush(userId);
+    // Initialize Expo push notifications for both Android and iOS
+    initializePushNotifications(userId);
     
     // Setup global listeners (singleton - safe to call multiple times)
     setupGlobalNotificationListeners();
@@ -174,6 +174,8 @@ export default function StudentLayout() {
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="appointments/index" options={{ headerShown: false }} />
       <Stack.Screen name="analytics/index" options={{ headerShown: false }} />
+      <Stack.Screen name="notifications/index" options={{ headerShown: false }} />
+      <Stack.Screen name="notifications/[id]" options={{ headerShown: false }} />
     </Stack>
   );
 }
