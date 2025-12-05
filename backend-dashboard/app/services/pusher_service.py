@@ -35,6 +35,7 @@ class PusherService:
     def _initialize(self):
         """Initialize Pusher client from environment variables."""
         if not PUSHER_AVAILABLE:
+            logging.error("[Pusher] ✗ pusher package not installed! Run: pip install pusher")
             self._client = None
             return
             
@@ -43,8 +44,10 @@ class PusherService:
         secret = os.getenv("PUSHER_APP_SECRET")
         cluster = os.getenv("PUSHER_APP_CLUSTER", "ap1")
         
+        logging.info(f"[Pusher] Checking credentials: app_id={'✓' if app_id else '✗'}, key={'✓' if key else '✗'}, secret={'✓' if secret else '✗'}")
+        
         if not all([app_id, key, secret]):
-            logging.warning("Pusher credentials not configured. Real-time features disabled.")
+            logging.error("[Pusher] ✗ Missing credentials in .env! Need: PUSHER_APP_ID, PUSHER_APP_KEY, PUSHER_APP_SECRET")
             self._client = None
             return
         
@@ -56,7 +59,7 @@ class PusherService:
                 cluster=cluster,
                 ssl=True
             )
-            logging.info(f"Pusher client initialized (cluster: {cluster})")
+            logging.info(f"[Pusher] ✓ Client initialized successfully (cluster: {cluster})")
         except Exception as e:
             logging.error(f"Failed to initialize Pusher: {e}")
             self._client = None
@@ -79,24 +82,37 @@ class PusherService:
             True if successful, False otherwise
         """
         if not self._client:
+            logging.warning(f"[Pusher] Client not available - cannot send {event} to {channel}")
             return False
         
         try:
             self._client.trigger(channel, event, data)
+            logging.info(f"[Pusher] ✓ Sent '{event}' to channel '{channel}'")
             return True
         except Exception as e:
-            logging.error(f"Pusher trigger failed: {e}")
+            logging.error(f"[Pusher] ✗ Failed to send '{event}' to '{channel}': {e}")
             return False
     
     def broadcast_message(self, conversation_id: int, message: Dict[str, Any]) -> bool:
         """Broadcast a new message to a conversation channel."""
-        return self.trigger(
+        # Broadcast to specific conversation channel
+        self.trigger(
             f"conversation-{conversation_id}",
             "message",
             {
                 "type": "message.created",
                 "conversation_id": conversation_id,
                 "message": message,
+            }
+        )
+        # Also broadcast to global conversations channel for sidebar badge updates
+        return self.trigger(
+            "conversations",
+            "new_message",
+            {
+                "type": "new_message",
+                "conversation_id": conversation_id,
+                "sender_id": message.get("sender_id"),
             }
         )
     
@@ -132,6 +148,31 @@ class PusherService:
             {
                 "conversation_id": conversation_id,
                 "status": status,
+            }
+        )
+    
+    def broadcast_messages_read(self, conversation_id: int, reader_id: int, count: int) -> bool:
+        """Broadcast that messages have been read in a conversation."""
+        return self.trigger(
+            f"conversation-{conversation_id}",
+            "messages_read",
+            {
+                "type": "messages.read",
+                "conversation_id": conversation_id,
+                "reader_id": reader_id,
+                "count": count,
+            }
+        )
+    
+    def broadcast_unread_count(self, user_id: int, total_unread: int) -> bool:
+        """Broadcast updated unread count to a specific user's channel."""
+        return self.trigger(
+            f"user-{user_id}",
+            "unread_count",
+            {
+                "type": "unread_count",
+                "user_id": user_id,
+                "total_unread": total_unread,
             }
         )
     

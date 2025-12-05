@@ -537,6 +537,7 @@ class InsightGenerationService:
         week_avg = round(sum(all_vals) / len(all_vals), 2) if all_vals else 0
         
         # Calculate week-over-week change (if we have enough data)
+        # This compares first half vs second half of the period
         prev_week_avg = None
         change_percent = None
         if len(daily) >= 4:
@@ -547,7 +548,10 @@ class InsightGenerationService:
                 prev_week_avg = round(sum(first_half) / len(first_half), 2)
                 curr_half_avg = round(sum(second_half) / len(second_half), 2)
                 if prev_week_avg > 0:
-                    change_percent = round((curr_half_avg - prev_week_avg) / prev_week_avg * 100, 1)
+                    # Calculate percentage change, capped at reasonable bounds
+                    raw_change = (curr_half_avg - prev_week_avg) / prev_week_avg * 100
+                    # Cap at -100% to +100% for display purposes
+                    change_percent = round(max(-100, min(100, raw_change)), 1)
 
         # Streaks data for output
         streaks_data = {

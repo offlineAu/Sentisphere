@@ -141,16 +141,88 @@ class SimpleSentimentModel:
         return SentimentOutput(label, label, round(conf, 2), "heuristic-1.0")
 
 
+class _FineTunedWrapper:
+    """Wrapper for fine-tuned sequence classification model."""
+    
+    def __init__(self, tok, mdl) -> None:
+        self.tok = tok
+        self.mdl = mdl
+        self.id2label = mdl.config.id2label
+    
+    def predict(self, text: str) -> SentimentOutput:
+        t = clean_text(text)
+        if not t:
+            return SentimentOutput("neutral", "neutral", 0.5, "finetuned-xlmr-v1")
+        
+        enc = self.tok(t, return_tensors="pt", truncation=True, max_length=256)
+        with torch.no_grad():
+            logits = self.mdl(**enc).logits
+        
+        probs = torch.softmax(logits[0], dim=-1)
+        pred_id = torch.argmax(probs).item()
+        conf = probs[pred_id].item()
+        label = self.id2label.get(pred_id, "neutral")
+        
+        return SentimentOutput(label, label, round(float(conf), 3), "finetuned-xlmr-v1")
+
+
+# Path to fine-tuned model (local or downloaded from HuggingFace)
+import os as _os
+_FINETUNED_MODEL_PATH = _os.path.join(
+    _os.path.dirname(_os.path.dirname(_os.path.dirname(__file__))), "models", "bisaya-sentiment"
+)
+_HF_MODEL_REPO = "OfflineAu/sentisphere-bisaya-sentiment"
+
+
+def _ensure_model_downloaded() -> str:
+    """Download model from HuggingFace if not present locally.
+    
+    Returns the model path (local path or HuggingFace repo ID for direct loading).
+    """
+    # Check if local model exists
+    if _os.path.exists(_FINETUNED_MODEL_PATH) and _os.path.exists(
+        _os.path.join(_FINETUNED_MODEL_PATH, "model.safetensors")
+    ):
+        print(f"[NLP] Using local model at {_FINETUNED_MODEL_PATH}")
+        return _FINETUNED_MODEL_PATH
+    
+    # For Railway/production: just return HF repo ID (transformers can load directly)
+    # This avoids downloading to local disk which may not persist
+    print(f"[NLP] Will load model directly from HuggingFace: {_HF_MODEL_REPO}")
+    return _HF_MODEL_REPO
+
+
 @lru_cache(maxsize=1)
 def get_sentiment_model():
-    """Lazy-load and cache the preferred sentiment model instance."""
+    """Lazy-load and cache the preferred sentiment model instance.
+    
+    Priority:
+    1. Fine-tuned model (local or downloaded from HuggingFace)
+    2. Zero-shot XLM-RoBERTa MLM
+    3. Heuristic fallback
+    """
     if _HAS_TRANSFORMERS:
+        # Try fine-tuned model first (local or from HuggingFace)
+        model_source = _ensure_model_downloaded()
+        try:
+            from transformers import AutoModelForSequenceClassification
+            tok = AutoTokenizer.from_pretrained(model_source)
+            mdl = AutoModelForSequenceClassification.from_pretrained(model_source)
+            print(f"[NLP] Loaded fine-tuned model from {model_source}")
+            return _FineTunedWrapper(tok, mdl)
+        except Exception as e:
+            print(f"[NLP] Failed to load fine-tuned model: {e}")
+        
+        # Fall back to zero-shot MLM
         try:
             tok = AutoTokenizer.from_pretrained("xlm-roberta-base")
             mdl = AutoModelForMaskedLM.from_pretrained("xlm-roberta-base")
+            print("[NLP] Using zero-shot XLM-RoBERTa MLM")
             return _XLMRWrapper(tok, mdl)
         except Exception:
             pass
+    
+    print("[NLP] Using heuristic fallback")
     return SimpleSentimentModel()
 
 

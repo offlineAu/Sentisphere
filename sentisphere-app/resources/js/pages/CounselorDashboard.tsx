@@ -162,7 +162,8 @@ const StatCard: React.FC<{
   variant?: 'default' | 'appointments' | 'risk' | 'checkins';
   customGradient?: string;
   isLive?: boolean;
-}> = ({ title, value, icon, delta, variant = 'default', customGradient, isLive = false }) => {
+  tooltip?: string;
+}> = ({ title, value, icon, delta, variant = 'default', customGradient, isLive = false, tooltip }) => {
   const getGradient = () => {
     if (customGradient) {
       return `bg-gradient-to-br ${customGradient} border border-transparent`;
@@ -207,7 +208,7 @@ const StatCard: React.FC<{
   };
 
   return (
-    <div className={`${getGradient()} rounded-2xl shadow p-5 hover:shadow-md transition-all duration-300 h-full relative`}>
+    <div className={`${getGradient()} rounded-2xl shadow p-5 hover:shadow-md transition-all duration-300 h-full relative`} title={tooltip}>
       {/* Live indicator */}
       {isLive && (
         <div className="absolute top-2 right-2 flex items-center gap-1" title="Real-time updates active">
@@ -218,8 +219,9 @@ const StatCard: React.FC<{
         </div>
       )}
       <div className="flex items-center justify-between mb-2">
-        <h3 className="text-sm font-medium text-white">
+        <h3 className="text-sm font-medium text-white flex items-center gap-1">
           {title}
+          {tooltip && <Info className="h-3 w-3 opacity-70" />}
         </h3>
         <div className={`p-2 rounded-lg ${getIconBgColor()}`}>
           <div className={getTextColor()}>
@@ -357,10 +359,14 @@ export default function CounselorDashboard() {
   );
 
   // WebSocket for instant notifications - triggers data refresh
-  const handleStatsUpdate = useCallback((stats: DashboardStats) => {
+  // Use refs to avoid recreating callbacks and causing infinite loops
+  const handleStatsUpdate = useCallback((_stats: DashboardStats) => {
     console.log('[Dashboard] WebSocket notification - refreshing data');
-    // Trigger a full data refresh when we receive WebSocket updates
     setRefreshKey(prev => prev + 1);
+  }, []);
+
+  const handleConnectionChange = useCallback((connected: boolean) => {
+    console.log('[Dashboard] WebSocket:', connected ? 'connected' : 'disconnected');
   }, []);
 
   const {
@@ -369,9 +375,7 @@ export default function CounselorDashboard() {
   } = useDashboardSocket({
     autoConnect: authenticated,
     onStatsUpdate: handleStatsUpdate,
-    onConnectionChange: (connected) => {
-      console.log('[Dashboard] WebSocket:', connected ? 'connected' : 'disconnected');
-    },
+    onConnectionChange: handleConnectionChange,
   });
 
   const moodScale = [
@@ -1090,6 +1094,7 @@ export default function CounselorDashboard() {
             icon={<Users className="h-4 w-4" />}
             delta={wsLastUpdate ? `Live • ${wsLastUpdate.toLocaleTimeString()}` : `Updated ${formatDate(new Date())}`}
             isLive={wsConnected}
+            tooltip="Total number of students who have submitted at least one check-in or journal entry."
           />
           <StatCard
             title="This Week Check-ins"
@@ -1098,6 +1103,7 @@ export default function CounselorDashboard() {
             icon={<CalendarCheck className="h-4 w-4" />}
             delta={wsConnected ? "Real-time" : undefined}
             isLive={wsConnected}
+            tooltip="Number of emotional check-ins submitted by students during the current week (Monday to Sunday)."
           />
           <StatCard
             title="Downloaded Appointment Forms"
@@ -1106,6 +1112,7 @@ export default function CounselorDashboard() {
             icon={<CalendarClock className="h-4 w-4" />}
             delta={wsConnected ? "Real-time" : undefined}
             isLive={wsConnected}
+            tooltip="Count of students who downloaded appointment request forms this week. May indicate students seeking counseling support."
           />
           <StatCard
             title="High-Risk Flags"
@@ -1114,6 +1121,7 @@ export default function CounselorDashboard() {
             icon={<AlertTriangle className="h-4 w-4" />}
             delta={wsConnected ? "Real-time" : undefined}
             isLive={wsConnected}
+            tooltip="Students flagged for immediate attention based on negative sentiment patterns, distress keywords, or consecutive low mood scores."
           />
         </div>
 
@@ -1125,6 +1133,7 @@ export default function CounselorDashboard() {
               <div className={`${styles.cardHeader}`}>
                 <div className="flex items-center gap-2">
                   <h2 className={styles.sectionTitle}>Weekly Mood Analytics</h2>
+                  <span className="text-[10px] text-blue-500 cursor-help" title="Average mood scores per week based on student check-ins. Scale: 1 (Terrible) to 9 (Awesome). Helps identify trends and periods of concern.">ⓘ</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
@@ -1231,7 +1240,10 @@ export default function CounselorDashboard() {
           {/* Recent Alerts (1/3 width on desktop) */}
           <div>
             <div className="bg-white rounded-2xl shadow p-4 h-[470px] flex flex-col justify-between">
-              <h3 className="font-semibold text-primary text-lg mb-1">Recent Alerts</h3>
+              <h3 className="font-semibold text-primary text-lg mb-1 flex items-center gap-1">
+                Recent Alerts
+                <span className="text-[10px] text-blue-500 cursor-help" title="Automatically generated alerts when students show concerning patterns: high stress, negative sentiment, distress keywords, or declining mood trends.">ⓘ</span>
+              </h3>
               <p className="text-[#6b7280] text-sm mb-3">Students who may need attention</p>
               <div className="space-y-3 flex-1 overflow-y-auto pr-1">
                 {recentAlerts.slice(0, 5).map((alert, idx) => (
@@ -1331,6 +1343,7 @@ export default function CounselorDashboard() {
               <div className={`${styles.cardHeader}`}>
                 <div className="flex items-center gap-2">
                   <h2 className={styles.sectionTitle}>Sentiment Breakdown</h2>
+                  <span className="text-[10px] text-blue-500 cursor-help" title="Distribution of sentiment from student check-ins and journals. Analyzed using NLP to classify text as Positive, Neutral, or Negative.">ⓘ</span>
                 </div>
                 <div className="flex justify-end gap-2">
                   {(["week", "month", "year"] as const).map((p) => (
@@ -1440,7 +1453,10 @@ export default function CounselorDashboard() {
               {/* Check-in Breakdown: Mood, Energy, Stress */}
               <div className="mt-6 space-y-3">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-sm font-medium text-primary">Check-in Breakdown </h3>
+                  <h3 className="text-sm font-medium text-primary flex items-center gap-1">
+                    Check-in Breakdown
+                    <span className="text-[10px] text-blue-500 cursor-help" title="Summary of student-reported mood, energy, and stress levels from check-ins. Shows distribution across different levels for the selected period.">ⓘ</span>
+                  </h3>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   {(() => {
@@ -1644,7 +1660,10 @@ export default function CounselorDashboard() {
           {/* Right rail: Appointment Logs */}
         <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow p-5 hover:shadow-md transition-all duration-300 border border-gray-100 flex flex-col self-start h-[470px] justify-between">
                   <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-lg font-semibold text-primary">Appointment Logs</h2>
+                    <h2 className="text-lg font-semibold text-primary flex items-center gap-1">
+                      Appointment Logs
+                      <span className="text-[10px] text-blue-500 cursor-help" title="Record of students who downloaded appointment request forms. Helps track counseling demand and follow up with students seeking support.">ⓘ</span>
+                    </h2>
                     {appointmentLogs.length > APPOINTMENTS_PER_PAGE && (
                       <span className="text-xs text-gray-500">
                         {appointmentPage * APPOINTMENTS_PER_PAGE + 1}-{Math.min((appointmentPage + 1) * APPOINTMENTS_PER_PAGE, appointmentLogs.length)} of {appointmentLogs.length}
@@ -1709,9 +1728,12 @@ export default function CounselorDashboard() {
                     </button>
                   </div>
                 )}
-            {/* AI Analysis below Appointment Logs */}
+            {/* Wellness Analysis below Appointment Logs */}
             <div className="mt-5 pt-4 border-t">
-              <div className="text-sm font-medium text-primary mb-2">AI Analysis (Last Week)</div>
+              <div className="text-sm font-medium text-primary mb-2 flex items-center gap-1">
+                Weekly Wellness Summary
+                <span className="text-[10px] text-blue-500 cursor-help" title="Generates a summary of student wellness patterns from the previous week. Uses rule-based analysis of mood trends, sentiment, and stress patterns.">ⓘ</span>
+              </div>
               <div className="flex-1 flex items-center justify-center">
                 <button
                   onClick={async () => {
@@ -1726,19 +1748,19 @@ export default function CounselorDashboard() {
                       const partB = mood.data?.summary || '';
                       const combined = [partA, partB].filter(Boolean).join("\n\n");
                       setAICheckinSummary(
-                        combined || 'No previous week summary available from the model.'
+                        combined || 'No previous week summary available.'
                       );
                     } catch (e) {
-                      console.error('AI summary error', e);
+                      console.error('Summary generation error', e);
                       setAICheckinSummary('Failed to generate previous week summary. Please try again later.');
                     }
                   }}
                   className="w-full flex flex-col items-center justify-center gap-3 p-4 bg-white rounded-lg border-2 border-dashed border-gray-300 hover:border-indigo-400 hover:bg-indigo-50 transition-all duration-200"
-                  title="Generate AI summary for last week"
+                  title="Generate wellness summary for last week"
                 >
                   <Lightbulb className="h-10 w-10 text-indigo-500" />
                   <span className="text-indigo-600 font-medium">Generate Last Week Summary</span>
-                  <span className="text-xs text-gray-500 text-center max-w-[220px]">Analyzes journals and check-ins for the previous week</span>
+                  <span className="text-xs text-gray-500 text-center max-w-[220px]">Analyzes mood trends and sentiment patterns from the previous week</span>
                 </button>
               </div>
             </div>
