@@ -28,7 +28,6 @@ from app.db.database import engine, ENGINE_INIT_ERROR_MSG
 from app.db.mobile_database import mobile_engine, get_mobile_db
 from app.db.session import get_db, SessionLocal
 from app.api.routes.auth import router as auth_router
-from app.api.pusher import router as pusher_router
 from app.models.alert import Alert, AlertSeverity, AlertStatus
 from app.models.counselor_profile import CounselorProfile
 from app.models.appointment_log import AppointmentLog
@@ -104,9 +103,6 @@ app.add_middleware(
 
 # Optional auth router (not enforced on other routes)
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
-
-# Pusher Beams auth router for Android push notifications
-app.include_router(pusher_router, prefix="/pusher", tags=["pusher"])
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
 
@@ -2434,29 +2430,24 @@ async def create_notification_endpoint(
 
 
 @app.post("/api/test-push/{user_id}")
-async def test_hybrid_push(user_id: int):
+async def test_push(user_id: int):
     """
-    Test hybrid push notification endpoint.
+    Test push notification endpoint.
     
-    Sends a test notification using the platform-appropriate method:
-    - iOS users (with ExponentPushToken): Expo Push API
-    - Android users (no Expo token): Pusher Beams
-    
-    Use this endpoint to verify the hybrid push system is working correctly.
+    Sends a test notification via Expo Push API.
+    Works for both Android and iOS users with ExponentPushToken.
     """
-    from app.services.push_notification_service import send_hybrid_push
+    from app.services.push_notification_service import send_test_notification
     
-    result = await send_hybrid_push(
+    result = await send_test_notification(
         mobile_engine=mobile_engine,
         user_id=user_id,
-        title="Hybrid Push Test",
-        message="Your hybrid push notification system works!",
-        data={"test": True, "timestamp": datetime.utcnow().isoformat()}
+        title="Push Test",
+        message="Your push notification system works!"
     )
     
     return {
         "status": "sent" if result.get("success") else "failed",
-        "method": result.get("method"),
         "user_id": user_id,
         "success": result.get("success"),
         "error": result.get("error"),
@@ -2531,6 +2522,88 @@ async def mark_notification_read_endpoint(
         raise HTTPException(status_code=500, detail="Failed to mark notification as read")
     
     return {"ok": True, "notification_id": notification_id, "is_read": True}
+
+
+@app.put("/api/notifications/{notification_id}/read")
+async def mark_notification_read_put(
+    notification_id: int,
+    token: str = Depends(oauth2_scheme),
+):
+    """
+    Mark a notification as read (PUT alias for PATCH).
+    Sets is_read = TRUE and read_at = NOW()
+    """
+    from app.services.push_notification_service import mark_notification_read
+    
+    try:
+        data = decode_token(token)
+        user_id = int(data.get("sub"))
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    
+    check_q = text("SELECT id FROM notification WHERE id = :id AND user_id = :user_id")
+    with mobile_engine.connect() as conn:
+        exists = conn.execute(check_q, {"id": notification_id, "user_id": user_id}).first()
+    
+    if not exists:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    
+    success = mark_notification_read(mobile_engine, notification_id)
+    
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to mark notification as read")
+    
+    return {"ok": True, "notification_id": notification_id, "is_read": True}
+
+
+@app.get("/api/notifications/unread-count")
+async def get_unread_notification_count(
+    token: str = Depends(oauth2_scheme),
+):
+    """
+    Get the count of unread notifications for the authenticated user.
+    """
+    try:
+        data = decode_token(token)
+        user_id = int(data.get("sub"))
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    
+    count_q = text("SELECT COUNT(*) as count FROM notification WHERE user_id = :user_id AND is_read = FALSE")
+    with mobile_engine.connect() as conn:
+        count = conn.execute(count_q, {"user_id": user_id}).scalar() or 0
+    
+    return {"unread_count": count}
+
+
+@app.get("/api/notifications/{notification_id}")
+async def get_notification_by_id(
+    notification_id: int,
+    token: str = Depends(oauth2_scheme),
+):
+    """
+    Get a single notification by ID.
+    """
+    try:
+        data = decode_token(token)
+        user_id = int(data.get("sub"))
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    
+    select_q = text(
+        """
+        SELECT id, user_id, title, message, category, source, related_alert_id,
+               is_sent, sent_at, is_read, read_at, created_at
+        FROM notification WHERE id = :id AND user_id = :user_id
+        """
+    )
+    with mobile_engine.connect() as conn:
+        row = conn.execute(select_q, {"id": notification_id, "user_id": user_id}).mappings().first()
+    
+    if not row:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    
+    return dict(row)
 
 
 class TestNotificationRequest(BaseModel):
@@ -2959,14 +3032,14 @@ else:
     try:
         scheduler = BackgroundScheduler()
         
-        # Daily quotes - every minute for testing (normally 9 AM daily)
-        # TODO: Change back to CronTrigger(hour=9, minute=0) for production
+        # Daily quotes - TEST MODE (every minute)
         scheduler.add_job(
             schedule_daily_quotes,
-            CronTrigger(minute="*"),  # Every minute for testing
+            CronTrigger(minute="*"),
             id="daily_quotes",
             replace_existing=True
         )
+        print("[Scheduler] Running daily quotes in TEST MODE (every minute)")
         
         # Alert monitor every 1 minute (for quick response to high-risk alerts)
         # TODO: Change back to */15 for production

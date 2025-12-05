@@ -1,13 +1,13 @@
 {
   "project_info": {
-    "project_number": "752875110036",
-    "project_id": "sentisphere-be1f1",
-    "storage_bucket": "sentisphere-be1f1.firebasestorage.app"
+    "project_number": "433019762952",
+    "project_id": "sentisphere-62b3a",
+    "storage_bucket": "sentisphere-62b3a.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:752875110036:android:c56532081345aeb0f13e81",
+        "mobilesdk_app_id": "1:433019762952:android:5ecb6dd8cd34a23dec94bd",
         "android_client_info": {
           "package_name": "com.sentisphere.mobile"
         }
@@ -15,7 +15,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyD2HZKnB1Hj10CazuJGWYTbp7IgBQkI8U4"
+          "current_key": "AIzaSyB5St9WUbq8TCcNVa2Crw4JL5edUII12Ko"
         }
       ],
       "services": {
