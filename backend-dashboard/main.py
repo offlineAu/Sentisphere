@@ -1630,11 +1630,16 @@ def mobile_typing_indicator(
     except Exception:
         pass
     
+    # DEBUG: Log typing indicator
+    print(f"[DEBUG TYPING] Mobile user {uid} ({nickname}) typing in conversation {conversation_id}")
+    
     # Broadcast via Pusher
+    pusher_result = False
     try:
-        pusher_service.broadcast_typing(conversation_id, uid, nickname)
-    except Exception:
-        pass
+        pusher_result = pusher_service.broadcast_typing(conversation_id, uid, nickname)
+        print(f"[DEBUG TYPING] Pusher broadcast result: {pusher_result}")
+    except Exception as e:
+        print(f"[DEBUG TYPING] Pusher error: {e}")
     
     # Also broadcast via WebSocket for backward compatibility
     try:
@@ -2081,17 +2086,31 @@ def counselor_send_message(
         ),
         {"mid": mid},
     ).mappings().first()
+    
+    # Build payload - FORCE Philippine timezone on timestamp
     if row:
-        print(f"  Stored in DB:   {row['timestamp']}", file=sys.stderr)
+        payload = dict(row)
+        # Convert timestamp to Philippine time string (DB may return UTC)
+        db_ts = row['timestamp']
+        if db_ts:
+            # If DB returned naive datetime, assume it's UTC and convert to PH
+            if hasattr(db_ts, 'tzinfo') and db_ts.tzinfo is None:
+                # Naive datetime from DB - assume UTC, convert to PH
+                utc_dt = db_ts.replace(tzinfo=timezone.utc)
+                ph_dt = utc_dt.astimezone(PH_TZ)
+                payload['timestamp'] = ph_dt.strftime("%Y-%m-%dT%H:%M:%S")
+            else:
+                payload['timestamp'] = db_ts.astimezone(PH_TZ).strftime("%Y-%m-%dT%H:%M:%S") if hasattr(db_ts, 'astimezone') else str(db_ts)
+    else:
+        payload = {"message_id": mid, "conversation_id": conversation_id, "sender_id": counselor_id, "content": message_in.content, "is_read": False, "timestamp": ph_now}
     
-    payload = dict(row) if row else {"message_id": mid, "conversation_id": conversation_id, "sender_id": counselor_id, "content": message_in.content, "is_read": False}
-    
-    # Add debug info to response (visible in browser Network tab)
+    # Add debug info to response
     payload["_debug"] = {
         "utc_now": utc_now.isoformat(),
         "ph_now": ph_now_dt.isoformat(),
         "ph_string_sent_to_db": ph_now,
-        "stored_in_db": str(row['timestamp']) if row else None,
+        "db_returned": str(row['timestamp']) if row else None,
+        "final_timestamp": payload.get('timestamp'),
         "server_tz": str(datetime.now().astimezone().tzinfo),
     }
     
