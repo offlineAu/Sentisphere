@@ -23,7 +23,7 @@ export default function ChatScreen() {
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://sentisphere-production.up.railway.app';
-  
+
   // Use store for conversations with subscription for reactivity
   const [conversations, setConversations] = useState<ApiConversation[]>(conversationStore.getConversations());
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
@@ -33,7 +33,7 @@ export default function ChatScreen() {
   const [cLoading, setCLoading] = useState(false);
   const [cSearch, setCSearch] = useState('');
   const [searchFocused, setSearchFocused] = useState(false);
-  
+
   // Subscribe to store changes
   useEffect(() => {
     const unsubscribe = conversationStore.subscribe(() => {
@@ -100,7 +100,7 @@ export default function ChatScreen() {
           const me = await meRes.json();
           setCurrentUserId(me?.user_id ?? null);
         }
-      } catch {}
+      } catch { }
       const res = await fetch(`${API_BASE_URL}/api/mobile/conversations?include_messages=true`, {
         headers: { Authorization: `Bearer ${tok}` },
       });
@@ -108,7 +108,7 @@ export default function ChatScreen() {
         const data: ApiConversation[] = await res.json();
         conversationStore.setConversations(data);
       }
-    } catch {}
+    } catch { }
     finally {
       conversationStore.setLoading(false);
     }
@@ -117,12 +117,12 @@ export default function ChatScreen() {
   useEffect(() => {
     fetchConversations();
   }, [fetchConversations]);
-  
+
   // Refresh on focus
   useFocusEffect(useCallback(() => {
     fetchConversations();
     runEntrance();
-    return () => {};
+    return () => { };
   }, [fetchConversations]));
 
   const doHaptic = async (kind: 'light' | 'selection' | 'success' = 'light') => {
@@ -131,7 +131,7 @@ export default function ChatScreen() {
       if (kind === 'success') return await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       if (kind === 'selection') return await Haptics.selectionAsync();
       return await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    } catch {}
+    } catch { }
   };
 
   const formatTime = (iso?: string | null) => {
@@ -169,43 +169,57 @@ export default function ChatScreen() {
   };
 
   const createWithCounselor = async (c: Counselor) => {
+    // Check for existing conversation with this counselor (prevent duplicates)
+    const existing = conversations.find(
+      conv => conv.counselor_id === c.user_id
+    );
+    if (existing) {
+      setPickerOpen(false);
+      await doHaptic('selection');
+      router.push({
+        pathname: '/(student)/(tabs)/chat/[id]',
+        params: { id: String(existing.conversation_id), name: c.name || c.nickname || 'Counselor' }
+      });
+      return;
+    }
+
     try {
       const tok = await getAuthToken();
       if (!tok) {
         console.error('No auth token');
         return;
       }
-      
+
       // Ensure counselor_id is a valid number
       const counselorId = c.user_id;
       if (!counselorId || typeof counselorId !== 'number') {
         console.error('Invalid counselor_id:', counselorId, 'Full counselor object:', JSON.stringify(c));
         return;
       }
-      
+
       const subject = c.name || c.nickname || c.email || 'Counselor';
       const requestBody = { subject, counselor_id: counselorId };
-      
+
       console.log('=== Creating Conversation ===');
       console.log('Counselor selected:', JSON.stringify(c));
       console.log('Request body:', JSON.stringify(requestBody));
-      
+
       const res = await fetch(`${API_BASE_URL}/api/mobile/conversations`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` },
         body: JSON.stringify(requestBody),
       });
-      
+
       if (!res.ok) {
         const errorText = await res.text();
         console.error('Failed to create conversation:', res.status, errorText);
         return;
       }
-      
+
       const convo: ApiConversation = await res.json();
       console.log('Created conversation response:', JSON.stringify(convo));
       console.log('Counselor ID in response:', convo.counselor_id);
-      
+
       setPickerOpen(false);
       conversationStore.addConversation(convo);
       router.push({ pathname: '/(student)/(tabs)/chat/[id]', params: { id: String(convo.conversation_id), name: subject } });
@@ -242,12 +256,12 @@ export default function ChatScreen() {
     try {
       const tok = await getAuthToken();
       if (!tok) return;
-      
+
       const res = await fetch(`${API_BASE_URL}/api/mobile/conversations/${conversationId}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${tok}` },
       });
-      
+
       if (!res.ok) {
         // Revert on failure - refetch conversations
         console.error('Failed to delete conversation on backend, refetching...');
@@ -262,7 +276,7 @@ export default function ChatScreen() {
 
   return (
     <GlobalScreenWrapper backgroundColor="#FFFFFF" topPadding={24}>
-      <KeyboardAvoidingView style={{ flex: 1, paddingHorizontal: 16, backgroundColor: '#FFFFFF' }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}> 
+      <KeyboardAvoidingView style={{ flex: 1, paddingHorizontal: 16, backgroundColor: '#FFFFFF' }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         {/* Header with back and add buttons */}
         <Animated.View style={[styles.headerRow, makeFadeUp(entrance.header)]}>
           <Pressable
@@ -319,7 +333,7 @@ export default function ChatScreen() {
                 {conversations.map((c) => {
                   const msgs = c.messages || [];
                   // Sort messages by timestamp to ensure we get the latest
-                  const sortedMsgs = [...msgs].sort((a, b) => 
+                  const sortedMsgs = [...msgs].sort((a, b) =>
                     getTimestampMs(a.timestamp) - getTimestampMs(b.timestamp)
                   );
                   const last = sortedMsgs.length > 0 ? sortedMsgs[sortedMsgs.length - 1] : undefined;
@@ -327,20 +341,20 @@ export default function ChatScreen() {
                   // Use counselor_name (live from user table) instead of subject (static from creation)
                   const name = c.counselor_name || c.subject || `Conversation #${c.conversation_id}`;
                   const isClosed = c.status === 'ended';
-                  
+
                   // Handle conversation press with optimistic read marking
                   const handleConversationPress = async () => {
                     // 1. Optimistic update - mark as read immediately in store
                     if (hasUnread) {
                       conversationStore.markConversationAsRead(c.conversation_id);
                     }
-                    
+
                     // 2. Navigate to conversation detail
                     router.push({ pathname: '/(student)/(tabs)/chat/[id]', params: { id: String(c.conversation_id), name } });
-                    
+
                     // 3. Backend will mark as read when conversation detail loads (existing behavior)
                   };
-                  
+
                   return (
                     <View key={c.conversation_id} style={styles.convItemWrapper}>
                       <Pressable
@@ -361,13 +375,13 @@ export default function ChatScreen() {
                       >
                         {/* Left accent bar for unread conversations */}
                         {hasUnread && !isClosed && <View style={styles.unreadAccent} />}
-                        
+
                         <View style={styles.convLeft}>
                           <View style={[
-                            styles.avatar, 
-                            { 
-                              backgroundColor: isClosed ? '#9CA3AF' : (hasUnread ? '#0D8C4F' : '#111827'), 
-                              opacity: isClosed ? 0.8 : 1 
+                            styles.avatar,
+                            {
+                              backgroundColor: isClosed ? '#9CA3AF' : (hasUnread ? '#0D8C4F' : '#111827'),
+                              opacity: isClosed ? 0.8 : 1
                             }
                           ]}>
                             <ThemedText style={{ color: '#FFFFFF', fontFamily: 'Inter_700Bold', fontSize: 15 }}>
@@ -375,24 +389,24 @@ export default function ChatScreen() {
                             </ThemedText>
                           </View>
                           <View style={styles.convTextWrap}>
-                            <ThemedText 
-                              style={{ 
-                                fontFamily: hasUnread ? 'Inter_700Bold' : 'Inter_600SemiBold', 
-                                fontSize: 15, 
+                            <ThemedText
+                              style={{
+                                fontFamily: hasUnread ? 'Inter_700Bold' : 'Inter_600SemiBold',
+                                fontSize: 15,
                                 color: isClosed ? '#6B7280' : (hasUnread ? '#111827' : '#374151'),
                                 opacity: isClosed ? 0.8 : 1
-                              }} 
+                              }}
                               numberOfLines={1}
                             >
                               {name}
                             </ThemedText>
-                            <ThemedText 
-                              style={{ 
-                                color: isClosed ? '#DC2626' : (hasUnread ? '#4B5563' : '#6B7280'), 
+                            <ThemedText
+                              style={{
+                                color: isClosed ? '#DC2626' : (hasUnread ? '#4B5563' : '#6B7280'),
                                 fontSize: 13,
                                 fontFamily: isClosed ? 'Inter_500Medium' : (hasUnread ? 'Inter_500Medium' : undefined),
                                 fontStyle: isClosed ? 'italic' : 'normal',
-                              }} 
+                              }}
                               numberOfLines={1}
                             >
                               {isClosed ? 'Conversation ended' : (last?.content || 'Start the conversation')}
@@ -420,10 +434,10 @@ export default function ChatScreen() {
                           ) : (
                             <>
                               {last?.timestamp && (
-                                <ThemedText style={{ 
-                                  color: hasUnread ? '#0D8C4F' : '#9CA3AF', 
-                                  fontSize: 12, 
-                                  fontFamily: hasUnread ? 'Inter_600SemiBold' : 'Inter_500Medium' 
+                                <ThemedText style={{
+                                  color: hasUnread ? '#0D8C4F' : '#9CA3AF',
+                                  fontSize: 12,
+                                  fontFamily: hasUnread ? 'Inter_600SemiBold' : 'Inter_500Medium'
                                 }}>
                                   {formatTime(last.timestamp)}
                                 </ThemedText>
@@ -693,10 +707,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#A7F3D0',
   },
-  unreadDot: { 
-    width: 8, 
-    height: 8, 
-    borderRadius: 4, 
+  unreadDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
     backgroundColor: '#10B981', // Sentisphere green
   },
   iconPill: {
