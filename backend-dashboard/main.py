@@ -1556,12 +1556,12 @@ async def mobile_send_message(
         text(
             """
             INSERT INTO messages (conversation_id, sender_id, content, is_read, timestamp)
-            VALUES (:cid, :sid, :content, :is_read, NOW())
+            VALUES (:cid, :sid, :content, :is_read, CONVERT_TZ(NOW(), '+00:00', '+08:00'))
             """
         ),
         {"cid": conversation_id, "sid": uid, "content": message_in.content, "is_read": bool(message_in.is_read)},
     )
-    mdb.execute(text("UPDATE conversations SET last_activity_at = NOW() WHERE conversation_id = :cid"), {"cid": conversation_id})
+    mdb.execute(text("UPDATE conversations SET last_activity_at = CONVERT_TZ(NOW(), '+00:00', '+08:00') WHERE conversation_id = :cid"), {"cid": conversation_id})
     mdb.commit()
     mid = res.lastrowid
     row = mdb.execute(
@@ -2033,12 +2033,12 @@ def counselor_send_message(
         text(
             """
             INSERT INTO messages (conversation_id, sender_id, content, is_read, timestamp)
-            VALUES (:cid, :sid, :content, :is_read, NOW())
+            VALUES (:cid, :sid, :content, :is_read, CONVERT_TZ(NOW(), '+00:00', '+08:00'))
             """
         ),
         {"cid": conversation_id, "sid": counselor_id, "content": message_in.content, "is_read": False},
     )
-    mdb.execute(text("UPDATE conversations SET last_activity_at = NOW() WHERE conversation_id = :cid"), {"cid": conversation_id})
+    mdb.execute(text("UPDATE conversations SET last_activity_at = CONVERT_TZ(NOW(), '+00:00', '+08:00') WHERE conversation_id = :cid"), {"cid": conversation_id})
     mdb.commit()
     mid = res.lastrowid
     row = mdb.execute(
@@ -4364,7 +4364,7 @@ class MessageIn(BaseModel):
 def send_message(conversation_id: int, message: MessageIn, current_user: str = Depends(get_current_user)):
     query = """
         INSERT INTO messages (conversation_id, sender_id, content, timestamp)
-        VALUES (:cid, :sid, :content, NOW())
+        VALUES (:cid, :sid, :content, CONVERT_TZ(NOW(), '+00:00', '+08:00'))
     """
     with engine.connect() as conn:
         result = conn.execute(
@@ -4373,12 +4373,14 @@ def send_message(conversation_id: int, message: MessageIn, current_user: str = D
         )
         conn.commit()
 
+        from zoneinfo import ZoneInfo
+        ph_tz = ZoneInfo("Asia/Manila")
         return {
             "id": result.lastrowid,
             "conversation_id": conversation_id,
             "sender_id": message.sender_id,
             "content": message.content,
-            "timestamp": str(datetime.now())
+            "timestamp": str(datetime.now(ph_tz))
         }
 
 @app.get("/health")

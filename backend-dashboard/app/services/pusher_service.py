@@ -199,7 +199,7 @@ class PusherService:
             }
         )
     
-    def broadcast_typing(self, conversation_id: int, user_id: int, nickname: str) -> bool:
+    def broadcast_typing(self, conversation_id: int, user_id: int, nickname: str, is_typing: bool = True) -> bool:
         """Broadcast typing indicator to a conversation channel."""
         return self.trigger(
             f"conversation-{conversation_id}",
@@ -208,7 +208,9 @@ class PusherService:
                 "type": "typing",
                 "conversation_id": conversation_id,
                 "user_id": user_id,
+                "user_name": nickname,
                 "nickname": nickname,
+                "is_typing": is_typing,
             }
         )
     
