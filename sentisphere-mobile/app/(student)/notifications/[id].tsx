@@ -4,9 +4,18 @@ import { ThemedText } from '@/components/themed-text';
 import { GlobalScreenWrapper } from '@/components/GlobalScreenWrapper';
 import { Icon } from '@/components/ui/icon';
 import { notificationStore, Notification } from '@/stores/notificationStore';
+import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
+import timezone from 'dayjs/plugin/timezone';
 import * as Haptics from 'expo-haptics';
 import * as SecureStore from 'expo-secure-store';
 import { router, useLocalSearchParams } from 'expo-router';
+import { parseTimestamp } from '@/utils/time';
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
+
+const APP_TIMEZONE = 'Asia/Manila';
 
 // Brand colors
 const BRAND_GREEN = '#10B981';
@@ -60,7 +69,7 @@ export default function NotificationDetailScreen() {
 
   const fetchNotification = async () => {
     if (!id) return;
-    
+
     // First check if we have it in store
     const cached = notificationStore.getNotificationById(Number(id));
     if (cached) {
@@ -72,7 +81,7 @@ export default function NotificationDetailScreen() {
       }
       return;
     }
-    
+
     // Fetch from API
     try {
       const tok = await getAuthToken();
@@ -98,7 +107,7 @@ export default function NotificationDetailScreen() {
   const markAsRead = async (notificationId: number) => {
     // Optimistic update in store
     notificationStore.markAsRead(notificationId);
-    
+
     // Sync with backend
     try {
       const tok = await getAuthToken();
@@ -117,23 +126,26 @@ export default function NotificationDetailScreen() {
   }, [id]);
 
   const formatTimestamp = (dateStr: string) => {
-    const date = new Date(dateStr);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMins / 60);
-    const diffDays = Math.floor(diffHours / 24);
+    if (!dateStr) {
+      return { relative: '', time: '', fullDate: '' };
+    }
+
+    const date = parseTimestamp(dateStr);
+    const now = dayjs().tz(APP_TIMEZONE);
+    const diffMins = now.diff(date, 'minute');
+    const diffHours = now.diff(date, 'hour');
+    const diffDays = now.diff(date, 'day');
 
     let relative = '';
     if (diffMins < 1) relative = 'Just now';
     else if (diffMins < 60) relative = `${diffMins} minutes ago`;
     else if (diffHours < 24) relative = `${diffHours} hours ago`;
     else if (diffDays < 7) relative = `${diffDays} days ago`;
-    else relative = date.toLocaleDateString();
+    else relative = date.format('MMM D, YYYY');
 
-    const time = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-    const fullDate = date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
-    
+    const time = date.format('h:mm A');
+    const fullDate = date.format('dddd, MMMM D, YYYY');
+
     return { relative, time, fullDate };
   };
 
@@ -143,7 +155,7 @@ export default function NotificationDetailScreen() {
 
   const goBack = () => {
     if (Platform.OS !== 'web') {
-      try { Haptics.selectionAsync(); } catch {}
+      try { Haptics.selectionAsync(); } catch { }
     }
     router.back();
   };
@@ -156,23 +168,23 @@ export default function NotificationDetailScreen() {
       <View style={styles.container}>
         {/* Header */}
         <Animated.View style={[styles.header, makeFadeUp(entrance.header)]}>
-          <Pressable 
-            onPress={goBack} 
+          <Pressable
+            onPress={goBack}
             style={({ pressed }) => [styles.backButton, pressed && styles.backButtonPressed]}
             accessibilityRole="button"
             accessibilityLabel="Go back"
           >
             <Icon name="chevron-left" size={22} color="#374151" />
           </Pressable>
-          
+
           <ThemedText style={styles.headerTitle}>Notification</ThemedText>
-          
+
           <View style={{ width: 44 }} />
         </Animated.View>
 
         {/* Content */}
-        <ScrollView 
-          showsVerticalScrollIndicator={false} 
+        <ScrollView
+          showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.scrollContent}
         >
           {loading ? (

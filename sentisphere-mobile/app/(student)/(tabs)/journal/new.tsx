@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
 import * as Haptics from 'expo-haptics';
+import { BottomToast, ToastType } from '@/components/BottomToast';
 
 export default function JournalNewScreen() {
   const router = useRouter();
@@ -26,7 +27,17 @@ export default function JournalNewScreen() {
   
   const [content, setContent] = useState('');
   const [isSaving, setIsSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  
+  // Toast state (unified BottomToast design)
+  const [toastVisible, setToastVisible] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState<ToastType>('success');
+  
+  const showToast = (message: string, type: ToastType = 'success') => {
+    setToastMessage(message);
+    setToastType(type);
+    setToastVisible(true);
+  };
   
   // Animation
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -61,12 +72,11 @@ export default function JournalNewScreen() {
     Keyboard.dismiss();
     
     if (!content.trim()) {
-      setError('Please write something before saving');
+      showToast('Please write something', 'error');
       return;
     }
     
     setIsSaving(true);
-    setError(null);
     
     try {
       const tok = await getAuthToken();
@@ -90,9 +100,14 @@ export default function JournalNewScreen() {
         try { await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
       }
       
-      router.replace('/(student)/(tabs)/journal');
+      showToast('Entry saved', 'success');
+      
+      // Small delay to show toast before navigating
+      setTimeout(() => {
+        router.replace('/(student)/(tabs)/journal');
+      }, 1200);
     } catch (e: any) {
-      setError(e?.message || 'Unable to save journal entry');
+      showToast(e?.message || 'Unable to save', 'error');
       if (Platform.OS !== 'web') {
         try { await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error); } catch {}
       }
@@ -169,10 +184,7 @@ export default function JournalNewScreen() {
             <TextInput
               style={styles.contentInput}
               value={content}
-              onChangeText={(text) => {
-                setContent(text);
-                if (error) setError(null);
-              }}
+              onChangeText={setContent}
               placeholder="What's on your mind today?"
               placeholderTextColor="#9CA3AF"
               multiline
@@ -185,15 +197,17 @@ export default function JournalNewScreen() {
               accessibilityLabel="Journal content"
             />
 
-            {error ? (
-              <View style={styles.errorBox}>
-                <Icon name="alert-circle" size={14} color="#DC2626" />
-                <ThemedText style={styles.errorText}>{error}</ThemedText>
-              </View>
-            ) : null}
-          </Animated.View>
+            </Animated.View>
         </ScrollView>
       </KeyboardAvoidingView>
+      
+      {/* Toast - unified BottomToast design */}
+      <BottomToast
+        visible={toastVisible}
+        message={toastMessage}
+        type={toastType}
+        onHide={() => setToastVisible(false)}
+      />
     </View>
   );
 }
@@ -270,22 +284,5 @@ const styles = StyleSheet.create({
     minHeight: 300,
     textAlignVertical: 'top',
     padding: 0,
-  },
-  errorBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 16,
-    padding: 12,
-    backgroundColor: '#FEF2F2',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#FECACA',
-  },
-  errorText: {
-    fontFamily: 'Inter_400Regular',
-    fontSize: 13,
-    color: '#DC2626',
-    flex: 1,
   },
 });

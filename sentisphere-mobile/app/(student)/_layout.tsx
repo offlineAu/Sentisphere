@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Platform, BackHandler } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { Stack, useRouter, useSegments } from 'expo-router';
@@ -7,6 +7,7 @@ import {
   setupGlobalNotificationListeners,
   cleanupGlobalNotificationListeners
 } from '@/utils/notifications';
+import { notificationStore } from '@/stores/notificationStore';
 
 export default function StudentLayout() {
   const router = useRouter();
@@ -134,6 +135,32 @@ export default function StudentLayout() {
     };
   }, [router]);
 
+  const API = process.env.EXPO_PUBLIC_API_URL || 'https://sentisphere-production.up.railway.app';
+
+  // Fetch notifications from backend and update store
+  const fetchNotifications = useCallback(async () => {
+    try {
+      let token: string | null = null;
+      if (Platform.OS === 'web') {
+        token = window.localStorage?.getItem('auth_token') || null;
+      } else {
+        token = await SecureStore.getItemAsync('auth_token');
+      }
+      if (!token) return;
+
+      const res = await fetch(`${API}/api/notifications?limit=100`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        notificationStore.setNotifications(data.notifications || []);
+        console.log('[Push] ✓ Notifications refreshed, unread:', notificationStore.getUnreadCount());
+      }
+    } catch (e) {
+      console.error('[Push] Failed to fetch notifications:', e);
+    }
+  }, []);
+
   /**
    * Initialize push notifications AFTER successful authentication.
    * 
@@ -146,6 +173,11 @@ export default function StudentLayout() {
    */
   useEffect(() => {
     if (!authorized || !userId) return;
+
+    // Initial fetch to populate notification store on app launch (works on all platforms)
+    fetchNotifications();
+
+    // Push notifications only work on native platforms
     if (Platform.OS === 'web') return;
 
     console.log('[Push] === PUSH SETUP START ===');
@@ -153,8 +185,11 @@ export default function StudentLayout() {
     // Initialize Expo push notifications for both Android and iOS
     initializePushNotifications(userId);
     
-    // Setup global listeners (singleton - safe to call multiple times)
-    setupGlobalNotificationListeners();
+    // Setup global listeners with callback to refresh notifications when push is received
+    setupGlobalNotificationListeners(() => {
+      console.log('[Push] New notification received - refreshing notifications...');
+      fetchNotifications();
+    });
     
     console.log('[Push] === PUSH SETUP COMPLETE ===');
 
@@ -163,7 +198,7 @@ export default function StudentLayout() {
       // Note: We don't cleanup here normally because listeners should persist
       // Cleanup happens explicitly on logout via cleanupGlobalNotificationListeners()
     };
-  }, [authorized, userId]);
+  }, [authorized, userId, fetchNotifications]);
 
   if (authorized !== true) {
     return null;

@@ -214,8 +214,22 @@ async def mobile_register(request: Request):
         data = {}
 
     nickname = (data.get("nickname") or "").strip()
+    password = (data.get("password") or "").strip()
+
     if len(nickname) < 3 or len(nickname) > 50:
         raise HTTPException(status_code=422, detail="Nickname must be 3-50 characters")
+
+    if len(password) < 6 or len(password) > 100:
+        raise HTTPException(status_code=422, detail="Password must be 6-100 characters")
+
+    # Hash password with bcrypt
+    password_hash = None
+    if _bcrypt_available():
+        import bcrypt
+        password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+    else:
+        # Fallback for environments without bcrypt (not recommended for production)
+        password_hash = password
 
     created_user = None
     with MobileSessionLocal() as db:
@@ -230,24 +244,14 @@ async def mobile_register(request: Request):
             ).scalars().first()
 
             if existing:
-                if (existing.role or "student") != "student":
-                    raise HTTPException(status_code=400, detail="Nickname already used by another role")
-                token = create_access_token(
-                    subject=str(existing.user_id),
-                    expires_delta=timedelta(minutes=settings.JWT_EXPIRE_MINUTES),
-                    user_data={
-                        "email": existing.email or "",
-                        "name": existing.nickname or existing.name or nickname,
-                        "role": "student",
-                    },
-                )
-                return {"ok": True, "user_id": existing.user_id, "access_token": token, "existing": True}
+                raise HTTPException(status_code=409, detail="Nickname already taken. Please choose a different one.")
 
             new_user = MobileUser(
                 email=None,
                 name=nickname,
                 role="student",
                 nickname=nickname,
+                password_hash=password_hash,
                 is_active=True,
             )
             db.add(new_user)
@@ -282,8 +286,13 @@ async def mobile_login(request: Request):
         data = {}
 
     nickname = (data.get("nickname") or "").strip()
+    password = (data.get("password") or "").strip()
+
     if not nickname:
         raise HTTPException(status_code=422, detail="Nickname required")
+
+    if not password:
+        raise HTTPException(status_code=422, detail="Password required")
 
     with MobileSessionLocal() as db:
         user = db.execute(
@@ -297,6 +306,19 @@ async def mobile_login(request: Request):
 
         if not user or (user.role or "student") != "student":
             raise HTTPException(status_code=404, detail="Not registered")
+
+        # Verify password
+        stored_hash = user.password_hash or ""
+        password_valid = False
+
+        if stored_hash:
+            password_valid = _verify_password(password, stored_hash)
+        else:
+            # User has no password set (legacy account) - deny login
+            raise HTTPException(status_code=401, detail="Account requires password reset. Please re-register.")
+
+        if not password_valid:
+            raise HTTPException(status_code=401, detail="Invalid credentials")
 
         token = create_access_token(
             subject=str(user.user_id),

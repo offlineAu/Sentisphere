@@ -5,6 +5,7 @@ import { GlobalScreenWrapper } from '@/components/GlobalScreenWrapper';
 import { Icon } from '@/components/ui/icon';
 import { NotificationListItem } from '@/components/notifications/NotificationListItem';
 import { notificationStore, Notification } from '@/stores/notificationStore';
+import { useBottomToast } from '@/components/BottomToast';
 import * as Haptics from 'expo-haptics';
 import * as SecureStore from 'expo-secure-store';
 import { router } from 'expo-router';
@@ -20,6 +21,8 @@ export default function NotificationsScreen() {
   const [notifications, setNotifications] = useState<Notification[]>(notificationStore.getNotifications());
   const [loading, setLoading] = useState(notificationStore.getIsLoading());
   const [refreshing, setRefreshing] = useState(false);
+  const [markingAllRead, setMarkingAllRead] = useState(false);
+  const { toastState, showToast, hideToast, ToastComponent } = useBottomToast();
 
   // Subscribe to store changes
   useEffect(() => {
@@ -125,6 +128,48 @@ export default function NotificationsScreen() {
     router.back();
   };
 
+  const markAllAsRead = async () => {
+    const unreadIds = notifications.filter(n => !n.is_read).map(n => n.id);
+    if (unreadIds.length === 0) return;
+
+    if (Platform.OS !== 'web') {
+      try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
+    }
+
+    setMarkingAllRead(true);
+    
+    // Optimistic update
+    notificationStore.markAllAsRead();
+    
+    // Sync with backend - mark each notification as read
+    try {
+      const tok = await getAuthToken();
+      if (!tok) {
+        setMarkingAllRead(false);
+        return;
+      }
+      
+      // Mark all unread notifications as read in parallel
+      await Promise.all(
+        unreadIds.map(id =>
+          fetch(`${API}/api/notifications/${id}/read`, {
+            method: 'PATCH',
+            headers: { Authorization: `Bearer ${tok}` },
+          })
+        )
+      );
+      
+      showToast(`${unreadIds.length} notification${unreadIds.length > 1 ? 's' : ''} marked as read`, 'success');
+    } catch (e) {
+      console.error('Failed to mark all notifications as read:', e);
+      showToast('Failed to mark notifications as read', 'error');
+      // Refetch to restore state on error
+      fetchNotifications();
+    } finally {
+      setMarkingAllRead(false);
+    }
+  };
+
   const unreadCount = notifications.filter(n => !n.is_read).length;
 
   return (
@@ -150,7 +195,27 @@ export default function NotificationsScreen() {
             )}
           </View>
           
-          <View style={{ width: 44 }} />
+          {unreadCount > 0 ? (
+            <Pressable
+              onPress={markAllAsRead}
+              disabled={markingAllRead}
+              style={({ pressed }) => [
+                styles.markAllButton,
+                pressed && styles.markAllButtonPressed,
+                markingAllRead && styles.markAllButtonDisabled,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Mark all as read"
+            >
+              {markingAllRead ? (
+                <ActivityIndicator size="small" color={BRAND_GREEN} />
+              ) : (
+                <Icon name="check" size={20} color={BRAND_GREEN} />
+              )}
+            </Pressable>
+          ) : (
+            <View style={{ width: 44 }} />
+          )}
         </Animated.View>
 
         {/* Content */}
@@ -195,6 +260,7 @@ export default function NotificationsScreen() {
           )}
         </Animated.View>
       </View>
+    {ToastComponent}
     </GlobalScreenWrapper>
   );
 }
@@ -230,6 +296,23 @@ const styles = StyleSheet.create({
   backButtonPressed: {
     backgroundColor: '#F9FAFB',
     transform: [{ scale: 0.96 }],
+  },
+  markAllButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#ECFDF5',
+    borderWidth: 1,
+    borderColor: '#D1FAE5',
+  },
+  markAllButtonPressed: {
+    backgroundColor: '#D1FAE5',
+    transform: [{ scale: 0.96 }],
+  },
+  markAllButtonDisabled: {
+    opacity: 0.6,
   },
   headerCenter: {
     flexDirection: 'row',
