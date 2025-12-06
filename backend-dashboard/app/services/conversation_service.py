@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import List, Optional
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
@@ -13,6 +14,9 @@ from app.schemas.conversation import (
     ConversationUpdate,
     MessageCreate,
 )
+
+# Philippine timezone
+PH_TZ = ZoneInfo("Asia/Manila")
 
 
 class ConversationService:
@@ -91,20 +95,20 @@ class ConversationService:
         *,
         commit: bool = True,
     ) -> Message:
-        # Let the DB assign the timestamp via server_default=func.now() so it
-        # matches the database clock (and mobile), then propagate that value
-        # to the parent conversation's last_activity_at.
+        # Use Philippine timezone for timestamp instead of DB server_default
+        ph_now = datetime.now(PH_TZ).replace(tzinfo=None)  # Store as naive datetime in PH time
+        
         message = Message(
             conversation_id=conversation.conversation_id,
             sender_id=message_in.sender_id,
             content=message_in.content,
             is_read=message_in.is_read or False,
+            timestamp=ph_now,  # Explicitly set Philippine time
         )
         db.add(message)
-        # Flush so that server_defaults (e.g. timestamp) are populated on the ORM object
         db.flush()
-        # Use the DB-assigned timestamp for conversation activity
-        conversation.last_activity_at = message.timestamp
+        # Use the same timestamp for conversation activity
+        conversation.last_activity_at = ph_now
         db.add(conversation)
         if commit:
             db.commit()

@@ -54,8 +54,8 @@ class PusherService:
             
         app_id = os.getenv("PUSHER_APP_ID")
         key = os.getenv("PUSHER_APP_KEY")
-        secret = os.getenv("PUSHER_APP_SECRET")
-        cluster = os.getenv("PUSHER_APP_CLUSTER", "ap1")
+        secret = os.getenv("PUSHER_APP_SECRET") or os.getenv("PUSHER_SECRET")  # Support both names
+        cluster = os.getenv("PUSHER_APP_CLUSTER") or os.getenv("PUSHER_CLUSTER", "ap1")  # Support both names
         
         logging.info(f"[Pusher] Checking credentials: app_id={'✓' if app_id else '✗'}, key={'✓' if key else '✗'}, secret={'✓' if secret else '✗'}")
         
