@@ -44,12 +44,12 @@ export default function MoodScreen() {
   const COLUMNS = 3;
   // Calculate button width: (screenWidth - padding*2 - gaps*(columns-1)) / columns
   const emojiButtonWidth = Math.floor((screenWidth - (HORIZONTAL_PADDING * 2) - (GRID_GAP * (COLUMNS - 1))) / COLUMNS);
-  
+
   // Responsive font and element sizes
   const titleFontSize = isSmallScreen ? 26 : isMediumScreen ? 28 : 32;
   const emojiSize = isSmallScreen ? 26 : 30;
   const emojiCircleSize = isSmallScreen ? 52 : 60;
-  
+
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const slideAnim = useRef(new Animated.Value(0)).current;
   const successAnim = useRef(new Animated.Value(0)).current;
@@ -79,7 +79,7 @@ export default function MoodScreen() {
   useFocusEffect(
     useCallback(() => {
       runEntrance();
-      return () => {};
+      return () => { };
     }, [])
   );
 
@@ -182,14 +182,14 @@ export default function MoodScreen() {
             if (name) { setDisplayName(name); return; }
           }
         }
-      } catch {}
+      } catch { }
       // Fallback to API
       const res = await fetch(`${API}/api/auth/mobile/me`, { headers: { Authorization: `Bearer ${tok}` } });
       if (res.ok) {
         const d = await res.json();
         setDisplayName(d?.nickname || d?.name || 'there');
       }
-    } catch {}
+    } catch { }
   }, [API]);
 
   useEffect(() => {
@@ -200,7 +200,7 @@ export default function MoodScreen() {
     if (submitted) {
       successAnim.setValue(0);
       Animated.timing(successAnim, { toValue: 1, duration: 420, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
-      if (Platform.OS !== 'web') { try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success) } catch {} }
+      if (Platform.OS !== 'web') { try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success) } catch { } }
     }
   }, [submitted]);
 
@@ -221,7 +221,7 @@ export default function MoodScreen() {
 
   const goNext = () => {
     if (step < TOTAL_STEPS - 1) {
-      if (Platform.OS !== 'web') { try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light) } catch {} }
+      if (Platform.OS !== 'web') { try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light) } catch { } }
       animateTransition('next', () => setStep(step + 1));
     }
   };
@@ -248,7 +248,7 @@ export default function MoodScreen() {
 
   const goBack = () => {
     if (step > 0) {
-      if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} }
+      if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch { } }
       animateTransition('back', () => {
         const prevStep = step - 1;
         if (prevStep === 0) setSelectedMood(null);
@@ -293,7 +293,7 @@ export default function MoodScreen() {
       });
       if (!res.ok) {
         let detail = '';
-        try { const d = await res.json(); detail = d?.detail || d?.message || '' } catch {}
+        try { const d = await res.json(); detail = d?.detail || d?.message || '' } catch { }
         // Handle rate limit (429) with friendly message
         if (res.status === 429) {
           throw new Error(detail || 'You can check in again in a few hours');
@@ -321,12 +321,12 @@ export default function MoodScreen() {
 
   const EmojiButton = ({ emoji, label, color, selected, onPress, buttonWidth }: { emoji: string; label: string; color: string; selected: boolean; onPress: () => void; buttonWidth: number }) => {
     const scale = useRef(new Animated.Value(1)).current;
-    
+
     const handlePressIn = () => {
       Animated.spring(scale, { toValue: 0.9, useNativeDriver: true, stiffness: 300, damping: 15 }).start();
-      if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} }
+      if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch { } }
     };
-    
+
     const handlePressOut = () => {
       Animated.spring(scale, { toValue: selected ? 1.05 : 1, useNativeDriver: true, stiffness: 300, damping: 15 }).start();
     };
@@ -338,18 +338,18 @@ export default function MoodScreen() {
     return (
       <Pressable onPress={onPress} onPressIn={handlePressIn} onPressOut={handlePressOut} style={{ overflow: 'visible' }}>
         <Animated.View style={[
-          styles.emojiButton, 
-          { 
+          styles.emojiButton,
+          {
             width: buttonWidth,
             paddingVertical: isSmallScreen ? 12 : 16,
             overflow: 'visible',
-          }, 
-          selected && { backgroundColor: `${color}15`, borderColor: color, borderWidth: 2 }, 
+          },
+          selected && { backgroundColor: `${color}15`, borderColor: color, borderWidth: 2 },
           { transform: [{ scale }] }
         ]}>
           <View style={[
-            styles.emojiCircle, 
-            { 
+            styles.emojiCircle,
+            {
               backgroundColor: `${color}20`,
               width: emojiCircleSize,
               height: emojiCircleSize,
@@ -359,7 +359,7 @@ export default function MoodScreen() {
             <ThemedText style={[styles.emojiLarge, { fontSize: emojiSize, lineHeight: emojiSize * 1.3 }]}>{emoji}</ThemedText>
           </View>
           <ThemedText style={[
-            styles.emojiLabel, 
+            styles.emojiLabel,
             { fontSize: isSmallScreen ? 11 : 13 },
             selected && { color, fontFamily: 'Inter_600SemiBold' }
           ]}>{label}</ThemedText>
@@ -370,12 +370,12 @@ export default function MoodScreen() {
 
   const ChipButton = ({ emoji, label, color, selected, onPress }: { emoji: string; label: string; color: string; selected: boolean; onPress: () => void }) => {
     const scale = useRef(new Animated.Value(1)).current;
-    
+
     const handlePressIn = () => {
       Animated.spring(scale, { toValue: 0.95, useNativeDriver: true, stiffness: 300, damping: 15 }).start();
-      if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} }
+      if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch { } }
     };
-    
+
     const handlePressOut = () => {
       Animated.spring(scale, { toValue: 1, useNativeDriver: true, stiffness: 300, damping: 15 }).start();
     };
@@ -400,12 +400,12 @@ export default function MoodScreen() {
 
   const FeelBetterButton = ({ emoji, label, color, selected, onPress }: { emoji: string; label: string; color: string; selected: boolean; onPress: () => void }) => {
     const scale = useRef(new Animated.Value(1)).current;
-    
+
     const handlePressIn = () => {
       Animated.spring(scale, { toValue: 0.9, useNativeDriver: true, stiffness: 300, damping: 15 }).start();
-      if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} }
+      if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch { } }
     };
-    
+
     const handlePressOut = () => {
       Animated.spring(scale, { toValue: 1, useNativeDriver: true, stiffness: 300, damping: 15 }).start();
     };
@@ -444,8 +444,8 @@ export default function MoodScreen() {
             <ThemedText style={styles.successTitle}>Thanks for checking in!</ThemedText>
             <ThemedText style={styles.successSubtitle}>Your mood has been recorded. Keep tracking to see your patterns.</ThemedText>
             <View style={styles.successActions}>
-              <Pressable style={styles.primaryButton} onPress={() => router.push('/(student)/(tabs)/dashboard')}>
-                <ThemedText style={styles.primaryButtonText}>Back to Dashboard</ThemedText>
+              <Pressable style={styles.primaryButton} onPress={() => router.push('/(student)/(tabs)/mood/mood-history')}>
+                <ThemedText style={styles.primaryButtonText}>Mood Log</ThemedText>
               </Pressable>
               <Pressable style={styles.secondaryButton} onPress={reset}>
                 <ThemedText style={styles.secondaryButtonText}>Check in again</ThemedText>
@@ -470,9 +470,9 @@ export default function MoodScreen() {
       <KeyboardAvoidingView style={{ flex: 1, backgroundColor: '#FFFFFF' }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <Animated.View style={[styles.stepContainer, makeFadeUp(entrance.content), { opacity: Animated.multiply(entrance.content, fadeAnim), transform: [{ translateX: slideAnim }] }]}>
           {step === 0 && (
-            <ScrollView 
-              style={[styles.stepScrollContent, { paddingHorizontal: HORIZONTAL_PADDING }]} 
-              contentContainerStyle={[styles.stepScrollInner, { paddingTop: isSmallScreen ? 8 : 12 }]} 
+            <ScrollView
+              style={[styles.stepScrollContent, { paddingHorizontal: HORIZONTAL_PADDING }]}
+              contentContainerStyle={[styles.stepScrollInner, { paddingTop: isSmallScreen ? 8 : 12 }]}
               showsVerticalScrollIndicator={false}
             >
               <View style={[styles.stepHeader, { marginTop: isSmallScreen ? 8 : 12, marginBottom: isSmallScreen ? 8 : 12 }]}>
@@ -498,9 +498,9 @@ export default function MoodScreen() {
           )}
 
           {step === 1 && (
-            <ScrollView 
-              style={[styles.stepScrollContent, { paddingHorizontal: HORIZONTAL_PADDING }]} 
-              contentContainerStyle={[styles.stepScrollInner, { paddingTop: isSmallScreen ? 8 : 12 }]} 
+            <ScrollView
+              style={[styles.stepScrollContent, { paddingHorizontal: HORIZONTAL_PADDING }]}
+              contentContainerStyle={[styles.stepScrollInner, { paddingTop: isSmallScreen ? 8 : 12 }]}
               showsVerticalScrollIndicator={false}
             >
               <View style={[styles.stepHeader, { marginTop: isSmallScreen ? 8 : 12, marginBottom: isSmallScreen ? 8 : 12 }]}>
@@ -525,9 +525,9 @@ export default function MoodScreen() {
           )}
 
           {step === 2 && (
-            <ScrollView 
-              style={[styles.stepScrollContent, { paddingHorizontal: HORIZONTAL_PADDING }]} 
-              contentContainerStyle={[styles.stepScrollInner, { paddingTop: isSmallScreen ? 8 : 12 }]} 
+            <ScrollView
+              style={[styles.stepScrollContent, { paddingHorizontal: HORIZONTAL_PADDING }]}
+              contentContainerStyle={[styles.stepScrollInner, { paddingTop: isSmallScreen ? 8 : 12 }]}
               showsVerticalScrollIndicator={false}
             >
               <View style={[styles.stepHeader, { marginTop: isSmallScreen ? 8 : 12, marginBottom: isSmallScreen ? 8 : 12 }]}>
@@ -552,9 +552,9 @@ export default function MoodScreen() {
           )}
 
           {step === 3 && (
-            <ScrollView 
-              style={[styles.stepScrollContent, { paddingHorizontal: HORIZONTAL_PADDING }]} 
-              contentContainerStyle={[styles.stepScrollInner, { paddingTop: isSmallScreen ? 8 : 12 }]} 
+            <ScrollView
+              style={[styles.stepScrollContent, { paddingHorizontal: HORIZONTAL_PADDING }]}
+              contentContainerStyle={[styles.stepScrollInner, { paddingTop: isSmallScreen ? 8 : 12 }]}
               showsVerticalScrollIndicator={false}
             >
               <View style={[styles.stepHeader, { marginTop: isSmallScreen ? 8 : 12, marginBottom: isSmallScreen ? 4 : 8 }]}>
@@ -579,10 +579,10 @@ export default function MoodScreen() {
           )}
 
           {step === 4 && (
-            <ScrollView 
-              style={[styles.stepScrollContent, { paddingHorizontal: HORIZONTAL_PADDING }]} 
-              contentContainerStyle={[styles.stepScrollInner, { paddingTop: isSmallScreen ? 8 : 12 }]} 
-              showsVerticalScrollIndicator={false} 
+            <ScrollView
+              style={[styles.stepScrollContent, { paddingHorizontal: HORIZONTAL_PADDING }]}
+              contentContainerStyle={[styles.stepScrollInner, { paddingTop: isSmallScreen ? 8 : 12 }]}
+              showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
             >
               <View style={[styles.stepHeader, { marginTop: isSmallScreen ? 8 : 12, marginBottom: isSmallScreen ? 8 : 12 }]}>
@@ -610,8 +610,8 @@ export default function MoodScreen() {
 
         {step === 4 && (
           <Animated.View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 16), paddingHorizontal: HORIZONTAL_PADDING }, makeFadeUp(entrance.footer)]}>
-            <Pressable 
-              style={[styles.continueButton, saving && styles.continueButtonDisabled]} 
+            <Pressable
+              style={[styles.continueButton, saving && styles.continueButtonDisabled]}
               onPress={handleSubmit}
               disabled={saving}
             >

@@ -3,6 +3,15 @@ import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
 import * as Haptics from 'expo-haptics';
 import type { Notification } from '@/stores/notificationStore';
+import { parseTimestamp } from '@/utils/time';
+import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
+import timezone from 'dayjs/plugin/timezone';
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
+
+const APP_TIMEZONE = 'Asia/Manila';
 
 // Brand colors
 const BRAND_GREEN = '#10B981';
@@ -31,23 +40,27 @@ export function NotificationListItem({ notification, onPress }: NotificationList
   const categoryStyle = CATEGORY_STYLES[notification.category] || CATEGORY_STYLES.other;
 
   const formatDate = (dateStr: string) => {
-    const date = new Date(dateStr);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMins / 60);
-    const diffDays = Math.floor(diffHours / 24);
+    if (!dateStr) return '';
+    try {
+      const date = parseTimestamp(dateStr);
+      const now = dayjs().tz(APP_TIMEZONE);
+      const diffMins = now.diff(date, 'minute');
+      const diffHours = now.diff(date, 'hour');
+      const diffDays = now.diff(date, 'day');
 
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays < 7) return `${diffDays}d ago`;
-    return date.toLocaleDateString();
+      if (diffMins < 1) return 'Just now';
+      if (diffMins < 60) return `${diffMins}m ago`;
+      if (diffHours < 24) return `${diffHours}h ago`;
+      if (diffDays < 7) return `${diffDays}d ago`;
+      return date.format('MMM D');
+    } catch {
+      return '';
+    }
   };
 
   const handlePress = () => {
     if (Platform.OS !== 'web') {
-      try { Haptics.selectionAsync(); } catch {}
+      try { Haptics.selectionAsync(); } catch { }
     }
     onPress(notification);
   };

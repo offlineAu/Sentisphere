@@ -49,6 +49,7 @@ import {
   AlertCircle,
   X,
   Edit2,
+  CheckCheck,
 } from 'lucide-react-native';
 
 type IconProps = {
@@ -100,7 +101,8 @@ type IconProps = {
     | 'lightbulb'
     | 'alert-circle'
     | 'x'
-    | 'edit-2';
+    | 'edit-2'
+    | 'check-check';
   size?: number;
   color?: string;
   fill?: string;
@@ -156,6 +158,7 @@ const icons: Record<string, any> = {
   'alert-circle': AlertCircle,
   'x': X,
   'edit-2': Edit2,
+  'check-check': CheckCheck,
 };
 
 export function Icon({ name, size = 20, color, fill }: IconProps) {

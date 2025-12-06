@@ -1,4 +1,4 @@
-import { StyleSheet, View, FlatList, TextInput, KeyboardAvoidingView, Platform, Pressable, useWindowDimensions, Modal, ActivityIndicator, Animated, Easing, ScrollView, Alert } from 'react-native';
+import { StyleSheet, View, FlatList, TextInput, KeyboardAvoidingView, Platform, Pressable, TouchableOpacity, useWindowDimensions, Modal, ActivityIndicator, Animated, Easing, ScrollView, Alert } from 'react-native';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { ThemedText } from '@/components/themed-text';
 import { GlobalScreenWrapper } from '@/components/GlobalScreenWrapper';
@@ -324,7 +324,8 @@ export default function ChatScreen() {
                   );
                   const last = sortedMsgs.length > 0 ? sortedMsgs[sortedMsgs.length - 1] : undefined;
                   const hasUnread = currentUserId ? msgs.some((m) => !m.is_read && m.sender_id !== currentUserId) : false;
-                  const name = c.subject || `Conversation #${c.conversation_id}`;
+                  // Use counselor_name (live from user table) instead of subject (static from creation)
+                  const name = c.counselor_name || c.subject || `Conversation #${c.conversation_id}`;
                   const isClosed = c.status === 'ended';
                   
                   // Handle conversation press with optimistic read marking
@@ -387,43 +388,55 @@ export default function ChatScreen() {
                             </ThemedText>
                             <ThemedText 
                               style={{ 
-                                color: isClosed ? '#9CA3AF' : (hasUnread ? '#4B5563' : '#6B7280'), 
+                                color: isClosed ? '#DC2626' : (hasUnread ? '#4B5563' : '#6B7280'), 
                                 fontSize: 13,
-                                fontFamily: hasUnread ? 'Inter_500Medium' : undefined,
-                                opacity: isClosed ? 0.75 : 1
+                                fontFamily: isClosed ? 'Inter_500Medium' : (hasUnread ? 'Inter_500Medium' : undefined),
+                                fontStyle: isClosed ? 'italic' : 'normal',
                               }} 
                               numberOfLines={1}
                             >
-                              {last?.content || 'Start the conversation'}
+                              {isClosed ? 'Conversation ended' : (last?.content || 'Start the conversation')}
                             </ThemedText>
                           </View>
                         </View>
                         <View style={styles.rightMeta}>
-                          <ThemedText style={{ 
-                            color: hasUnread ? '#0D8C4F' : '#9CA3AF', 
-                            fontSize: 12, 
-                            fontFamily: hasUnread ? 'Inter_600SemiBold' : 'Inter_500Medium' 
-                          }}>
-                            {formatTime(last?.timestamp || c.last_activity_at)}
-                          </ThemedText>
-                          {!isClosed && hasUnread && (
-                            <View style={styles.unreadBadge}>
-                              <View style={styles.unreadDot} />
-                            </View>
+                          {isClosed ? (
+                            // Closed conversation - show elegant delete button
+                            // Using TouchableOpacity instead of Pressable to avoid nested <button> on web
+                            <TouchableOpacity
+                              onPressIn={() => doHaptic('selection')}
+                              onPress={(e) => {
+                                e.stopPropagation();
+                                deleteConversation(c.conversation_id);
+                              }}
+                              style={styles.deleteButtonInline}
+                              activeOpacity={0.7}
+                              accessibilityRole="button"
+                              accessibilityLabel="Delete conversation"
+                              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            >
+                              <Icon name="trash-2" size={16} color="#EF4444" />
+                            </TouchableOpacity>
+                          ) : (
+                            <>
+                              {last?.timestamp && (
+                                <ThemedText style={{ 
+                                  color: hasUnread ? '#0D8C4F' : '#9CA3AF', 
+                                  fontSize: 12, 
+                                  fontFamily: hasUnread ? 'Inter_600SemiBold' : 'Inter_500Medium' 
+                                }}>
+                                  {formatTime(last.timestamp)}
+                                </ThemedText>
+                              )}
+                              {hasUnread && (
+                                <View style={styles.unreadBadge}>
+                                  <View style={styles.unreadDot} />
+                                </View>
+                              )}
+                            </>
                           )}
                         </View>
                       </Pressable>
-                      {isClosed && (
-                        <Pressable
-                          onPressIn={() => doHaptic('selection')}
-                          onPress={() => deleteConversation(c.conversation_id)}
-                          style={styles.deleteButton}
-                          accessibilityRole="button"
-                          accessibilityLabel="Delete conversation"
-                        >
-                          <Icon name="trash-2" size={18} color="#EF4444" />
-                        </Pressable>
-                      )}
                     </View>
                   );
                 })}
@@ -648,13 +661,15 @@ const styles = StyleSheet.create({
     left: 0,
     top: '10%',
   },
-  deleteButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
+  deleteButtonInline: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: '#FEE2E2',
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#FECACA',
   },
   convLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1, minWidth: 0 },
   convTextWrap: { flex: 1, minWidth: 0, gap: 3 },

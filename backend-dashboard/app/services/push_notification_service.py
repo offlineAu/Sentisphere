@@ -280,8 +280,18 @@ def create_notification_record(
     insert_q = text(
         """
         INSERT INTO notification (user_id, title, message, category, source, related_alert_id, is_sent, sent_at, is_read, created_at)
-        VALUES (:user_id, :title, :message, :category, :source, :related_alert_id, :is_sent, 
-                CASE WHEN :sent_at THEN NOW() ELSE NULL END, FALSE, NOW())
+        VALUES (
+            :user_id,
+            :title,
+            :message,
+            :category,
+            :source,
+            :related_alert_id,
+            :is_sent,
+            CASE WHEN :sent_at THEN CONVERT_TZ(NOW(), 'UTC', 'Asia/Manila') ELSE NULL END,
+            FALSE,
+            CONVERT_TZ(NOW(), 'UTC', 'Asia/Manila')
+        )
         """
     )
     
@@ -309,7 +319,7 @@ def update_notification_sent(mobile_engine, notification_id: int) -> bool:
     """Mark notification as sent with current timestamp."""
     update_q = text(
         """
-        UPDATE notification SET is_sent = TRUE, sent_at = NOW()
+        UPDATE notification SET is_sent = TRUE, sent_at = CONVERT_TZ(NOW(), 'UTC', 'Asia/Manila')
         WHERE id = :notification_id
         """
     )
@@ -326,7 +336,7 @@ def mark_notification_read(mobile_engine, notification_id: int) -> bool:
     """Mark notification as read with current timestamp."""
     update_q = text(
         """
-        UPDATE notification SET is_read = TRUE, read_at = NOW()
+        UPDATE notification SET is_read = TRUE, read_at = CONVERT_TZ(NOW(), 'UTC', 'Asia/Manila')
         WHERE id = :notification_id
         """
     )
@@ -554,7 +564,7 @@ async def send_daily_quote_notifications(mobile_engine) -> Dict[str, Any]:
             SELECT 1 FROM notification n 
             WHERE n.user_id = u.user_id 
             AND n.category = 'daily_quote'
-            AND n.created_at > NOW() - INTERVAL 5 MINUTE
+            AND n.created_at > CONVERT_TZ(NOW(), 'UTC', 'Asia/Manila') - INTERVAL 5 MINUTE
         )
         """
     )
@@ -608,7 +618,7 @@ async def send_daily_quote_notifications(mobile_engine) -> Dict[str, Any]:
                 )
                 if push_result.get("success"):
                     # Mark as sent
-                    update_q = text("UPDATE notification SET is_sent = TRUE, sent_at = NOW() WHERE id = :nid")
+                    update_q = text("UPDATE notification SET is_sent = TRUE, sent_at = CONVERT_TZ(NOW(), 'UTC', 'Asia/Manila') WHERE id = :nid")
                     try:
                         with mobile_engine.begin() as conn:
                             conn.execute(update_q, {"nid": notif_id})
@@ -663,7 +673,7 @@ async def send_wellness_reminder_instantly(
             SELECT id FROM notification
             WHERE user_id = :user_id
             AND category = 'wellness_reminder'
-            AND created_at > DATE_SUB(NOW(), INTERVAL 24 HOUR)
+            AND created_at > DATE_SUB(CONVERT_TZ(NOW(), 'UTC', 'Asia/Manila'), INTERVAL 24 HOUR)
             LIMIT 1
             """
         )

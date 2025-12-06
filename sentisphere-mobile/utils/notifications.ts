@@ -39,6 +39,9 @@ let notificationReceivedSubscription: Notifications.Subscription | null = null;
 let notificationResponseSubscription: Notifications.Subscription | null = null;
 let listenersActive = false;
 
+// Callback for when a new notification is received (to update UI/store)
+let onNotificationReceivedCallback: ((notification: Notifications.Notification) => void) | null = null;
+
 // ============================================================================
 // NOTIFICATION HANDLER (Configure once at module load)
 // ============================================================================
@@ -263,9 +266,18 @@ export async function initializePushNotifications(userId: string): Promise<void>
  * - If already active, returns immediately
  * - Stores subscriptions in module-level variables
  * 
+ * @param onNotificationReceived - Optional callback when a notification is received (for updating UI/store)
+ * 
  * Call this ONCE after initializePushNotifications.
  */
-export function setupGlobalNotificationListeners(): void {
+export function setupGlobalNotificationListeners(
+  onNotificationReceived?: (notification: Notifications.Notification) => void
+): void {
+  // Store the callback for use in listeners
+  if (onNotificationReceived) {
+    onNotificationReceivedCallback = onNotificationReceived;
+  }
+
   // Guard: Only one set of listeners ever
   if (listenersActive) {
     console.log('[Push] Global notification listeners already active - skipping');
@@ -278,6 +290,10 @@ export function setupGlobalNotificationListeners(): void {
   notificationReceivedSubscription = Notifications.addNotificationReceivedListener(
     (notification) => {
       console.log('[Notification] Received:', notification.request.content.title);
+      // Call the callback to update UI/store
+      if (onNotificationReceivedCallback) {
+        onNotificationReceivedCallback(notification);
+      }
     }
   );
 

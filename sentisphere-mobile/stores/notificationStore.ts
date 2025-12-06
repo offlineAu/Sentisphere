@@ -67,6 +67,14 @@ class NotificationStore {
     this.notify();
   }
 
+  markAllAsRead(): void {
+    const now = new Date().toISOString();
+    this.notifications = this.notifications.map((n) =>
+      !n.is_read ? { ...n, is_read: true, read_at: now } : n
+    );
+    this.notify();
+  }
+
   addNotification(notification: Notification): void {
     this.notifications = [notification, ...this.notifications];
     this.notify();
