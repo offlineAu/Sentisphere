@@ -13,18 +13,18 @@ import { useFocusEffect } from '@react-navigation/native';
 import { conversationStore } from '@/stores/conversationStore';
 import { formatChatTime, formatDateLabel, getTimestampMs, getCurrentChatTime } from '@/utils/time';
 
- type Msg = { id: string; role: 'user' | 'ai'; text: string; time: string; createdAt: number; status?: 'sent' | 'delivered' | 'read' };
+type Msg = { id: string; role: 'user' | 'ai'; text: string; time: string; createdAt: number; status?: 'sent' | 'delivered' | 'read' };
 
- type ApiMessage = {
+type ApiMessage = {
   message_id: number;
   conversation_id: number;
   sender_id: number;
   content: string;
   is_read: boolean;
   timestamp: string;
- };
+};
 
- type ApiConversation = {
+type ApiConversation = {
   conversation_id: number;
   initiator_user_id: number;
   initiator_role: string;
@@ -36,9 +36,9 @@ import { formatChatTime, formatDateLabel, getTimestampMs, getCurrentChatTime } f
   created_at: string;
   last_activity_at?: string | null;
   messages?: ApiMessage[];
- };
+};
 
- export default function ChatDetailScreen() {
+export default function ChatDetailScreen() {
   const { id, name } = useLocalSearchParams<{ id: string; name?: string }>();
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState('');
@@ -59,11 +59,11 @@ import { formatChatTime, formatDateLabel, getTimestampMs, getCurrentChatTime } f
   // Display name: prefer live counselor_name from API, fallback to route param
   const displayName = conv?.counselor_name || conv?.subject || name || 'Counselor';
   const wsRef = useRef<WebSocket | null>(null);
-  
+
   // Track which messages should animate (only newly sent/received, not on page load)
   const animatedMessageIds = useRef<Set<string>>(new Set());
   const isInitialLoad = useRef(true);
-  
+
   // Polling refs
   const lastMessageIdRef = useRef<string | null>(null);
   const isFetchingRef = useRef(false);
@@ -100,7 +100,7 @@ import { formatChatTime, formatDateLabel, getTimestampMs, getCurrentChatTime } f
       if (kind === 'success') return await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       if (kind === 'selection') return await Haptics.selectionAsync();
       return await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    } catch {}
+    } catch { }
   };
 
   useEffect(() => {
@@ -134,18 +134,18 @@ import { formatChatTime, formatDateLabel, getTimestampMs, getCurrentChatTime } f
       setLoading(true);
       setMessages([]); // Clear immediately to prevent flash of old content
     }
-    
+
     try {
       const tok = await getAuthToken();
       if (!tok) return;
-      
+
       // Fetch user ID and conversation in parallel for speed
       let meId: number | null = currentUserId;
-      const convPromise = fetch(`${API_BASE_URL}/api/mobile/conversations/${id}?include_messages=true`, { 
+      const convPromise = fetch(`${API_BASE_URL}/api/mobile/conversations/${id}?include_messages=true`, {
         headers: { Authorization: `Bearer ${tok}` },
         cache: 'no-store',
       });
-      
+
       if (!meId) {
         try {
           const meRes = await fetch(`${API_BASE_URL}/api/auth/mobile/me`, { headers: { Authorization: `Bearer ${tok}` } });
@@ -154,15 +154,15 @@ import { formatChatTime, formatDateLabel, getTimestampMs, getCurrentChatTime } f
             meId = me?.user_id ?? null;
             setCurrentUserId(meId);
           }
-        } catch {}
+        } catch { }
       }
-      
+
       const convRes = await convPromise;
       if (convRes.ok) {
         const c: ApiConversation = await convRes.json();
         setConv(c);
         setChatOpen(c.status === 'open');
-        
+
         // Process messages
         const msgs: ApiMessage[] = Array.isArray(c.messages) ? c.messages : [];
         const mapped: Msg[] = msgs.map((m) => {
@@ -173,15 +173,17 @@ import { formatChatTime, formatDateLabel, getTimestampMs, getCurrentChatTime } f
           return { id: String(m.message_id), role, text: m.content, time, createdAt, status };
         });
         setMessages(mapped);
-        
+
         // Mark initial load complete (no animations for existing messages)
         isInitialLoad.current = false;
-        
-        // Mark as read (fire and forget)
-        fetch(`${API_BASE_URL}/api/mobile/conversations/${id}/read`, { 
-          method: 'POST', 
-          headers: { Authorization: `Bearer ${tok}` } 
-        }).catch(() => {});
+
+        // Mark as read (fire and forget) + update store for instant badge sync
+        fetch(`${API_BASE_URL}/api/mobile/conversations/${id}/read`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${tok}` }
+        }).then(() => {
+          conversationStore.markConversationAsRead(Number(id));
+        }).catch(() => { });
       }
     } finally {
       setLoading(false);
@@ -190,55 +192,55 @@ import { formatChatTime, formatDateLabel, getTimestampMs, getCurrentChatTime } f
 
   // Fetch on mount
   useEffect(() => { fetchConversation(true); }, [id]);
-  
+
   // Refresh on focus (when navigating back to this screen) - don't clear messages
   useFocusEffect(useCallback(() => {
     // Reset auth flag on focus in case user re-authenticated
     isAuthValidRef.current = true;
     fetchConversation(false);
     runEntrance();
-    return () => {};
+    return () => { };
   }, [fetchConversation, runEntrance]));
-  
+
   const fetchNewMessages = useCallback(async () => {
     // Skip if auth is invalid, chat is closed, or already fetching
     if (!isAuthValidRef.current || !chatOpen || isFetchingRef.current) return;
     isFetchingRef.current = true;
-    
+
     try {
       const tok = await getAuthToken();
       if (!tok || !conv) {
         isAuthValidRef.current = false;
         return;
       }
-      
-      const mRes = await fetch(`${API_BASE_URL}/api/mobile/conversations/${id}/messages`, { 
+
+      const mRes = await fetch(`${API_BASE_URL}/api/mobile/conversations/${id}/messages`, {
         headers: { Authorization: `Bearer ${tok}` },
         cache: 'no-store',
       });
-      
+
       // Stop polling on auth errors
       if (mRes.status === 401 || mRes.status === 403) {
         isAuthValidRef.current = false;
         return;
       }
-      
+
       if (!mRes.ok) return;
-      
+
       const msgs: ApiMessage[] = await mRes.json();
       if (!msgs.length) return;
-      
+
       // Get the latest message ID from fetched messages
       const latestMsgId = String(msgs[msgs.length - 1].message_id);
-      
+
       // Only update if there are new messages
       if (lastMessageIdRef.current !== latestMsgId) {
         lastMessageIdRef.current = latestMsgId;
-        
+
         setMessages((prev) => {
           const prevIds = new Set(prev.map(p => p.id));
           const newMsgs: Msg[] = [];
-          
+
           // Only add truly new messages
           for (const m of msgs) {
             const msgId = String(m.message_id);
@@ -252,7 +254,7 @@ import { formatChatTime, formatDateLabel, getTimestampMs, getCurrentChatTime } f
               animatedMessageIds.current.add(msgId);
             }
           }
-          
+
           if (newMsgs.length > 0) {
             // Play haptic for new incoming messages (not from user)
             const newOthers = newMsgs.filter(m => m.role === 'ai');
@@ -265,14 +267,14 @@ import { formatChatTime, formatDateLabel, getTimestampMs, getCurrentChatTime } f
           }
           return prev;
         });
-        
+
         // Mark messages as read (fire and forget)
-        fetch(`${API_BASE_URL}/api/mobile/conversations/${id}/read`, { 
-          method: 'POST', 
-          headers: { Authorization: `Bearer ${tok}` } 
-        }).catch(() => {});
+        fetch(`${API_BASE_URL}/api/mobile/conversations/${id}/read`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${tok}` }
+        }).catch(() => { });
       }
-    } catch {} finally {
+    } catch { } finally {
       isFetchingRef.current = false;
     }
   }, [API_BASE_URL, getAuthToken, id, conv, chatOpen, currentUserId]);
@@ -280,12 +282,12 @@ import { formatChatTime, formatDateLabel, getTimestampMs, getCurrentChatTime } f
   // Set up fast polling interval
   useEffect(() => {
     if (!conv || loading) return;
-    
+
     // Update lastMessageIdRef with current latest message
     if (messages.length > 0) {
       lastMessageIdRef.current = messages[messages.length - 1].id;
     }
-    
+
     // Poll every 1 second for fast updates
     const interval = setInterval(fetchNewMessages, 1000);
     return () => clearInterval(interval);
@@ -294,28 +296,28 @@ import { formatChatTime, formatDateLabel, getTimestampMs, getCurrentChatTime } f
   // WebSocket for real-time updates
   useEffect(() => {
     if (!conv || !id) return;
-    
+
     const connectWebSocket = async () => {
       try {
         const tok = await getAuthToken();
         if (!tok) return;
-        
+
         // Construct WebSocket URL
         const wsProtocol = API_BASE_URL.startsWith('https') ? 'wss' : 'ws';
         const wsHost = API_BASE_URL.replace(/^https?:\/\//, '');
         const wsUrl = `${wsProtocol}://${wsHost}/ws/chat/${id}?token=${tok}`;
-        
+
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
-        
+
         ws.onopen = () => {
           console.log('WebSocket connected for conversation', id);
         };
-        
+
         ws.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data);
-            
+
             // Handle conversation status updates
             if (data.type === 'status_update') {
               const newStatus = data.status;
@@ -325,7 +327,7 @@ import { formatChatTime, formatDateLabel, getTimestampMs, getCurrentChatTime } f
                 doHaptic('selection');
               }
             }
-            
+
             // Handle new messages
             if (data.type === 'new_message' && data.message) {
               const m = data.message as ApiMessage;
@@ -334,7 +336,7 @@ import { formatChatTime, formatDateLabel, getTimestampMs, getCurrentChatTime } f
               const createdAt = getTimestampMs(m.timestamp);
               const time = formatChatTime(m.timestamp);
               const newMsg: Msg = { id: msgId, role, text: m.content, time, createdAt, status: 'read' };
-              
+
               setMessages((prev) => {
                 // Avoid duplicates
                 if (prev.some((x) => x.id === newMsg.id)) return prev;
@@ -342,19 +344,29 @@ import { formatChatTime, formatDateLabel, getTimestampMs, getCurrentChatTime } f
                 animatedMessageIds.current.add(msgId);
                 return [...prev, newMsg];
               });
-              
+
+              // Hide typing indicator when message arrives
+              setTyping(false);
+
               // Auto-scroll to bottom
               requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
+            }
+
+            // Handle typing indicator from counselor
+            if (data.type === 'typing' && data.user_id !== currentUserId) {
+              setTyping(true);
+              // Auto-hide after 3 seconds of no typing events
+              setTimeout(() => setTyping(false), 3000);
             }
           } catch (e) {
             console.log('WebSocket message parse error:', e);
           }
         };
-        
+
         ws.onerror = (error) => {
           console.log('WebSocket error:', error);
         };
-        
+
         ws.onclose = () => {
           console.log('WebSocket disconnected');
         };
@@ -362,9 +374,9 @@ import { formatChatTime, formatDateLabel, getTimestampMs, getCurrentChatTime } f
         console.log('WebSocket connection error:', e);
       }
     };
-    
+
     connectWebSocket();
-    
+
     return () => {
       if (wsRef.current) {
         wsRef.current.close();
@@ -376,13 +388,13 @@ import { formatChatTime, formatDateLabel, getTimestampMs, getCurrentChatTime } f
   // Scroll to bottom when keyboard opens (iOS and Android) with smooth animation
   useEffect(() => {
     const keyboardShowEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    
+
     const keyboardShowListener = Keyboard.addListener(keyboardShowEvent, (e) => {
       // Use appropriate delay based on platform
       // iOS: shorter delay since we use keyboardWillShow
       // Android: slightly longer to wait for keyboard animation
       const delay = Platform.OS === 'ios' ? 50 : 150;
-      
+
       setTimeout(() => {
         // Use requestAnimationFrame for smoother scroll timing
         requestAnimationFrame(() => {
@@ -390,7 +402,7 @@ import { formatChatTime, formatDateLabel, getTimestampMs, getCurrentChatTime } f
         });
       }, delay);
     });
-    
+
     return () => {
       keyboardShowListener.remove();
     };
@@ -417,10 +429,10 @@ import { formatChatTime, formatDateLabel, getTimestampMs, getCurrentChatTime } f
     const now = Date.now();
     const tm = getCurrentChatTime();
     const tempId = `temp-${now}`;
-    
+
     // Mark this message for animation
     animatedMessageIds.current.add(tempId);
-    
+
     const userMsg: Msg = { id: tempId, role: 'user', text: trimmed, time: tm, createdAt: now, status: 'sent' };
     setMessages((prev) => [...prev, userMsg]);
     setInput('');
@@ -443,18 +455,18 @@ import { formatChatTime, formatDateLabel, getTimestampMs, getCurrentChatTime } f
         animatedMessageIds.current.add(newId);
         setMessages((prev) => prev.map((x) => (x.id === tempId ? { id: newId, role: 'user', text: m.content, time, createdAt, status: 'read' } : x)));
       }
-    } catch {}
+    } catch { }
   };
 
   const toggleChat = async () => {
     await doHaptic('selection');
     const next = !chatOpen;
     const newStatus = next ? 'open' : 'ended';
-    
+
     // Optimistic update - update UI immediately
     setChatOpen(next);
     setConv((prev) => prev ? { ...prev, status: newStatus } : prev);
-    
+
     // Update global store for immediate sync with conversation list
     if (conv) {
       if (next) {
@@ -463,26 +475,26 @@ import { formatChatTime, formatDateLabel, getTimestampMs, getCurrentChatTime } f
         conversationStore.closeConversation(conv.conversation_id);
       }
     }
-    
+
     // Then sync with backend
     try {
       const tok = await getAuthToken();
       if (!tok || !conv) return;
-      
+
       const requestBody = { status: newStatus };
       console.log('[toggleChat] Updating conversation:', conv.conversation_id, 'to status:', newStatus);
-      
+
       const res = await fetch(`${API_BASE_URL}/api/mobile/conversations/${conv.conversation_id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` },
         body: JSON.stringify(requestBody),
       });
-      
+
       if (!res.ok) {
         // Log the error response
         const errorText = await res.text();
         console.error('Failed to update conversation status:', res.status, errorText);
-        
+
         // Revert on failure
         setChatOpen(!next);
         setConv((prev) => prev ? { ...prev, status: next ? 'ended' : 'open' } : prev);
@@ -515,7 +527,7 @@ import { formatChatTime, formatDateLabel, getTimestampMs, getCurrentChatTime } f
 
   const handleLongPress = (m: Msg) => {
     const actions: AlertButton[] = [
-      { text: 'Copy', onPress: () => { try { if (Platform.OS === 'web') { /* @ts-ignore */ navigator?.clipboard?.writeText(m.text); } } catch {} } },
+      { text: 'Copy', onPress: () => { try { if (Platform.OS === 'web') { /* @ts-ignore */ navigator?.clipboard?.writeText(m.text); } } catch { } } },
       { text: 'Delete', style: 'destructive', onPress: () => setMessages((prev) => prev.filter((x) => x.id !== m.id)) },
       { text: 'Cancel', style: 'cancel' },
     ];
@@ -523,8 +535,11 @@ import { formatChatTime, formatDateLabel, getTimestampMs, getCurrentChatTime } f
       Alert.alert('Message', 'Choose an action', actions);
     } else {
       const doCopy = confirm('Copy this message?');
-      if (doCopy) { try { // @ts-ignore
-        navigator?.clipboard?.writeText(m.text); } catch {} }
+      if (doCopy) {
+        try { // @ts-ignore
+          navigator?.clipboard?.writeText(m.text);
+        } catch { }
+      }
     }
   };
 
@@ -549,7 +564,7 @@ import { formatChatTime, formatDateLabel, getTimestampMs, getCurrentChatTime } f
     const translateAnim = useRef(new Animated.Value(0)).current;
     const hasAnimatedIn = useRef(false);
     const [hidden, setHidden] = useState(false);
-    
+
     // Single effect to handle all animation states
     useEffect(() => {
       // Initial entrance animation (only once)
@@ -561,7 +576,7 @@ import { formatChatTime, formatDateLabel, getTimestampMs, getCurrentChatTime } f
         ]).start();
         return;
       }
-      
+
       // Exit animation when input is focused
       if (inputFocused && hasAnimatedIn.current) {
         Animated.parallel([
@@ -570,7 +585,7 @@ import { formatChatTime, formatDateLabel, getTimestampMs, getCurrentChatTime } f
           Animated.timing(translateAnim, { toValue: -20, duration: 200, useNativeDriver: true }),
         ]).start(() => setHidden(true));
       }
-      
+
       // Re-entrance animation when keyboard closes
       if (!inputFocused && hidden) {
         setHidden(false);
@@ -584,18 +599,18 @@ import { formatChatTime, formatDateLabel, getTimestampMs, getCurrentChatTime } f
         ]).start();
       }
     }, [inputFocused, hidden]);
-    
+
     if (hidden) return null;
-    
+
     return (
       <Animated.View style={[
-        styles.welcomeContainer, 
-        { 
-          opacity: fadeAnim, 
+        styles.welcomeContainer,
+        {
+          opacity: fadeAnim,
           transform: [
             { scale: scaleAnim },
             { translateY: translateAnim }
-          ] 
+          ]
         }
       ]}>
         {/* Decorative background circles */}
@@ -606,14 +621,14 @@ import { formatChatTime, formatDateLabel, getTimestampMs, getCurrentChatTime } f
             </View>
           </View>
         </View>
-        
+
         {/* Text content */}
         <ThemedText style={styles.welcomeTitle}>Start a Conversation</ThemedText>
         <ThemedText style={styles.welcomeName}>{displayName || 'Your Counselor'}</ThemedText>
         <ThemedText style={styles.welcomeText}>
           Share what's on your mind. Your counselor is here to listen and support you.
         </ThemedText>
-        
+
         {/* Trust badges */}
         <View style={styles.welcomeBadges}>
           <View style={styles.welcomeBadge}>
@@ -631,7 +646,7 @@ import { formatChatTime, formatDateLabel, getTimestampMs, getCurrentChatTime } f
             <ThemedText style={styles.welcomeBadgeText}>Secure</ThemedText>
           </View>
         </View>
-        
+
         {/* Hint */}
         <View style={styles.welcomeHint}>
           <Icon name="arrow-right" size={14} color="#9CA3AF" />
@@ -646,12 +661,12 @@ import { formatChatTime, formatDateLabel, getTimestampMs, getCurrentChatTime } f
     // Capture initial animation state ONCE on mount - never changes after
     const shouldAnimateOnMount = useRef(shouldAnimate).current;
     const animValue = useRef(new Animated.Value(shouldAnimateOnMount ? 0 : 1)).current;
-    
+
     useEffect(() => {
       if (shouldAnimateOnMount) {
         // Remove from animation set immediately so re-renders don't re-trigger
         animatedMessageIds.current.delete(m.id);
-        
+
         // Run the animation once
         Animated.spring(animValue, {
           toValue: 1,
@@ -661,13 +676,13 @@ import { formatChatTime, formatDateLabel, getTimestampMs, getCurrentChatTime } f
         }).start();
       }
     }, []); // Empty deps - only run once on mount
-    
+
     const statusMarks = isUser ? (m.status === 'read' ? '✓✓' : m.status === 'delivered' ? '✓✓' : '✓') : '';
     const statusColor = isUser ? (m.status === 'read' ? palette.tint : palette.muted) : palette.muted;
-    
+
     return (
       <Animated.View style={[
-        styles.row, 
+        styles.row,
         { justifyContent: isUser ? 'flex-end' : 'flex-start' },
         shouldAnimateOnMount && {
           opacity: animValue,
@@ -728,7 +743,7 @@ import { formatChatTime, formatDateLabel, getTimestampMs, getCurrentChatTime } f
               accessibilityRole="button"
               accessibilityLabel="Go back"
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              onPressIn={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} } }}
+              onPressIn={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch { } } }}
               onPress={() => router.replace('/(student)/(tabs)/chat')}
               style={({ pressed }) => [styles.backBtn, { opacity: pressed ? 0.8 : 1 }]}
             >
@@ -744,14 +759,14 @@ import { formatChatTime, formatDateLabel, getTimestampMs, getCurrentChatTime } f
               <ThemedText style={styles.headerSubtitle}>Counseling Conversation</ThemedText>
             </View>
           </View>
-          <Pressable 
-            onPress={toggleChat} 
-            onPressIn={() => doHaptic('selection')} 
+          <Pressable
+            onPress={toggleChat}
+            onPressIn={() => doHaptic('selection')}
             style={({ pressed }) => [styles.statusBadgeBtn, { opacity: pressed ? 0.8 : 1 }]}
             accessibilityRole="button"
             accessibilityLabel={chatOpen ? 'Chat is open, tap to close' : 'Chat is closed, tap to reopen'}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          > 
+          >
             <StatusBadge open={chatOpen} />
           </Pressable>
         </Animated.View>
@@ -776,75 +791,75 @@ import { formatChatTime, formatDateLabel, getTimestampMs, getCurrentChatTime } f
           />
         </Animated.View>
 
-          <Animated.View style={[styles.inputBarWrap, { borderTopColor: palette.border, backgroundColor: palette.background, paddingBottom: insets.bottom || 8 }, makeFadeUp(entrance.input)]}> 
-            {chatOpen ? (
-              <View
-                style={[
-                  styles.inputBar,
-                  {
-                    backgroundColor: palette.background,
-                    borderColor: inputFocused ? '#0D8C4F' : palette.border,
-                    borderWidth: inputFocused ? 1.5 : 1,
-                  },
-                ]}
-              > 
-                <Pressable onPressIn={() => doHaptic('light')} style={({ pressed }) => [styles.attachBtn, { opacity: pressed ? 0.8 : 1 }]} accessibilityRole="button" accessibilityLabel="Add attachment">
-                  <Icon name="plus" size={18} color={palette.icon} />
-                </Pressable>
-                <TextInput
-                  value={input}
-                  onChangeText={setInput}
-                  placeholder="Type your message..."
-                  placeholderTextColor={palette.muted}
-                  // @ts-ignore - web outline
-                  style={[styles.input, { height: inputHeight, outlineStyle: 'none' } as any]}
-                  onSubmitEditing={send}
-                  multiline
-                  onFocus={() => setInputFocused(true)}
-                  onBlur={() => setInputFocused(false)}
-                  selectionColor="#0D8C4F"
-                  underlineColorAndroid="transparent"
-                  onContentSizeChange={(e) => setInputHeight(Math.min(120, Math.max(40, e.nativeEvent.contentSize.height)))}
-                />
-                <Pressable
-                  disabled={!canSend}
-                  onPress={send}
-                  onPressIn={() => canSend && doHaptic('light')}
-                  accessibilityRole="button"
-                  accessibilityLabel="Send message"
-                  style={({ pressed }) => ({ padding: 6, borderRadius: 8, opacity: !canSend ? 0.4 : (pressed ? 0.6 : 1) })}
-                >
-                  <Icon name="send" size={20} color={palette.text} />
-                </Pressable>
-              </View>
-            ) : (
-              <View style={styles.closedChatContainer}>
-                <View style={styles.closedChatContent}>
-                  <View style={styles.closedIconWrap}>
-                    <Icon name="check-circle" size={20} color="#6B7280" />
-                  </View>
-                  <View style={styles.closedTextWrap}>
-                    <ThemedText style={styles.closedTitle}>Conversation Ended</ThemedText>
-                    <ThemedText style={styles.closedSubtitle}>This chat has been closed by you</ThemedText>
-                  </View>
+        <Animated.View style={[styles.inputBarWrap, { borderTopColor: palette.border, backgroundColor: palette.background, paddingBottom: insets.bottom || 8 }, makeFadeUp(entrance.input)]}>
+          {chatOpen ? (
+            <View
+              style={[
+                styles.inputBar,
+                {
+                  backgroundColor: palette.background,
+                  borderColor: inputFocused ? '#0D8C4F' : palette.border,
+                  borderWidth: inputFocused ? 1.5 : 1,
+                },
+              ]}
+            >
+              <Pressable onPressIn={() => doHaptic('light')} style={({ pressed }) => [styles.attachBtn, { opacity: pressed ? 0.8 : 1 }]} accessibilityRole="button" accessibilityLabel="Add attachment">
+                <Icon name="plus" size={18} color={palette.icon} />
+              </Pressable>
+              <TextInput
+                value={input}
+                onChangeText={setInput}
+                placeholder="Type your message..."
+                placeholderTextColor={palette.muted}
+                // @ts-ignore - web outline
+                style={[styles.input, { height: inputHeight, outlineStyle: 'none' } as any]}
+                onSubmitEditing={send}
+                multiline
+                onFocus={() => setInputFocused(true)}
+                onBlur={() => setInputFocused(false)}
+                selectionColor="#0D8C4F"
+                underlineColorAndroid="transparent"
+                onContentSizeChange={(e) => setInputHeight(Math.min(120, Math.max(40, e.nativeEvent.contentSize.height)))}
+              />
+              <Pressable
+                disabled={!canSend}
+                onPress={send}
+                onPressIn={() => canSend && doHaptic('light')}
+                accessibilityRole="button"
+                accessibilityLabel="Send message"
+                style={({ pressed }) => ({ padding: 6, borderRadius: 8, opacity: !canSend ? 0.4 : (pressed ? 0.6 : 1) })}
+              >
+                <Icon name="send" size={20} color={palette.text} />
+              </Pressable>
+            </View>
+          ) : (
+            <View style={styles.closedChatContainer}>
+              <View style={styles.closedChatContent}>
+                <View style={styles.closedIconWrap}>
+                  <Icon name="check-circle" size={20} color="#6B7280" />
                 </View>
-                <Pressable 
-                  onPress={toggleChat} 
-                  onPressIn={() => doHaptic('selection')}
-                  style={({ pressed }) => [styles.reopenButton, { opacity: pressed ? 0.8 : 1 }]}
-                >
-                  <Icon name="refresh-ccw" size={16} color="#0D8C4F" />
-                  <ThemedText style={styles.reopenButtonText}>Reopen Chat</ThemedText>
-                </Pressable>
+                <View style={styles.closedTextWrap}>
+                  <ThemedText style={styles.closedTitle}>Conversation Ended</ThemedText>
+                  <ThemedText style={styles.closedSubtitle}>This chat has been closed by you</ThemedText>
+                </View>
               </View>
-            )}
-          </Animated.View>
+              <Pressable
+                onPress={toggleChat}
+                onPressIn={() => doHaptic('selection')}
+                style={({ pressed }) => [styles.reopenButton, { opacity: pressed ? 0.8 : 1 }]}
+              >
+                <Icon name="refresh-ccw" size={16} color="#0D8C4F" />
+                <ThemedText style={styles.reopenButtonText}>Reopen Chat</ThemedText>
+              </Pressable>
+            </View>
+          )}
+        </Animated.View>
       </KeyboardAvoidingView>
     </GlobalScreenWrapper>
   );
 }
 
- const styles = StyleSheet.create({
+const styles = StyleSheet.create({
   container: { flex: 1 },
   chatHeader: {
     flexDirection: 'row',
