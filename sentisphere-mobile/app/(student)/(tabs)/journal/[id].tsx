@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button';
 import * as Haptics from 'expo-haptics';
 import { useFocusEffect } from '@react-navigation/native';
 import { addDeletedJournalId } from '@/utils/soft-delete';
+import { BottomToast } from '@/components/BottomToast';
 
 export default function JournalDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -54,7 +55,6 @@ export default function JournalDetailScreen() {
   const entranceHeader = useRef(new Animated.Value(0)).current;
   const entranceContent = useRef(new Animated.Value(0)).current;
   const entranceActions = useRef(new Animated.Value(0)).current;
-  const successOpacity = useRef(new Animated.Value(0)).current;
 
   const runEntrance = useCallback(() => {
     entranceHeader.setValue(0);
@@ -248,17 +248,10 @@ export default function JournalDetailScreen() {
         try { await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
       }
       
-      // Exit edit mode
+      // Exit edit mode and show toast
       setIsEditing(false);
       setEditContent('');
       setShowSaveSuccess(true);
-      
-      // Animate success toast
-      Animated.sequence([
-        Animated.timing(successOpacity, { toValue: 1, duration: 200, useNativeDriver: true }),
-        Animated.delay(1500),
-        Animated.timing(successOpacity, { toValue: 0, duration: 300, useNativeDriver: true }),
-      ]).start(() => setShowSaveSuccess(false));
       
     } catch (e: any) {
       console.error('[Journal] Save failed:', e);
@@ -416,13 +409,13 @@ export default function JournalDetailScreen() {
   // Render view mode
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      {/* Success toast */}
-      {showSaveSuccess && (
-        <Animated.View style={[styles.successToast, { opacity: successOpacity }]}>
-          <Icon name="check-circle" size={18} color="#059669" />
-          <ThemedText style={styles.successToastText}>Changes saved</ThemedText>
-        </Animated.View>
-      )}
+      {/* Bottom success toast */}
+      <BottomToast
+        visible={showSaveSuccess}
+        message="Changes saved"
+        type="success"
+        onHide={() => setShowSaveSuccess(false)}
+      />
 
       {/* View mode header */}
       <Animated.View style={[styles.viewHeader, makeFadeUp(entranceHeader)]}>
@@ -609,34 +602,6 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_600SemiBold',
     fontSize: 15,
     color: '#FFFFFF',
-  },
-  // === SUCCESS TOAST ===
-  successToast: {
-    position: 'absolute',
-    top: 12,
-    left: 20,
-    right: 20,
-    zIndex: 100,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: '#ECFDF5',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#A7F3D0',
-    shadowColor: '#059669',
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 4,
-  },
-  successToastText: {
-    fontFamily: 'Inter_500Medium',
-    fontSize: 14,
-    color: '#059669',
   },
   // === LOADING STATE ===
   loadingWrap: {

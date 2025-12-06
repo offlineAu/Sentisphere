@@ -17,6 +17,7 @@ import { Link } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import * as SecureStore from 'expo-secure-store';
 import { learnTopics } from './data';
+import { BottomToast, ToastType } from '@/components/BottomToast';
 
 const API = process.env.EXPO_PUBLIC_API_URL || 'https://sentisphere-production.up.railway.app';
 
@@ -151,18 +152,14 @@ export default function LearnScreen() {
     }, [loadSavedResources])
   );
 
-  // Toast state + animation (matching journal/appointments style)
-  const toast = useRef(new Animated.Value(0)).current;
+  // Toast state (using unified BottomToast component)
+  const [toastVisible, setToastVisible] = useState(false);
   const [toastText, setToastText] = useState('');
-  const [toastType, setToastType] = useState<'saved' | 'removed'>('saved');
-  const showToast = (text: string, type: 'saved' | 'removed' = 'saved') => {
+  const [toastType, setToastType] = useState<ToastType>('success');
+  const showToast = (text: string, type: ToastType = 'success') => {
     setToastText(text);
     setToastType(type);
-    Animated.timing(toast, { toValue: 1, duration: 220, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start(() => {
-      setTimeout(() => {
-        Animated.timing(toast, { toValue: 0, duration: 220, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
-      }, 1200);
-    });
+    setToastVisible(true);
   };
 
   const toggleSave = async (id: string) => {
@@ -181,10 +178,10 @@ export default function LearnScreen() {
     // Show haptic feedback and toast
     if (wasSaved) {
       if (Platform.OS !== 'web') { try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning); } catch {} }
-      showToast('Removed from saved', 'removed');
+      showToast('Removed from saved', 'info');
     } else {
       if (Platform.OS !== 'web') { try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {} }
-      showToast('Saved to collection', 'saved');
+      showToast('Saved to collection', 'success');
     }
 
     // Persist to backend
@@ -431,41 +428,13 @@ export default function LearnScreen() {
         
       </ScrollView>
 
-      {/* Toast notification (matching journal/appointments style) */}
-      <Animated.View
-        pointerEvents="none"
-        style={{
-          position: 'absolute',
-          left: 16,
-          right: 16,
-          bottom: 24,
-          transform: [{ translateY: toast.interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }],
-          opacity: toast,
-        }}
-      >
-        <View style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 10,
-          paddingVertical: 10,
-          paddingHorizontal: 14,
-          borderRadius: 12,
-          backgroundColor: '#111827',
-        }}>
-          <Animated.View style={{
-            width: 22,
-            height: 22,
-            borderRadius: 11,
-            alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: toastType === 'removed' ? '#DC2626' : '#10B981',
-            transform: [{ scale: toast.interpolate({ inputRange: [0, 1], outputRange: [0.8, 1] }) }],
-          }}>
-            <Icon name={toastType === 'removed' ? 'bookmark' : 'check-circle'} size={14} color="#FFFFFF" />
-          </Animated.View>
-          <ThemedText style={{ color: '#FFFFFF' }}>{toastText || 'Done'}</ThemedText>
-        </View>
-      </Animated.View>
+      {/* Bottom Toast */}
+      <BottomToast
+        visible={toastVisible}
+        message={toastText}
+        type={toastType}
+        onHide={() => setToastVisible(false)}
+      />
     </GlobalScreenWrapper>
   );
 }

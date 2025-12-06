@@ -230,18 +230,7 @@ async def mobile_register(request: Request):
             ).scalars().first()
 
             if existing:
-                if (existing.role or "student") != "student":
-                    raise HTTPException(status_code=400, detail="Nickname already used by another role")
-                token = create_access_token(
-                    subject=str(existing.user_id),
-                    expires_delta=timedelta(minutes=settings.JWT_EXPIRE_MINUTES),
-                    user_data={
-                        "email": existing.email or "",
-                        "name": existing.nickname or existing.name or nickname,
-                        "role": "student",
-                    },
-                )
-                return {"ok": True, "user_id": existing.user_id, "access_token": token, "existing": True}
+                raise HTTPException(status_code=409, detail="Nickname already taken. Please choose a different one.")
 
             new_user = MobileUser(
                 email=None,
