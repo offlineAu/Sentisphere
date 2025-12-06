@@ -2047,7 +2047,17 @@ def counselor_send_message(
     if owner.get("status") == "ended":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot send messages to an ended conversation")
     
+    # DEBUG: Log timestamp details
+    import sys
+    utc_now = datetime.now(timezone.utc)
+    ph_now_dt = get_ph_now()
     ph_now = get_ph_now_str()
+    print(f"[DEBUG MESSAGE TIMESTAMP]", file=sys.stderr)
+    print(f"  UTC now:        {utc_now.isoformat()}", file=sys.stderr)
+    print(f"  PH datetime:    {ph_now_dt.isoformat()}", file=sys.stderr)
+    print(f"  PH string (DB): {ph_now}", file=sys.stderr)
+    print(f"  Server TZ:      {datetime.now().astimezone().tzinfo}", file=sys.stderr)
+    
     res = mdb.execute(
         text(
             """
@@ -2060,6 +2070,8 @@ def counselor_send_message(
     mdb.execute(text("UPDATE conversations SET last_activity_at = :ts WHERE conversation_id = :cid"), {"cid": conversation_id, "ts": ph_now})
     mdb.commit()
     mid = res.lastrowid
+    
+    # DEBUG: Verify what was actually stored
     row = mdb.execute(
         text(
             """
@@ -2069,6 +2081,9 @@ def counselor_send_message(
         ),
         {"mid": mid},
     ).mappings().first()
+    if row:
+        print(f"  Stored in DB:   {row['timestamp']}", file=sys.stderr)
+    
     payload = dict(row) if row else {"message_id": mid, "conversation_id": conversation_id, "sender_id": counselor_id, "content": message_in.content, "is_read": False}
     
     # Broadcast via Pusher for instant delivery to mobile
