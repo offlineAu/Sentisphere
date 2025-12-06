@@ -29,19 +29,31 @@ interface Conversation {
   initiator_email?: string;
 }
 
-// Helper to format time in PHT (Asia/Manila)
+// Helper to format time - timestamp from API is already in Philippine time
 const formatTimePHT = (timestamp: string | null | undefined): string => {
   if (!timestamp) return '';
   try {
-    return new Date(timestamp).toLocaleTimeString('en-PH', {
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true,
-      timeZone: 'Asia/Manila',
-    });
+    // Parse the timestamp string directly (it's already in PH time from backend)
+    // Format: "2025-12-06T13:05:00" or "2025-12-06 13:05:00"
+    const normalized = timestamp.replace(' ', 'T');
+    const parts = normalized.split('T');
+    if (parts.length < 2) return '';
+    
+    const timePart = parts[1].split(':');
+    const hours = parseInt(timePart[0], 10);
+    const minutes = timePart[1] || '00';
+    
+    // Convert 24-hour to 12-hour format
+    const period = hours >= 12 ? 'PM' : 'AM';
+    const hours12 = hours % 12 || 12; // Convert 0 to 12, 13 to 1, etc.
+    
+    return `${hours12}:${minutes} ${period}`;
   } catch {
-    return new Date(timestamp).toLocaleTimeString([], {
-      hour: '2-digit',
+    // Fallback: try native parsing
+    const date = new Date(timestamp);
+    if (isNaN(date.getTime())) return '';
+    return date.toLocaleTimeString('en-US', {
+      hour: 'numeric',
       minute: '2-digit',
       hour12: true,
     });

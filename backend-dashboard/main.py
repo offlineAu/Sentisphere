@@ -4253,13 +4253,22 @@ async def send_message(
         content=message_in.content,
         is_read=message_in.is_read,
     )
+    
+    # DEBUG: Log timestamp info
+    print(f"[DEBUG /api/conversations/{conversation_id}/messages]")
+    print(f"  PH time now: {get_ph_now().isoformat()}")
+    
+    message = ConversationService.add_message(db, conversation, message_payload)
+    
+    # DEBUG: Log what was stored
+    print(f"  Message timestamp: {message.timestamp}")
+    
     logging.info(
         "send_message: user_id=%s role=%s convo_id=%s",
         getattr(current_user, "user_id", None),
         getattr(current_user, "role", None),
         conversation_id,
     )
-    message = ConversationService.add_message(db, conversation, message_payload)
     # Broadcast to subscribers for this conversation after DB commit
     try:
         await ws_conv_manager.broadcast_message_created(
