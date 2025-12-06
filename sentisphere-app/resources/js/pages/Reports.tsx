@@ -228,6 +228,7 @@ function Reports() {
 
   // Carousels refs
   const weeklySliderRef = useRef<any>(null);
+  const behavioralSliderRef = useRef<any>(null);
 
   // Calendar events
   const [events, setEvents] = useState<CalendarEvent[]>([]);
@@ -314,6 +315,25 @@ function Reports() {
     ),
     customPaging: () => <span className="block h-2 w-2 rounded-full bg-gray-300" />,
   }), [insights.length]);
+
+  // Behavioral insights carousel settings
+  const behavioralSliderSettings = useMemo(() => ({
+    dots: true,
+    infinite: behavioralInsights.length > 1,
+    arrows: false,
+    autoplay: behavioralInsights.length > 1,
+    autoplaySpeed: 5000,
+    speed: 500,
+    slidesToShow: 1,
+    slidesToScroll: 1,
+    adaptiveHeight: false,
+    appendDots: (dots: React.ReactNode) => (
+      <div className="absolute bottom-3 left-0 right-0">
+        <ul className="flex justify-center gap-2">{dots}</ul>
+      </div>
+    ),
+    customPaging: () => <span className="block h-2 w-2 rounded-full bg-gray-300" />,
+  }), [behavioralInsights.length]);
 
   // WebSocket for instant notifications when new data arrives
   const handleDataUpdate = useCallback(() => {
@@ -508,14 +528,19 @@ function Reports() {
           }))
         );
 
-        // Fetch behavioral insights
-        setBehavioralLoading(true);
+        // Fetch behavioral insights (only show loading on initial load)
+        if (behavioralInsights.length === 0) {
+          setBehavioralLoading(true);
+        }
         try {
           const behavioralRes = await api.get<any>(`/reports/behavior`, { params: filterParams });
           const behavioralData = behavioralRes.data || [];
           setBehavioralInsights(Array.isArray(behavioralData) ? behavioralData : []);
         } catch {
-          setBehavioralInsights([]);
+          // Don't clear existing data on error during refresh
+          if (behavioralInsights.length === 0) {
+            setBehavioralInsights([]);
+          }
         } finally {
           setBehavioralLoading(false);
         }
@@ -1013,8 +1038,18 @@ function Reports() {
                 Activity patterns and behavioral trends from student data.
               </p>
             </div>
+            {behavioralInsights.length > 1 && (
+              <div className="flex items-center gap-2">
+                <button className="p-1 rounded-full border hover:bg-gray-100" onClick={() => behavioralSliderRef.current?.slickPrev()} aria-label="Previous insight">
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                <button className="p-1 rounded-full border hover:bg-gray-100" onClick={() => behavioralSliderRef.current?.slickNext()} aria-label="Next insight">
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+            )}
           </div>
-          {behavioralLoading ? (
+          {behavioralLoading && behavioralInsights.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 text-center">
               <LoadingSpinner className="h-8 w-8 text-primary" />
               <p className="text-sm text-gray-500 mt-2">Loading behavioral insights...</p>
@@ -1030,26 +1065,30 @@ function Reports() {
               </p>
             </div>
           ) : (
-            <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2">
-              {behavioralInsights.map((insight, idx) => (
-                <div key={idx} className="rounded-xl border bg-gradient-to-br from-gray-50 to-white p-4 transition hover:shadow-md">
-                  <h3 className="text-sm font-semibold text-[#111827] mb-2 flex items-center gap-2">
-                    <Activity className="h-4 w-4 text-primary" />
-                    {insight.title}
-                  </h3>
-                  <p className="text-xs text-[#6b7280] mb-3 leading-relaxed">{insight.description}</p>
-                  {insight.metrics && insight.metrics.length > 0 && (
-                    <div className="grid grid-cols-2 gap-2">
-                      {insight.metrics.map((metric, mIdx) => (
-                        <div key={mIdx} className="bg-white rounded-lg p-2 border text-center">
-                          <div className="text-[10px] text-[#6b7280] uppercase tracking-wide">{metric.label}</div>
-                          <div className="text-sm font-bold text-[#111827] mt-0.5">{metric.value}</div>
+            <div className="relative pb-8">
+              <Slider ref={behavioralSliderRef} {...behavioralSliderSettings} className="behavioral-insights-slider">
+                {behavioralInsights.map((insight, idx) => (
+                  <div key={idx} className="px-1">
+                    <div className="rounded-xl border bg-gradient-to-br from-gray-50 to-white p-4 transition hover:shadow-md min-h-[200px]">
+                      <h3 className="text-sm font-semibold text-[#111827] mb-2 flex items-center gap-2">
+                        <Activity className="h-4 w-4 text-primary" />
+                        {insight.title}
+                      </h3>
+                      <p className="text-xs text-[#6b7280] mb-3 leading-relaxed">{insight.description}</p>
+                      {insight.metrics && insight.metrics.length > 0 && (
+                        <div className="grid grid-cols-2 gap-2">
+                          {insight.metrics.map((metric, mIdx) => (
+                            <div key={mIdx} className="bg-white rounded-lg p-2 border text-center">
+                              <div className="text-[10px] text-[#6b7280] uppercase tracking-wide">{metric.label}</div>
+                              <div className="text-sm font-bold text-[#111827] mt-0.5">{metric.value}</div>
+                            </div>
+                          ))}
                         </div>
-                      ))}
+                      )}
                     </div>
-                  )}
-                </div>
-              ))}
+                  </div>
+                ))}
+              </Slider>
             </div>
           )}
         </div>
