@@ -89,40 +89,43 @@ export default function EnhancedDashboardScreen() {
   }, [API, getAuthToken, decodeJwtName])
   useEffect(() => { fetchCurrentUser() }, [fetchCurrentUser])
 
-  // Fetch unread notification count from backend
-  const fetchUnreadCount = useCallback(async () => {
-    try {
-      const tok = await getAuthToken()
-      if (!tok) return
-      const res = await fetch(`${API}/api/notifications/unread-count`, {
-        headers: { Authorization: `Bearer ${tok}` }
-      })
-      if (res.ok) {
-        const data = await res.json()
-        setUnreadCount(data.unread_count || 0)
-      }
-    } catch (e) {
-      console.log('[Dashboard] Failed to fetch unread count:', e)
-    }
-  }, [API, getAuthToken])
-
-  // Fetch unread count on mount and when screen is focused
-  useEffect(() => { fetchUnreadCount() }, [fetchUnreadCount])
-  
-  useEffect(() => {
-    const unsub = navigation.addListener('focus', fetchUnreadCount)
-    return unsub
-  }, [navigation, fetchUnreadCount])
-
   // Subscribe to notification store for instant updates when notifications are read
   useEffect(() => {
     const unsubscribe = notificationStore.subscribe(() => {
       // Update unread count from store (instant update when marking as read)
-      const storeCount = notificationStore.getUnreadCount()
-      setUnreadCount(storeCount)
+      setUnreadCount(notificationStore.getUnreadCount())
     })
     return unsubscribe
   }, [])
+
+  // Fetch full notifications list and update store - this ensures badge is always accurate
+  const fetchNotifications = useCallback(async () => {
+    try {
+      const tok = await getAuthToken()
+      if (!tok) return
+      const res = await fetch(`${API}/api/notifications?limit=100`, {
+        headers: { Authorization: `Bearer ${tok}` }
+      })
+      if (res.ok) {
+        const data = await res.json()
+        notificationStore.setNotifications(data.notifications || [])
+        // Store subscription will automatically update unreadCount
+      }
+    } catch (e) {
+      console.log('[Dashboard] Failed to fetch notifications:', e)
+    }
+  }, [API, getAuthToken])
+
+  // Fetch notifications on mount
+  useEffect(() => { fetchNotifications() }, [fetchNotifications])
+  
+  // Fetch notifications when screen is focused (to catch new notifications)
+  useEffect(() => {
+    const unsub = navigation.addListener('focus', () => {
+      fetchNotifications()
+    })
+    return unsub
+  }, [navigation, fetchNotifications])
 
   // Health check to verify backend connection on app startup
   useEffect(() => {

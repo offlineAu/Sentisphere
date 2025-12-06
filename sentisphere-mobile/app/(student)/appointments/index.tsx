@@ -20,6 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { useCallback } from 'react';
 import { KeyboardAwareScrollView, KeyboardAwareScrollViewRef } from '@/components/KeyboardAwareScrollView';
+import { BottomToast, ToastType } from '@/components/BottomToast';
 
 // Counselor type matching backend response
 type Counselor = { 
@@ -170,16 +171,14 @@ export default function AppointmentsScreen() {
     })();
   }, [API]);
 
-  // Toast
-  const toast = useRef(new Animated.Value(0)).current;
+  // Toast state
+  const [toastVisible, setToastVisible] = useState(false);
   const [toastText, setToastText] = useState('');
-  const showToast = (text: string) => {
+  const [toastType, setToastType] = useState<ToastType>('success');
+  const showToast = (text: string, type: ToastType = 'success') => {
     setToastText(text);
-    Animated.timing(toast, { toValue: 1, duration: 220, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start(() => {
-      setTimeout(() => {
-        Animated.timing(toast, { toValue: 0, duration: 220, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
-      }, 1200);
-    });
+    setToastType(type);
+    setToastVisible(true);
   };
 
   // Scroll ref for auto-scroll to focused input with smooth animation
@@ -809,27 +808,6 @@ export default function AppointmentsScreen() {
         </View>
       </KeyboardAwareScrollView>
 
-      {/* Toast */}
-      <Animated.View
-        pointerEvents="none"
-        style={{
-          position: 'absolute',
-          left: 16,
-          right: 16,
-          bottom: 24,
-          transform: [{ translateY: toast.interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }],
-          opacity: toast,
-        }}
-      >
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 14, borderRadius: 12, backgroundColor: '#111827' }}>
-          <View style={{ width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center', backgroundColor: '#10B981' }}>
-            {/* check icon */}
-            <Icon name="check-circle" size={14} color="#FFFFFF" />
-          </View>
-          <ThemedText style={{ color: '#FFFFFF' }}>{toastText || 'Done'}</ThemedText>
-        </View>
-      </Animated.View>
-
       {/* Booking overlay */}
       <Modal visible={isBooking} transparent animationType="fade">
         <View style={styles.overlay}>
@@ -859,6 +837,14 @@ export default function AppointmentsScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Bottom Toast */}
+      <BottomToast
+        visible={toastVisible}
+        message={toastText}
+        type={toastType}
+        onHide={() => setToastVisible(false)}
+      />
     </GlobalScreenWrapper>
   );
 }
