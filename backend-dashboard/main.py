@@ -7,7 +7,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from sqlalchemy import case, func, select, text
 from sqlalchemy.orm import Session
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
+from zoneinfo import ZoneInfo
+
+# Philippine timezone
+PH_TZ = ZoneInfo("Asia/Manila")
+
+def get_ph_now() -> datetime:
+    """Get current datetime in Philippine timezone."""
+    return datetime.now(PH_TZ)
+
+def get_ph_now_str() -> str:
+    """Get current datetime in Philippine timezone as ISO string."""
+    return datetime.now(PH_TZ).strftime("%Y-%m-%d %H:%M:%S")
 import os
 from pathlib import Path
 import json
@@ -1552,16 +1564,17 @@ async def mobile_send_message(
     ).mappings().first()
     if not owner or int(owner["initiator_user_id"]) != int(uid):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+    ph_now = get_ph_now_str()
     res = mdb.execute(
         text(
             """
             INSERT INTO messages (conversation_id, sender_id, content, is_read, timestamp)
-            VALUES (:cid, :sid, :content, :is_read, CONVERT_TZ(NOW(), '+00:00', '+08:00'))
+            VALUES (:cid, :sid, :content, :is_read, :ts)
             """
         ),
-        {"cid": conversation_id, "sid": uid, "content": message_in.content, "is_read": bool(message_in.is_read)},
+        {"cid": conversation_id, "sid": uid, "content": message_in.content, "is_read": bool(message_in.is_read), "ts": ph_now},
     )
-    mdb.execute(text("UPDATE conversations SET last_activity_at = CONVERT_TZ(NOW(), '+00:00', '+08:00') WHERE conversation_id = :cid"), {"cid": conversation_id})
+    mdb.execute(text("UPDATE conversations SET last_activity_at = :ts WHERE conversation_id = :cid"), {"cid": conversation_id, "ts": ph_now})
     mdb.commit()
     mid = res.lastrowid
     row = mdb.execute(
@@ -2024,21 +2037,27 @@ def counselor_send_message(
     """Send a message as a counselor to a conversation assigned to them."""
     counselor_id = current_user.user_id
     owner = mdb.execute(
-        text("SELECT counselor_id FROM conversations WHERE conversation_id = :cid"),
+        text("SELECT counselor_id, status FROM conversations WHERE conversation_id = :cid"),
         {"cid": conversation_id},
     ).mappings().first()
     if not owner or owner["counselor_id"] != counselor_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found or not assigned to you")
+    
+    # Reject messages to ended conversations
+    if owner.get("status") == "ended":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot send messages to an ended conversation")
+    
+    ph_now = get_ph_now_str()
     res = mdb.execute(
         text(
             """
             INSERT INTO messages (conversation_id, sender_id, content, is_read, timestamp)
-            VALUES (:cid, :sid, :content, :is_read, CONVERT_TZ(NOW(), '+00:00', '+08:00'))
+            VALUES (:cid, :sid, :content, :is_read, :ts)
             """
         ),
-        {"cid": conversation_id, "sid": counselor_id, "content": message_in.content, "is_read": False},
+        {"cid": conversation_id, "sid": counselor_id, "content": message_in.content, "is_read": False, "ts": ph_now},
     )
-    mdb.execute(text("UPDATE conversations SET last_activity_at = CONVERT_TZ(NOW(), '+00:00', '+08:00') WHERE conversation_id = :cid"), {"cid": conversation_id})
+    mdb.execute(text("UPDATE conversations SET last_activity_at = :ts WHERE conversation_id = :cid"), {"cid": conversation_id, "ts": ph_now})
     mdb.commit()
     mid = res.lastrowid
     row = mdb.execute(
@@ -4362,25 +4381,24 @@ class MessageIn(BaseModel):
 
 @app.post("/api/_legacy/conversations/{conversation_id}/messages")
 def send_message(conversation_id: int, message: MessageIn, current_user: str = Depends(get_current_user)):
+    ph_now = get_ph_now_str()
     query = """
         INSERT INTO messages (conversation_id, sender_id, content, timestamp)
-        VALUES (:cid, :sid, :content, CONVERT_TZ(NOW(), '+00:00', '+08:00'))
+        VALUES (:cid, :sid, :content, :ts)
     """
     with engine.connect() as conn:
         result = conn.execute(
             text(query),
-            {"cid": conversation_id, "sid": message.sender_id, "content": message.content}
+            {"cid": conversation_id, "sid": message.sender_id, "content": message.content, "ts": ph_now}
         )
         conn.commit()
 
-        from zoneinfo import ZoneInfo
-        ph_tz = ZoneInfo("Asia/Manila")
         return {
             "id": result.lastrowid,
             "conversation_id": conversation_id,
             "sender_id": message.sender_id,
             "content": message.content,
-            "timestamp": str(datetime.now(ph_tz))
+            "timestamp": ph_now
         }
 
 @app.get("/health")

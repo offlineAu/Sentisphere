@@ -256,24 +256,52 @@ export default function Chat() {
   useEffect(() => {
     if (!activeConversation || !authenticated) return;
     
-    const fetchMessages = async () => {
+    // IMPORTANT: Clear messages immediately when switching conversations
+    // Use cached messages if available, otherwise show empty
+    const cachedMessages = messagesByConversation[activeConversation] || [];
+    setMessages(cachedMessages);
+    
+    // Also clear typing indicator when switching
+    setIsTyping(false);
+    
+    // Track which conversation we're fetching for
+    const fetchingForConversation = activeConversation;
+    
+    const fetchMessagesAndStatus = async () => {
       try {
-        const res = await api.get<ChatMessage[]>(`/conversations/${activeConversation}/messages`);
+        // Fetch messages
+        const res = await api.get<ChatMessage[]>(`/conversations/${fetchingForConversation}/messages`);
         const data = (res.data || []).map(normalizeMessage);
-        setMessages(data);
-        setMessagesByConversation((prev) => ({ ...prev, [activeConversation]: data }));
-        const unread = res.data.filter((m) => !Boolean((m as any).is_read) && m.sender_id !== userId).length;
-        setUnreadCounts((prev) => ({ ...prev, [activeConversation]: unread }));
         
-        // Mark messages as read when opening conversation
-        if (unread > 0) {
-          try {
-            await api.post(`/conversations/${activeConversation}/read`);
-            setUnreadCounts((prev) => ({ ...prev, [activeConversation]: 0 }));
-            // Refresh global unread count for sidebar badge
-            refreshUnreadCount();
-          } catch {
-            // Ignore read marking errors
+        // Also fetch conversation details to get latest status
+        const convRes = await api.get<Conversation>(`/conversations/${fetchingForConversation}`);
+        
+        // Only update if we're still on the same conversation
+        if (fetchingForConversation === activeConversation) {
+          setMessages(data);
+          setMessagesByConversation((prev) => ({ ...prev, [fetchingForConversation]: data }));
+          const unread = res.data.filter((m) => !Boolean((m as any).is_read) && m.sender_id !== userId).length;
+          setUnreadCounts((prev) => ({ ...prev, [fetchingForConversation]: unread }));
+          
+          // Update conversation status from fresh data
+          if (convRes.data?.status) {
+            setConversations(prev => prev.map(c => 
+              c.conversation_id === fetchingForConversation 
+                ? { ...c, status: convRes.data.status } 
+                : c
+            ));
+          }
+          
+          // Mark messages as read when opening conversation
+          if (unread > 0) {
+            try {
+              await api.post(`/conversations/${fetchingForConversation}/read`);
+              setUnreadCounts((prev) => ({ ...prev, [fetchingForConversation]: 0 }));
+              // Refresh global unread count for sidebar badge
+              refreshUnreadCount();
+            } catch {
+              // Ignore read marking errors
+            }
           }
         }
       } catch (err) {
@@ -282,7 +310,7 @@ export default function Chat() {
     };
     
     // Fetch immediately
-    fetchMessages();
+    fetchMessagesAndStatus();
   }, [activeConversation, authenticated, userId]);
 
   // Fetch participant nickname when conversation changes
@@ -309,16 +337,27 @@ export default function Chat() {
   }, [currentConversation]);
 
   // Lightweight polling to fetch messages per conversation and compute unread via is_read
+  // Use a ref to track the current active conversation to avoid stale closure issues
+  const activeConversationRef = useRef(activeConversation);
+  useEffect(() => {
+    activeConversationRef.current = activeConversation;
+  }, [activeConversation]);
+  
   useEffect(() => {
     if (conversations.length === 0 || !authenticated) return;
+    
     const poll = async () => {
       const ids = conversations.map((c) => c.conversation_id);
+      const currentActive = activeConversationRef.current;
+      
       for (const id of ids) {
         try {
           const { data } = await api.get<ChatMessage[]>(`/conversations/${id}/messages`);
           const norm = (data || []).map(normalizeMessage);
           setMessagesByConversation((prev) => ({ ...prev, [id]: norm }));
-          if (id === activeConversation) {
+          
+          // Only update messages state if this is STILL the active conversation
+          if (id === currentActive && id === activeConversationRef.current) {
             setMessages(norm);
           }
           const unread = data.filter((m) => !Boolean((m as any).is_read) && m.sender_id !== userId).length;
@@ -328,12 +367,12 @@ export default function Chat() {
         }
       }
     };
-    // initial
-    poll();
-    // interval - poll every 5 seconds for faster updates
-    const interval = setInterval(poll, 5000);
+    
+    // Don't poll immediately - let the conversation switch effect handle initial fetch
+    // interval - poll every 10 seconds (reduced frequency to avoid race conditions)
+    const interval = setInterval(poll, 10000);
     return () => clearInterval(interval);
-  }, [conversations]);
+  }, [conversations, authenticated, userId]);
 
   // Auto-scroll to bottom on new messages
   const messagesScrollRef = useRef<HTMLDivElement | null>(null);
@@ -343,8 +382,8 @@ export default function Chat() {
     el.scrollTop = el.scrollHeight;
   }, [messages, activeConversation]);
 
-  // Handle send
-  const handleSend = () => {
+  // Handle send - with fresh status check
+  const handleSend = async () => {
     if (
       !newMessage.trim() ||
       !activeConversation ||
@@ -352,6 +391,24 @@ export default function Chat() {
       currentConversation.status !== "open"
     )
       return;
+    
+    // Double-check conversation status before sending (prevents sending to ended chats)
+    try {
+      const statusCheck = await api.get<Conversation>(`/conversations/${activeConversation}`);
+      if (statusCheck.data?.status === 'ended') {
+        // Update local state to reflect ended status
+        setConversations(prev => prev.map(c => 
+          c.conversation_id === activeConversation 
+            ? { ...c, status: 'ended' } 
+            : c
+        ));
+        alert('This conversation has ended. You cannot send more messages.');
+        return;
+      }
+    } catch {
+      // Continue if status check fails
+    }
+    
     api
       .post<ChatMessage>(`/conversations/${activeConversation}/messages`, {
         sender_id: userId,
@@ -501,12 +558,15 @@ export default function Chat() {
     
     // Listen for typing indicators
     channel.bind('typing', (data: any) => {
-      if (data?.user_id !== userId) {
+      console.log('[Chat] Typing event received:', data);
+      if (data?.user_id !== userId && data?.is_typing !== false) {
         setIsTyping(true);
-        setTypingUser(data?.nickname || "Someone");
+        setTypingUser(data?.user_name || data?.nickname || "Someone");
         // Clear typing after 3 seconds
         if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
         typingTimeoutRef.current = setTimeout(() => setIsTyping(false), 3000);
+      } else if (data?.is_typing === false) {
+        setIsTyping(false);
       }
     });
     
