@@ -39,7 +39,9 @@ export default function AuthScreen() {
   const oopsAnim = useRef(new Animated.Value(0)).current
   const scrollViewRef = useRef<KeyboardAwareScrollViewRef>(null)
   const nicknameInputRef = useRef<TextInput>(null)
-  
+  const passwordInputRef = useRef<TextInput>(null)
+  const [password, setPassword] = useState('')
+
 
   const post = async (path: string, body: any) => {
     const res = await fetch(`${API}${path}`, {
@@ -52,7 +54,7 @@ export default function AuthScreen() {
       try {
         const payload = await res.json()
         detail = payload?.detail || payload?.message || ''
-      } catch {}
+      } catch { }
       const errorText = detail ? `${detail}` : `${path} failed: ${res.status}`
       throw new Error(errorText)
     }
@@ -110,13 +112,13 @@ export default function AuthScreen() {
   const saveToken = async (t: string) => {
     try {
       await SecureStore.setItemAsync('auth_token', t)
-    } catch {}
+    } catch { }
     // Also persist for web
     try {
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
         window.localStorage?.setItem('auth_token', t)
       }
-    } catch {}
+    } catch { }
   }
 
   // DEV ONLY: Log instructions for clearing auth tokens in Metro console
@@ -180,13 +182,17 @@ export default function AuthScreen() {
         showToast('Please enter a nickname (min 3 characters)')
         return
       }
+      if (!password || password.length < 6) {
+        showToast('Please enter a password (min 6 characters)')
+        return
+      }
       // Dismiss keyboard immediately when starting registration
       Keyboard.dismiss()
       setAttempting(true)
       setStatus('Registering...')
       setSplashPhase('loading')
       setShowSplash(true)
-      const d = await post('/api/auth/mobile/register', { nickname })
+      const d = await post('/api/auth/mobile/register', { nickname, password })
       setToken(d.access_token)
       await saveToken(d.access_token)
       setStatus('Registered and signed in')
@@ -208,11 +214,15 @@ export default function AuthScreen() {
         showToast('Please enter your nickname')
         return
       }
+      if (!password) {
+        showToast('Please enter your password')
+        return
+      }
       // Dismiss keyboard immediately when starting login
       Keyboard.dismiss()
       setAttempting(true)
       setStatus('Signing in...')
-      const d = await post('/api/auth/mobile/login', { nickname })
+      const d = await post('/api/auth/mobile/login', { nickname, password })
       const tok = d.access_token || d.token || null
       setToken(tok)
       if (tok) { await saveToken(tok) }
@@ -240,7 +250,7 @@ export default function AuthScreen() {
 
   return (
     <GlobalScreenWrapper backgroundColor="#FFFFFF" topPadding={0}>
-      <KeyboardAwareScrollView 
+      <KeyboardAwareScrollView
         ref={scrollViewRef}
         backgroundColor="#FFFFFF"
         contentContainerStyle={styles.screen}
@@ -305,43 +315,62 @@ export default function AuthScreen() {
               ],
             }}
           >
-          <View style={styles.field}>
-            <ThemedText style={styles.label}>Nickname</ThemedText>
-            <TextInput
-              ref={nicknameInputRef}
-              placeholder="e.g. Jun"
-              placeholderTextColor="#9CA3AF"
-              autoCapitalize="none"
-              autoCorrect={false}
-              value={nickname}
-              onChangeText={setNickname}
-              blurOnSubmit={false}
-              returnKeyType="done"
-              onSubmitEditing={() => {}}
-              onFocus={() => {
-                // Smooth scroll input into view when focused
-                smoothScrollToInput(280)
-              }}
-              style={[styles.input, { borderColor: palette.border, color: palette.text }]} />
-          </View>
-          <View style={styles.colButtons}>
-            <Button
-              title={mode === 'signup' ? 'Sign Up' : 'Log In'}
-              onPress={mode === 'signup' ? doRegister : doLogin}
-              variant="primary"
-              style={styles.buttonSmall}
-              textStyle={{ fontSize: 16 }}
-              loading={attempting}
-              disabled={attempting}
-            />
-          </View>
-          {status ? (
-            <ThemedText style={{ marginTop: 12, textAlign: 'center', color: status.startsWith('✅') || status.includes('Signed') ? '#16A34A' : '#DC2626' }}>{status}</ThemedText>
-          ) : null}
+            <View style={styles.field}>
+              <ThemedText style={styles.label}>Nickname</ThemedText>
+              <TextInput
+                ref={nicknameInputRef}
+                placeholder="e.g. Jun"
+                placeholderTextColor="#9CA3AF"
+                autoCapitalize="none"
+                autoCorrect={false}
+                value={nickname}
+                onChangeText={setNickname}
+                blurOnSubmit={false}
+                returnKeyType="done"
+                onSubmitEditing={() => { }}
+                onFocus={() => {
+                  // Smooth scroll input into view when focused
+                  smoothScrollToInput(280)
+                }}
+                style={[styles.input, { borderColor: palette.border, color: palette.text }]} />
+            </View>
+            <View style={styles.field}>
+              <ThemedText style={styles.label}>Password</ThemedText>
+              <TextInput
+                ref={passwordInputRef}
+                placeholder="Enter password"
+                placeholderTextColor="#9CA3AF"
+                autoCapitalize="none"
+                autoCorrect={false}
+                secureTextEntry={true}
+                value={password}
+                onChangeText={setPassword}
+                blurOnSubmit={false}
+                returnKeyType="done"
+                onSubmitEditing={() => { }}
+                onFocus={() => {
+                  smoothScrollToInput(350)
+                }}
+                style={[styles.input, { borderColor: palette.border, color: palette.text }]} />
+            </View>
+            <View style={styles.colButtons}>
+              <Button
+                title={mode === 'signup' ? 'Sign Up' : 'Log In'}
+                onPress={mode === 'signup' ? doRegister : doLogin}
+                variant="primary"
+                style={styles.buttonSmall}
+                textStyle={{ fontSize: 16 }}
+                loading={attempting}
+                disabled={attempting}
+              />
+            </View>
+            {status ? (
+              <ThemedText style={{ marginTop: 12, textAlign: 'center', color: status.startsWith('✅') || status.includes('Signed') ? '#16A34A' : '#DC2626' }}>{status}</ThemedText>
+            ) : null}
           </Animated.View>
         </View>
       </KeyboardAwareScrollView>
-      
+
       {/* Animated Toast */}
       {toastMessage && (
         <Animated.View
@@ -360,7 +389,7 @@ export default function AuthScreen() {
       {Boolean(successNickname) && (
         <View style={styles.successOverlay}>
           <LinearGradient colors={["#FFFFFF", "#ECFDF5"]} style={StyleSheet.absoluteFillObject} />
-          <Animated.View style={{ alignItems: 'center', gap: 8, opacity: successAnim, transform: [{ scale: successAnim.interpolate({ inputRange: [0,1], outputRange: [0.96, 1] }) }] }}>
+          <Animated.View style={{ alignItems: 'center', gap: 8, opacity: successAnim, transform: [{ scale: successAnim.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] }) }] }}>
             <Image source={require('../../assets/images/congrats.png')} style={{ width: 120, height: 120 }} accessibilityLabel="Success" />
             <ThemedText style={{ fontSize: 20, fontFamily: 'Inter_700Bold', color: '#111827', marginTop: 6 }}>
               Welcome {successNickname}!
@@ -383,7 +412,7 @@ export default function AuthScreen() {
       {welcomeVisible && (
         <View style={styles.successOverlay}>
           <LinearGradient colors={["#FFFFFF", "#ECFDF5"]} style={StyleSheet.absoluteFillObject} />
-          <Animated.View style={{ alignItems: 'center', gap: 8, opacity: welcomeAnim, transform: [{ scale: welcomeAnim.interpolate({ inputRange: [0,1], outputRange: [0.96, 1] }) }] }}>
+          <Animated.View style={{ alignItems: 'center', gap: 8, opacity: welcomeAnim, transform: [{ scale: welcomeAnim.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] }) }] }}>
             <Image source={require('../../assets/images/welcome-back.png')} style={{ width: 120, height: 120 }} accessibilityLabel="Welcome back" />
             <ThemedText style={{ fontSize: 20, fontFamily: 'Inter_700Bold', color: '#111827', marginTop: 6 }}>
               Welcome back to Sentisphere!
@@ -406,7 +435,7 @@ export default function AuthScreen() {
       {oopsVisible && (
         <View style={styles.successOverlay}>
           <LinearGradient colors={["#FFFFFF", "#ECFDF5"]} style={StyleSheet.absoluteFillObject} />
-          <Animated.View style={{ alignItems: 'center', gap: 8, opacity: oopsAnim, transform: [{ scale: oopsAnim.interpolate({ inputRange: [0,1], outputRange: [0.96, 1] }) }] }}>
+          <Animated.View style={{ alignItems: 'center', gap: 8, opacity: oopsAnim, transform: [{ scale: oopsAnim.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] }) }] }}>
             <Image source={require('../../assets/images/oops.png')} style={{ width: 120, height: 120 }} accessibilityLabel="Not registered" />
             <ThemedText style={{ fontSize: 20, fontFamily: 'Inter_700Bold', color: '#111827', marginTop: 6, textAlign: 'center', marginHorizontal: 24 }}>
               Oops! You're not a registered sentisphere user
