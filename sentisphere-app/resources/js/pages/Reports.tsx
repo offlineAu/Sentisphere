@@ -326,6 +326,28 @@ function Reports() {
     onStatsUpdate: handleDataUpdate,
   });
 
+  // Refresh data when tab becomes visible
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        console.log('[Reports] Tab visible - refreshing data');
+        setRefreshKey(prev => prev + 1);
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
+
+  // Fallback polling every 30 seconds
+  useEffect(() => {
+    const pollInterval = setInterval(() => {
+      setRefreshKey(prev => prev + 1);
+    }, 5000);
+    
+    return () => clearInterval(pollInterval);
+  }, []);
+
   // --- Fetch participation ---
   useEffect(() => {
     api.get<{ participation: number }>(`/reports/participation`, { params: filterParams })

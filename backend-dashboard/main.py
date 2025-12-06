@@ -5231,6 +5231,7 @@ def weekly_insights(
 
 
 @app.get("/api/reports/behavior-insights")
+@app.get("/api/reports/behavior")  # Alias for frontend compatibility
 def behavior_insights(
     range: str = Query("this_week"),
     start: Optional[str] = Query(None),
