@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { motion } from "framer-motion";
 import { Send, MessageSquare, User, Search, X, Calendar, Mail, Activity, AlertTriangle } from "lucide-react";
 import { useSidebar } from "../components/SidebarContext";
@@ -9,6 +9,7 @@ import api from "../lib/api";
 import { sessionStatus } from "../lib/auth";
 import { router } from "@inertiajs/react";
 import Pusher from "pusher-js";
+import { usePusher } from "@/contexts/PusherContext";
 
 // -----------------------------
 // Types
@@ -95,6 +96,15 @@ export default function Chat() {
   } | null>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
 
+  // Global Pusher context for cross-page real-time updates
+  const { 
+    onNewMessage, 
+    onStatusChange, 
+    markConversationRead,
+    refreshUnreadCount,
+    conversationStatuses,
+  } = usePusher();
+
   const normalizeMessage = (m: any): ChatMessage => ({
     ...m,
     message_id: m?.message_id ?? m?.id,
@@ -141,6 +151,47 @@ export default function Chat() {
       }));
     }
   };
+
+  // Register callbacks with global Pusher context for cross-page updates
+  useEffect(() => {
+    // When a new message arrives from any page, update our local state
+    onNewMessage.current = (msg: any) => {
+      console.log('[Chat] Global new message callback:', msg);
+      if (msg?.conversation_id) {
+        upsertMessage(Number(msg.conversation_id), msg);
+      }
+    };
+
+    // When conversation status changes globally
+    onStatusChange.current = (data: any) => {
+      console.log('[Chat] Global status change callback:', data);
+      if (data?.conversation_id && data?.status) {
+        setConversations(prev => prev.map(c => 
+          c.conversation_id === Number(data.conversation_id) 
+            ? { ...c, status: data.status as 'open' | 'ended' } 
+            : c
+        ));
+      }
+    };
+
+    return () => {
+      onNewMessage.current = null;
+      onStatusChange.current = null;
+    };
+  }, [activeConversation, userId]);
+
+  // Sync conversation statuses from global context (fallback polling)
+  useEffect(() => {
+    if (conversationStatuses.size === 0) return;
+    
+    setConversations(prev => prev.map(c => {
+      const globalStatus = conversationStatuses.get(c.conversation_id);
+      if (globalStatus && globalStatus !== c.status) {
+        return { ...c, status: globalStatus };
+      }
+      return c;
+    }));
+  }, [conversationStatuses]);
 
   // Check session authentication and redirect if needed
   useEffect(() => {
@@ -219,6 +270,8 @@ export default function Chat() {
           try {
             await api.post(`/conversations/${activeConversation}/read`);
             setUnreadCounts((prev) => ({ ...prev, [activeConversation]: 0 }));
+            // Refresh global unread count for sidebar badge
+            refreshUnreadCount();
           } catch {
             // Ignore read marking errors
           }
@@ -869,7 +922,7 @@ export default function Chat() {
                           if (now - lastTypingSentRef.current > 2000 && activeConversation) {
                             lastTypingSentRef.current = now;
                             // Fire-and-forget API call for typing indicator
-                            api.post(`/counselor/conversations/${activeConversation}/typing`)
+                            api.post(`/counselor/conversations/${activeConversation}/typing`, { is_typing: true })
                               .catch(() => { /* ignore errors */ });
                           }
                         }}
