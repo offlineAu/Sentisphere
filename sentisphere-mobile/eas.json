@@ -14,6 +14,7 @@
         "buildType": "apk"
       },
       "env": {
+        "GOOGLE_SERVICES_JSON": "@google_services_json",
         "EXPO_PUBLIC_API_URL": "http://YOUR_LOCAL_IP:8010"
       }
     },
@@ -21,16 +22,31 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "GOOGLE_SERVICES_JSON": "@google_services_json",
+        "EXPO_PUBLIC_API_URL": "https://sentisphere-production.up.railway.app"
       }
     },
     "releaseApk": {
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "GOOGLE_SERVICES_JSON": "@google_services_json",
+        "EXPO_PUBLIC_API_URL": "https://sentisphere-production.up.railway.app"
       }
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "android": {
+        "buildType": "app-bundle"
+      },
+      "env": {
+        "GOOGLE_SERVICES_JSON": "@google_services_json",
+        "EXPO_PUBLIC_API_URL": "https://sentisphere-production.up.railway.app"
+      }
     }
   },
   "submit": {

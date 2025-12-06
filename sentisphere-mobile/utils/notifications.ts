@@ -2,13 +2,15 @@
  * Push Notification Manager for Expo SDK 51+
  * 
  * ARCHITECTURE:
- * - Single source of truth for all push notification logic
- * - Idempotent initialization (safe to call multiple times)
+ * - Single source of truth for notification handlers and listeners
  * - Module-level singleton listeners (exactly ONE set)
  * - SecureStore-based caching to prevent duplicate backend POSTs
  * 
+ * UNIFIED EXPO PUSH:
+ * - Both Android and iOS use Expo Push Notifications
+ * 
  * USAGE:
- * - Call initializePushNotifications(userId) after auth
+ * - Call initializePushNotifications(userId) after authentication
  * - Call setupGlobalNotificationListeners() to attach listeners
  * - Call cleanupGlobalNotificationListeners() on logout
  */
@@ -99,28 +101,22 @@ async function deleteStoredValue(key: string): Promise<void> {
 /**
  * Request notification permissions and get the Expo push token.
  * Internal function - handles all platform-specific logic.
+ * 
+ * Works for both Android and iOS using Expo Push Notifications.
  */
 async function getExpoPushToken(): Promise<string | null> {
-  // Setup Android notification channel
-  if (Platform.OS === 'android') {
-    try {
-      await Notifications.setNotificationChannelAsync('default', {
-        name: 'default',
-        importance: Notifications.AndroidImportance.MAX,
-        vibrationPattern: [0, 250, 250, 250],
-        lightColor: '#FF231F7C',
-      });
-    } catch (error) {
-      console.warn('[Push] Failed to setup Android channel:', error);
-    }
+  // Setup Android notification channel (MUST be done before requesting token)
+  if (Platform.OS === "android") {
+    await Notifications.setNotificationChannelAsync("default", {
+      name: "Default",
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: "#FF231F7C",
+    });
+    console.log("[Push] Android notification channel created");
   }
 
   // Check device compatibility
-  if (!Device.isDevice && Platform.OS === 'android') {
-    console.log('[Push] Android emulator - push tokens not available');
-    return null;
-  }
-
   if (Constants.appOwnership === 'expo') {
     console.log('[Push] Expo Go detected - build with dev client or standalone APK for push tokens');
     return null;
@@ -131,7 +127,12 @@ async function getExpoPushToken(): Promise<string | null> {
     return null;
   }
 
+  // Both Android and iOS from here
   try {
+    // Debug logging for build-time variables
+    console.log("[Debug] EAS Project ID:", Constants.expoConfig?.extra?.eas?.projectId);
+    console.log("[Debug] Firebase google-services loaded:", !!process.env.GOOGLE_SERVICES_JSON);
+
     // Check/request permissions
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
@@ -149,19 +150,23 @@ async function getExpoPushToken(): Promise<string | null> {
     // Get project ID
     const projectId = Constants.expoConfig?.extra?.eas?.projectId;
     if (!projectId) {
-      console.error('[Push] Missing EAS projectId in app config - ensure build uses EAS project ID and updated google-services.json');
+      console.error('[Push] Missing EAS projectId in app config');
       return null;
     }
 
     // Get token
+    if (Platform.OS === 'android') {
+      console.log("📱 ANDROID — requesting Push Token...");
+    }
     const tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
-    console.log('[Push] ✓ Token obtained:', tokenData.data.substring(0, 30) + '...');
+    const platform = Platform.OS === 'android' ? 'Android' : 'iOS';
+    if (Platform.OS === 'android') {
+      console.log("📱 ANDROID PUSH TOKEN:", tokenData.data);
+    }
+    console.log(`[Push] ✓ ${platform} Token obtained:`, tokenData.data.substring(0, 30) + '...');
     return tokenData.data;
   } catch (error) {
-    console.error('[Push] Failed to get token:', error);
-    if (error instanceof Error && error.message.includes('FIS_AUTH_ERROR')) {
-      console.error('[Push] Detected FIS_AUTH_ERROR - update Firebase SHA-1/SHA-256 fingerprints for release, download new google-services.json, and rebuild the Android binary');
-    }
+    console.error('[Push] Failed to get push token:', error);
     return null;
   }
 }
@@ -208,10 +213,7 @@ async function postTokenToBackend(pushToken: string): Promise<boolean> {
 /**
  * Initialize push notifications for a user.
  * 
- * IDEMPOTENT: Safe to call multiple times.
- * - Checks cached token/userId in SecureStore
- * - Only POSTs to backend if token is new OR userId changed
- * - Stores current token/userId after successful POST
+ * Works for both Android and iOS using Expo Push Notifications.
  * 
  * @param userId - The authenticated user's ID (string)
  */
@@ -224,35 +226,26 @@ export async function initializePushNotifications(userId: string): Promise<void>
   }
 
   try {
-    // 1. Get push token
     const currentToken = await getExpoPushToken();
     if (!currentToken) {
       console.log('[Push] No token obtained - skipping registration');
       return;
     }
 
-    // 2. Check cached values
     const lastToken = await getStoredValue(STORAGE_KEYS.LAST_PUSH_TOKEN);
     const lastUserId = await getStoredValue(STORAGE_KEYS.LAST_PUSH_USER_ID);
 
-    // 3. Determine if we need to POST
     const tokenChanged = lastToken !== currentToken;
     const userChanged = lastUserId !== userId;
 
     if (!tokenChanged && !userChanged) {
       console.log('[Push] ⏭️ Cached match found - skipping backend POST');
-      console.log('[Push]    Token unchanged, userId unchanged');
       return;
     }
 
-    console.log('[Push] 🔄 Change detected:');
-    if (tokenChanged) console.log('[Push]    Token: changed');
-    if (userChanged) console.log('[Push]    UserId:', lastUserId, '→', userId);
-
-    // 4. POST to backend
+    console.log('[Push] 🔄 Change detected, POSTing to backend');
     const success = await postTokenToBackend(currentToken);
 
-    // 5. Cache on success
     if (success) {
       await setStoredValue(STORAGE_KEYS.LAST_PUSH_TOKEN, currentToken);
       await setStoredValue(STORAGE_KEYS.LAST_PUSH_USER_ID, userId);

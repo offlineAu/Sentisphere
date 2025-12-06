@@ -29,6 +29,7 @@ import {
   RefreshCcw,
   Share2,
   Bell,
+  BellOff,
   Send,
   MapPin,
   Ticket,
@@ -41,6 +42,13 @@ import {
   ChevronLeft,
   Trash2,
   Feather as FeatherIcon,
+  Info,
+  Quote,
+  Settings,
+  Lightbulb,
+  AlertCircle,
+  X,
+  Edit2,
 } from 'lucide-react-native';
 
 type IconProps = {
@@ -73,8 +81,8 @@ type IconProps = {
     | 'refresh-ccw'
     | 'share-2'
     | 'bell'
+    | 'bell-off'
     | 'send'
-    | 'bookmark'
     | 'map-pin'
     | 'ticket'
     | 'party-popper'
@@ -85,7 +93,14 @@ type IconProps = {
     | 'chevron-right'
     | 'chevron-left'
     | 'trash-2'
-    | 'feather';
+    | 'feather'
+    | 'info'
+    | 'quote'
+    | 'settings'
+    | 'lightbulb'
+    | 'alert-circle'
+    | 'x'
+    | 'edit-2';
   size?: number;
   color?: string;
   fill?: string;
@@ -121,6 +136,7 @@ const icons: Record<string, any> = {
   'refresh-ccw': RefreshCcw,
   'share-2': Share2,
   'bell': Bell,
+  'bell-off': BellOff,
   'send': Send,
   'map-pin': MapPin,
   'ticket': Ticket,
@@ -133,6 +149,13 @@ const icons: Record<string, any> = {
   'chevron-left': ChevronLeft,
   'trash-2': Trash2,
   'feather': FeatherIcon,
+  'info': Info,
+  'quote': Quote,
+  'settings': Settings,
+  'lightbulb': Lightbulb,
+  'alert-circle': AlertCircle,
+  'x': X,
+  'edit-2': Edit2,
 };
 
 export function Icon({ name, size = 20, color, fill }: IconProps) {

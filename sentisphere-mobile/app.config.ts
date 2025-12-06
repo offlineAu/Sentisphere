@@ -20,14 +20,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   android: {
     adaptiveIcon: {
       foregroundImage: "./assets/images/sentisphere-logo.png",
-      backgroundColor: "#E6F4FE"
+      backgroundColor: "#ffffffff"
     },
     edgeToEdgeEnabled: true,
     predictiveBackGestureEnabled: false,
     package: "com.sentisphere.mobile",
-    // NOTE: Release SHA-1/SHA-256 must be added to Firebase and a fresh google-services.json downloaded
-    // Run `eas credentials --platform android --profile releaseApk` to retrieve fingerprints before shipping
-    googleServicesFile: process.env.GOOGLE_SERVICES_JSON ?? "./google-services.json",
+    googleServicesFile: process.env.GOOGLE_SERVICES_JSON,
     softwareKeyboardLayoutMode: "pan"
   },
   androidStatusBar: {
@@ -66,7 +64,21 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         color: "#10B981",
         sounds: []
       }
-    ]
+    ],
+    [
+      "expo-build-properties",
+      {
+        android: {
+          compileSdkVersion: 36,
+          targetSdkVersion: 36,
+          minSdkVersion: 24
+        },
+        ios: {
+          deploymentTarget: "15.1"
+        }
+      }
+    ],
+    "./plugins/withFirebaseMessaging"
   ],
   experiments: {
     typedRoutes: true,

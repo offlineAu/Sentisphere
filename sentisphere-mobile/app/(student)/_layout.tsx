@@ -150,7 +150,7 @@ export default function StudentLayout() {
 
     console.log('[Push] === PUSH SETUP START ===');
     
-    // Initialize push notifications with userId for idempotent caching
+    // Initialize Expo push notifications for both Android and iOS
     initializePushNotifications(userId);
     
     // Setup global listeners (singleton - safe to call multiple times)
@@ -174,6 +174,8 @@ export default function StudentLayout() {
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="appointments/index" options={{ headerShown: false }} />
       <Stack.Screen name="analytics/index" options={{ headerShown: false }} />
+      <Stack.Screen name="notifications/index" options={{ headerShown: false }} />
+      <Stack.Screen name="notifications/[id]" options={{ headerShown: false }} />
     </Stack>
   );
 }

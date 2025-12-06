@@ -94,13 +94,15 @@ async def send_expo_push(
         logger.warning(f"send_expo_push: Invalid token format: {push_token[:20]}...")
         return result
     
-    # Build Expo message
+    # Build Expo message with high priority for Android
     expo_message = {
         "to": push_token,
         "sound": "default",
         "title": title,
         "body": message,
         "data": data or {},
+        "priority": "high",
+        "channelId": "default",
     }
     
     try:
@@ -182,7 +184,7 @@ async def send_expo_push_batch(
         for i in range(0, len(messages), batch_size):
             batch = messages[i:i + batch_size]
             
-            # Ensure proper format
+            # Ensure proper format with high priority for Android
             formatted_batch = []
             for msg in batch:
                 formatted_batch.append({
@@ -190,7 +192,9 @@ async def send_expo_push_batch(
                     "sound": "default",
                     "title": msg.get("title", ""),
                     "body": msg.get("body", ""),
-                    "data": msg.get("data", {})
+                    "data": msg.get("data", {}),
+                    "priority": "high",
+                    "channelId": "default",
                 })
             
             async with httpx.AsyncClient(timeout=30.0) as client:
