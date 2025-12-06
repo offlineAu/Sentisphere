@@ -8,6 +8,7 @@ import { LoadingSpinner } from "../components/loading-spinner";
 import { RiskBadge } from "@/components/ui/RiskBadge";
 import { MoodTimeline, StressBar } from "@/components/insights";
 import api from "../lib/api";
+import { parseApiError } from "@/lib/error-handler";
 import styles from "./Reports.module.css";
 import Slider from "react-slick";
 import "slick-carousel/slick/slick.css";

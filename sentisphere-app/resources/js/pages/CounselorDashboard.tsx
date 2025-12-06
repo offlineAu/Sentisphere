@@ -20,6 +20,7 @@ import { useSidebar } from "../components/SidebarContext";
 import DashboardLayout from "../layouts/DashboardLayout";
 import styles from './CounselorDashboard.module.css';
 import api from "../lib/api";
+import { parseApiError } from "@/lib/error-handler";
 import { LoadingSpinner } from "../components/loading-spinner";
 import { sessionStatus } from "../lib/auth";
 import { router } from "@inertiajs/react";

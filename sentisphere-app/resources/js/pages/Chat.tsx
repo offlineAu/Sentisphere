@@ -10,6 +10,7 @@ import { sessionStatus } from "../lib/auth";
 import { router } from "@inertiajs/react";
 import Pusher from "pusher-js";
 import { usePusher } from "@/contexts/PusherContext";
+import { parseApiError } from "@/lib/error-handler";
 
 // -----------------------------
 // Types
@@ -223,27 +224,35 @@ export default function Chat() {
         const unique = Array.from(new Map(res.data.map(c => [c.conversation_id, c])).values());
 
         // Enrich with initiator nickname and email for display
-        const withNicknames = await Promise.all(
+        // Use Promise.allSettled to continue even if some user fetches fail
+        const enrichResults = await Promise.allSettled(
           unique.map(async (c) => {
-            try {
-              const { data } = await api.get<{ nickname: string; email?: string }>(`/users/${c.initiator_user_id}`);
-              return { 
-                ...c, 
-                initiator_nickname: data.nickname || c.initiator_nickname,
-                initiator_email: data.email || undefined,
-              };
-            } catch {
-              return c;
-            }
+            const { data } = await api.get<{ nickname: string; email?: string }>(`/users/${c.initiator_user_id}`);
+            return { 
+              ...c, 
+              initiator_nickname: data.nickname || c.initiator_nickname,
+              initiator_email: data.email || undefined,
+            };
           })
         );
+
+        const withNicknames = enrichResults.map((result, index) => {
+          if (result.status === 'fulfilled') {
+            return result.value;
+          }
+          // If user fetch failed, use original conversation data
+          return unique[index];
+        });
 
         setConversations(withNicknames);
         if (withNicknames.length > 0) {
           setActiveConversation(withNicknames[0].conversation_id);
         }
       } catch (err) {
-        console.error("Error fetching conversations:", err);
+        const apiError = parseApiError(err);
+        console.error("Error fetching conversations:", apiError.message);
+        // Don't crash - just show empty state
+        setConversations([]);
       } finally {
         setLoading(false);
       }
@@ -274,7 +283,17 @@ export default function Chat() {
         const data = (res.data || []).map(normalizeMessage);
         
         // Also fetch conversation details to get latest status
-        const convRes = await api.get<Conversation>(`/conversations/${fetchingForConversation}`);
+        let convStatus: 'open' | 'ended' | null = null;
+        try {
+          const convRes = await api.get<Conversation>(`/conversations/${fetchingForConversation}`);
+          convStatus = convRes.data?.status || null;
+        } catch (convErr) {
+          // Conversation details fetch failed - continue with messages
+          const apiError = parseApiError(convErr);
+          if (apiError.isNotFound) {
+            console.log(`[Chat] Conversation ${fetchingForConversation} not found`);
+          }
+        }
         
         // Only update if we're still on the same conversation
         if (fetchingForConversation === activeConversation) {
@@ -284,10 +303,10 @@ export default function Chat() {
           setUnreadCounts((prev) => ({ ...prev, [fetchingForConversation]: unread }));
           
           // Update conversation status from fresh data
-          if (convRes.data?.status) {
+          if (convStatus) {
             setConversations(prev => prev.map(c => 
               c.conversation_id === fetchingForConversation 
-                ? { ...c, status: convRes.data.status } 
+                ? { ...c, status: convStatus as 'open' | 'ended' } 
                 : c
             ));
           }
@@ -305,7 +324,18 @@ export default function Chat() {
           }
         }
       } catch (err) {
-        console.error("Error fetching messages:", err);
+        const apiError = parseApiError(err);
+        if (apiError.isNotFound) {
+          // Conversation was deleted - remove from list and clear active
+          console.log(`[Chat] Conversation ${fetchingForConversation} deleted, removing`);
+          setConversations(prev => prev.filter(c => c.conversation_id !== fetchingForConversation));
+          if (fetchingForConversation === activeConversation) {
+            setActiveConversation(null);
+            setMessages([]);
+          }
+        } else {
+          console.error("Error fetching messages:", err);
+        }
       }
     };
     
@@ -349,6 +379,7 @@ export default function Chat() {
     const poll = async () => {
       const ids = conversations.map((c) => c.conversation_id);
       const currentActive = activeConversationRef.current;
+      const deletedIds: number[] = [];
       
       for (const id of ids) {
         try {
@@ -363,7 +394,28 @@ export default function Chat() {
           const unread = data.filter((m) => !Boolean((m as any).is_read) && m.sender_id !== userId).length;
           setUnreadCounts((prev) => ({ ...prev, [id]: unread }));
         } catch (e) {
-          // noop
+          const apiError = parseApiError(e);
+          if (apiError.isNotFound) {
+            // Conversation was deleted - mark for removal
+            console.log(`[Chat] Conversation ${id} not found (deleted), removing from list`);
+            deletedIds.push(id);
+          }
+          // Continue processing other conversations
+        }
+      }
+      
+      // Remove deleted conversations from state
+      if (deletedIds.length > 0) {
+        setConversations(prev => prev.filter(c => !deletedIds.includes(c.conversation_id)));
+        setMessagesByConversation(prev => {
+          const next = { ...prev };
+          deletedIds.forEach(id => delete next[id]);
+          return next;
+        });
+        // If active conversation was deleted, clear it
+        if (currentActive && deletedIds.includes(currentActive)) {
+          setActiveConversation(null);
+          setMessages([]);
         }
       }
     };
@@ -431,7 +483,25 @@ export default function Chat() {
         });
         setUnreadCounts((prev) => ({ ...prev, [activeConversation]: prev[activeConversation] || 0 }));
       })
-      .catch((err) => console.error("Error sending message:", err));
+      .catch((err) => {
+        const apiError = parseApiError(err);
+        if (apiError.isNotFound) {
+          // Conversation was deleted
+          setConversations(prev => prev.filter(c => c.conversation_id !== activeConversation));
+          setActiveConversation(null);
+          setMessages([]);
+        } else if (apiError.status === 400) {
+          // Conversation ended - update status
+          setConversations(prev => prev.map(c => 
+            c.conversation_id === activeConversation 
+              ? { ...c, status: 'ended' } 
+              : c
+          ));
+          alert(apiError.message || 'Cannot send message to this conversation.');
+        } else {
+          console.error("Error sending message:", apiError.message);
+        }
+      });
   };
 
   // Initialize Pusher for real-time chat and subscribe to global conversations channel

@@ -9,7 +9,7 @@ import { SidebarProvider } from "./components/SidebarContext";
 import { PusherProvider } from "./contexts/PusherContext";
 import BackgroundOrnaments from "./components/background-ornaments";
 import { LoadingSpinner } from './components/loading-spinner';
-import { ErrorBoundary } from './components/error-boundary';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 const appName = import.meta.env.VITE_APP_NAME || 'Laravel';
 
