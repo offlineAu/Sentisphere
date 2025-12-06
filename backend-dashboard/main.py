@@ -2086,6 +2086,15 @@ def counselor_send_message(
     
     payload = dict(row) if row else {"message_id": mid, "conversation_id": conversation_id, "sender_id": counselor_id, "content": message_in.content, "is_read": False}
     
+    # Add debug info to response (visible in browser Network tab)
+    payload["_debug"] = {
+        "utc_now": utc_now.isoformat(),
+        "ph_now": ph_now_dt.isoformat(),
+        "ph_string_sent_to_db": ph_now,
+        "stored_in_db": str(row['timestamp']) if row else None,
+        "server_tz": str(datetime.now().astimezone().tzinfo),
+    }
+    
     # Broadcast via Pusher for instant delivery to mobile
     try:
         pusher_service.broadcast_message(conversation_id, payload)
