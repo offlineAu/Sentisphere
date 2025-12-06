@@ -52,7 +52,7 @@ const PusherContext = createContext<PusherContextType | null>(null);
 const PUSHER_KEY = import.meta.env.VITE_PUSHER_APP_KEY || 'your-pusher-key';
 const PUSHER_CLUSTER = import.meta.env.VITE_PUSHER_APP_CLUSTER || 'ap1';
 const TYPING_TIMEOUT = 3000; // 3 seconds
-const STATUS_POLL_INTERVAL = 30000; // 30 seconds fallback polling
+const STATUS_POLL_INTERVAL = 10000; // 10 seconds fallback polling for faster status updates
 
 export function PusherProvider({ children }: { children: React.ReactNode }) {
   const pusherRef = useRef<Pusher | null>(null);
