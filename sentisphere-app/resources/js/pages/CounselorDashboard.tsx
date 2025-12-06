@@ -642,6 +642,33 @@ export default function CounselorDashboard() {
     fetchData();
   }, [authenticated, globalRange, rangeStart, rangeEnd, refreshKey]);
 
+  // Refresh data when tab becomes visible (user returns to tab)
+  useEffect(() => {
+    if (!authenticated) return;
+    
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        console.log('[Dashboard] Tab visible - refreshing data');
+        setRefreshKey(prev => prev + 1);
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [authenticated]);
+
+  // Fallback polling every 30 seconds for real-time updates
+  useEffect(() => {
+    if (!authenticated) return;
+    
+    const pollInterval = setInterval(() => {
+      console.log('[Dashboard] Polling refresh');
+      setRefreshKey(prev => prev + 1);
+    }, 5000); // 30 seconds
+    
+    return () => clearInterval(pollInterval);
+  }, [authenticated]);
+
   // Fetch Weekly Mood Analytics (trends) once, independent of the dashboard global date filter
   useEffect(() => {
     if (!authenticated) return;
