@@ -287,3 +287,111 @@ def get_legacy_model():
     Kept for backward compatibility and comparison testing.
     """
     return get_sentiment_model()
+
+
+# =============================================================================
+# ENSEMBLE ANALYSIS (New multi-model pipeline)
+# =============================================================================
+
+def analyze_text_ensemble(
+    text: str,
+    mood_level: Optional[str] = None,
+    energy_level: Optional[str] = None,
+    stress_level: Optional[str] = None,
+    feel_better: Optional[str] = None,
+) -> SentimentOutput:
+    """
+    Analyze text using the ensemble sentiment pipeline.
+    
+    This uses multiple models:
+    - XLM-RoBERTa (multilingual base)
+    - Twitter-RoBERTa-Emotion (multi-emotion)
+    - Fine-tuned Bisaya model (Cebuano-specialized)
+    - MentalHealth lexicon analyzer
+    
+    Args:
+        text: Input text to analyze
+        mood_level: Optional user-reported mood
+        energy_level: Optional user-reported energy
+        stress_level: Optional user-reported stress
+        feel_better: Optional feel better indicator
+    
+    Returns:
+        SentimentOutput with ensemble-merged sentiment
+    """
+    try:
+        from app.services.ensemble_sentiment import get_ensemble_pipeline
+        
+        pipeline = get_ensemble_pipeline()
+        result = pipeline.analyze(
+            text,
+            mood_level=mood_level,
+            energy_level=energy_level,
+            stress_level=stress_level,
+            feel_better=feel_better,
+        )
+        
+        # Extract final result
+        final = result.final_result
+        emotions_list = final.get("emotions", ["neutral"])
+        emotions_str = ", ".join(emotions_list) if emotions_list else "neutral"
+        
+        return SentimentOutput(
+            sentiment=final.get("sentiment", "neutral"),
+            emotions=emotions_str,
+            confidence=final.get("combined_confidence", 0.5),
+            model_version="ensemble-v1.0",
+        )
+        
+    except Exception as e:
+        # Fallback to mental health analyzer
+        import logging
+        logging.warning(f"[NLP] Ensemble failed, using fallback: {e}")
+        return analyze_checkin_text(
+            text,
+            mood_level=mood_level,
+            energy_level=energy_level,
+            stress_level=stress_level,
+            feel_better=feel_better,
+        )
+
+
+def analyze_text_ensemble_detailed(
+    text: str,
+    mood_level: Optional[str] = None,
+    energy_level: Optional[str] = None,
+    stress_level: Optional[str] = None,
+    feel_better: Optional[str] = None,
+) -> Dict:
+    """
+    Analyze text using the ensemble pipeline with full detailed output.
+    
+    Returns the complete JSON output with all model results.
+    """
+    try:
+        from app.services.ensemble_sentiment import analyze_ensemble
+        return analyze_ensemble(
+            text,
+            mood_level=mood_level,
+            energy_level=energy_level,
+            stress_level=stress_level,
+            feel_better=feel_better,
+        )
+    except Exception as e:
+        import logging
+        logging.warning(f"[NLP] Ensemble detailed failed: {e}")
+        # Return minimal structure
+        return {
+            "xlm_roberta": None,
+            "bisaya_model": None,
+            "emotion_detection": None,
+            "final_result": {
+                "sentiment": "neutral",
+                "combined_confidence": 0.5,
+                "reasoning": f"Fallback due to error: {str(e)}",
+                "emotions": ["neutral"],
+                "dominant_emotion": "neutral",
+                "flags": ["fallback_mode"],
+            },
+        }
+
