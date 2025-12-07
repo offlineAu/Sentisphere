@@ -11,13 +11,18 @@ from app.models.emotional_checkin import EmotionalCheckin
 from app.models.journal import Journal
 from app.models.journal_sentiment import JournalSentiment
 from app.schemas.sentiment import SentimentResult
-from app.utils.nlp_loader import SentimentOutput, analyze_text, analyze_checkin_text
+from app.utils.nlp_loader import (
+    SentimentOutput,
+    analyze_text,
+    analyze_checkin_text,
+    analyze_text_ensemble,  # NEW: Ensemble pipeline
+)
 from app.utils.text_cleaning import clean_text
 from app.utils.gibberish_detector import GibberishDetector
 
 
 class SentimentService:
-    model_version: str = "heuristic-1.0"
+    model_version: str = "ensemble-v1.0"  # Updated to ensemble
 
     @classmethod
     def analyze_journal(cls, db: Session, journal_id: int) -> JournalSentiment:
@@ -121,10 +126,9 @@ class SentimentService:
         if checkin.feel_better:
             feel_better = checkin.feel_better.value if hasattr(checkin.feel_better, 'value') else str(checkin.feel_better)
         
-        # Use context-aware analysis. The text may be empty if the
-        # original comment was gibberish, but the model will still
-        # infer sentiment from the structured context.
-        prediction = analyze_checkin_text(
+        # Use ensemble pipeline for context-aware analysis
+        # The ensemble combines XLM-RoBERTa, Twitter-Emotion, Bisaya model, and MH analyzer
+        prediction = analyze_text_ensemble(
             text=comment_for_model,
             mood_level=mood_level,
             energy_level=energy_level,
@@ -146,6 +150,7 @@ class SentimentService:
 
     @classmethod
     def _predict(cls, text: str) -> SentimentOutput:
+        """Predict sentiment using the ensemble pipeline."""
         cleaned = clean_text(text)
         if not cleaned:
             return SentimentOutput(
@@ -154,7 +159,8 @@ class SentimentService:
                 confidence=0.5,
                 model_version=cls.model_version,
             )
-        prediction = analyze_text(cleaned)
+        # Use ensemble pipeline for journals
+        prediction = analyze_text_ensemble(cleaned)
         return SentimentOutput(
             sentiment=prediction.sentiment,
             emotions=prediction.emotions,

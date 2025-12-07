@@ -641,6 +641,43 @@ def debug_sentiment_probe(payload: SentimentProbeIn):
     )
 
 
+class EnsembleProbeIn(BaseModel):
+    """Input for ensemble sentiment analysis probe."""
+    text: str
+    mood_level: Optional[str] = None
+    energy_level: Optional[str] = None
+    stress_level: Optional[str] = None
+    feel_better: Optional[str] = None
+
+
+@app.post("/api/debug/sentiment/ensemble")
+def debug_ensemble_probe(payload: EnsembleProbeIn):
+    """
+    Debug endpoint for testing the ensemble sentiment pipeline.
+    
+    Returns the full three-stage analysis:
+    - XLM-RoBERTa base analysis
+    - Twitter-RoBERTa emotion detection
+    - Bisaya refinement (if triggered)
+    - Hybrid merged result
+    
+    Only available in non-production environments.
+    """
+    if settings.ENV.lower() == "production":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not available in production")
+    
+    from app.utils.nlp_loader import analyze_text_ensemble_detailed
+    
+    result = analyze_text_ensemble_detailed(
+        payload.text or "",
+        mood_level=payload.mood_level,
+        energy_level=payload.energy_level,
+        stress_level=payload.stress_level,
+        feel_better=payload.feel_better,
+    )
+    return result
+
+
 # --- Journals: Similarity ---
 
 
