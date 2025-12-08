@@ -408,7 +408,8 @@ class SmartAlertService:
             sentiment = s.sentiment.lower() if s.sentiment else "neutral"
             confidence = float(s.confidence) if s.confidence else 0.5
             
-            if sentiment == "negative":
+            # Treat both negative and strongly_negative as negative
+            if sentiment in ["negative", "strongly_negative"]:
                 total_score -= confidence
             elif sentiment == "positive":
                 total_score += confidence
@@ -418,7 +419,8 @@ class SmartAlertService:
             sentiment = s.sentiment.lower() if s.sentiment else "neutral"
             confidence = float(s.confidence) if s.confidence else 0.5
             
-            if sentiment == "negative":
+            # Treat both negative and strongly_negative as negative (journals weighted higher)
+            if sentiment in ["negative", "strongly_negative"]:
                 total_score -= confidence * 1.5  # Journals weighted higher
             elif sentiment == "positive":
                 total_score += confidence * 1.5
