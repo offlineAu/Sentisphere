@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { Platform, BackHandler } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { Stack, useRouter, useSegments } from 'expo-router';
-import { 
+import {
   initializePushNotifications,
   setupGlobalNotificationListeners,
   cleanupGlobalNotificationListeners
@@ -26,17 +26,17 @@ export default function StudentLayout() {
     const onBackPress = () => {
       // Cast segments to string array to avoid TypeScript strict typing issues
       const segmentStrings = segments as string[];
-      
+
       // Check if we're on the main tabs (dashboard area)
       const isOnMainTabs = segmentStrings.some(s => s.includes('(tabs)') || s.includes('tabs'));
       const isOnDashboard = segmentStrings.some(s => s.includes('dashboard'));
-      
+
       // If on main tabs or dashboard with no deep navigation, prevent back
       if (isOnMainTabs && !segmentStrings.some(s => s.includes('appointments') || s.includes('analytics'))) {
         // On main dashboard - prevent back to auth screen
         return true; // Prevent default back behavior
       }
-      
+
       // Allow normal back navigation for other screens (appointments, chat details, etc.)
       return false;
     };
@@ -77,11 +77,11 @@ export default function StudentLayout() {
           return;
         }
 
-        // 2. If no token, redirect to auth
+        // 2. If no token, redirect to splash/index to handle onboarding flow
         if (!token) {
-          console.log('[Auth] No stored token found - showing login screen');
+          console.log('[Auth] No stored token found - redirecting to splash for onboarding');
           setAuthorized(false);
-          router.replace('/auth');
+          router.replace('/');
           return;
         }
 
@@ -103,19 +103,19 @@ export default function StudentLayout() {
             setUserId(uid);
             setAuthorized(true);
           } else {
-            // Token invalid/expired - clear it and show login
-            console.log('[Auth] ✗ Token invalid (status:', response.status, ') - clearing and showing login');
+            // Token invalid/expired - clear it and redirect to splash
+            console.log('[Auth] ✗ Token invalid (status:', response.status, ') - clearing and redirecting to splash');
             await clearStoredToken();
             setAuthorized(false);
-            router.replace('/auth');
+            router.replace('/');
           }
         } catch (error) {
           console.log('[Auth] ✗ Token validation failed:', error);
-          // Network error or backend unreachable - clear token and show login
+          // Network error or backend unreachable - clear token and redirect to splash
           await clearStoredToken();
           if (isMounted) {
             setAuthorized(false);
-            router.replace('/auth');
+            router.replace('/');
           }
         }
       } catch (error) {
@@ -124,7 +124,7 @@ export default function StudentLayout() {
           return;
         }
         setAuthorized(false);
-        router.replace('/auth');
+        router.replace('/');
       }
     };
 
@@ -181,16 +181,16 @@ export default function StudentLayout() {
     if (Platform.OS === 'web') return;
 
     console.log('[Push] === PUSH SETUP START ===');
-    
+
     // Initialize Expo push notifications for both Android and iOS
     initializePushNotifications(userId);
-    
+
     // Setup global listeners with callback to refresh notifications when push is received
     setupGlobalNotificationListeners(() => {
       console.log('[Push] New notification received - refreshing notifications...');
       fetchNotifications();
     });
-    
+
     console.log('[Push] === PUSH SETUP COMPLETE ===');
 
     // Cleanup on unmount (e.g., when user navigates away or logs out)
