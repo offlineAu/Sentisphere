@@ -514,10 +514,10 @@ class InsightGenerationService:
             dt = j.get("created_at")
             try:
                 t = datetime.fromisoformat(dt) if isinstance(dt, str) else dt
+                if isinstance(t, datetime) and 0 <= t.hour <= 4:
+                    late_night_count += 1
             except Exception:
                 continue
-            if 0 <= t.hour <= 4:
-                late_night_count += 1
         
         # Enhanced risk scoring
         score, reason, level = InsightGenerationService._risk_score(
