@@ -4031,7 +4031,7 @@ def weekly_insights(
     return CounselorReportService.weekly_insights(db)
 
 
-@app.post("/reports/trigger-insights")
+@app.post("/api/reports/trigger-insights")
 def trigger_insights_generation(
     _user: User = Depends(require_counselor),
     db: Session = Depends(get_db),
