@@ -211,14 +211,14 @@ def build_sanitized_payload(user_id: Optional[int], start_dt: datetime, end_dt: 
             {"action": r.get("action"), "count": int(r.get("cnt") or 0)} for r in act_rows
         ]
 
-        # Appointments (counts by form_type) - coalesce downloaded_at with created_at fallback
+        # Appointments (counts by form_type)
         app_rows = conn.execute(
             text(
                 """
                 SELECT form_type, COUNT(*) AS cnt
                 FROM appointment_log
-                WHERE COALESCE(downloaded_at, created_at) >= :start 
-                  AND COALESCE(downloaded_at, created_at) <= :end
+                WHERE downloaded_at >= :start 
+                  AND downloaded_at <= :end
                 {user_filter}
                 GROUP BY form_type
                 """.format(user_filter=("AND user_id = :uid" if user_id is not None else ""))
