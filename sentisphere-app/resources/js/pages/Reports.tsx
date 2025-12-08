@@ -205,6 +205,7 @@ function Reports() {
   const [insights, setInsights] = useState<WeeklyInsight[]>([]);
   const [behavioralInsights, setBehavioralInsights] = useState<BehavioralInsight[]>([]);
   const [behavioralLoading, setBehavioralLoading] = useState(false);
+  const [generatingInsights, setGeneratingInsights] = useState(false);
   const [engagement, setEngagement] = useState<EngagementMetrics | null>(null);
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const d = new Date();
@@ -363,7 +364,7 @@ function Reports() {
   useEffect(() => {
     const pollInterval = setInterval(() => {
       setRefreshKey(prev => prev + 1);
-    }, 5000);
+    }, 30000); // 30 seconds (was incorrectly 5s)
 
     return () => clearInterval(pollInterval);
   }, []);
@@ -657,14 +658,14 @@ function Reports() {
             const gradientYellow = "bg-gradient-to-br from-[#facc15] to-[#eab308] text-white";
             const whiteCard = "bg-white hover:shadow-md transition";
             const cardClass = `${baseCard} ${isTotal
-                ? gradientGreen
-                : isRisk
-                  ? gradientRed
-                  : isActive
-                    ? gradientBlue
-                    : isWellness
-                      ? gradientYellow
-                      : whiteCard
+              ? gradientGreen
+              : isRisk
+                ? gradientRed
+                : isActive
+                  ? gradientBlue
+                  : isWellness
+                    ? gradientYellow
+                    : whiteCard
               }`;
             const isGradient = isTotal || isRisk || isActive || isWellness;
             const titleClass = isGradient ? "text-sm font-medium opacity-90" : "text-sm font-medium text-gray-600";
@@ -918,16 +919,49 @@ function Reports() {
                   NLP-generated wellness analysis from student check-ins and journals.
                 </p>
               </div>
-              {insights.length > 0 && (
-                <div className="flex items-center gap-2">
-                  <button className="p-1 rounded-full border hover:bg-gray-100" onClick={() => weeklySliderRef.current?.slickPrev()} aria-label="Previous insight">
-                    <ChevronLeft className="h-4 w-4" />
-                  </button>
-                  <button className="p-1 rounded-full border hover:bg-gray-100" onClick={() => weeklySliderRef.current?.slickNext()} aria-label="Next insight">
-                    <ChevronRight className="h-4 w-4" />
-                  </button>
-                </div>
-              )}
+              <div className="flex items-center gap-2">
+                <button
+                  className="px-3 py-1.5 text-xs font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 transition-colors"
+                  onClick={async () => {
+                    setGeneratingInsights(true);
+                    try {
+                      const res = await api.post<{ status: string; message: string }>('/reports/trigger-insights');
+                      const { status, message } = res.data;
+                      if (status === 'already_current') {
+                        alert(`✓ ${message}`);
+                      } else if (status === 'generated') {
+                        alert(`✓ ${message}`);
+                        setRefreshKey(prev => prev + 1); // Refresh to show new insights
+                      } else if (status === 'insufficient_data') {
+                        alert(`ℹ ${message}`);
+                      } else {
+                        alert(`Error: ${message}`);
+                      }
+                    } catch (err: any) {
+                      alert(`Error generating insights: ${err?.response?.data?.detail || err.message}`);
+                    } finally {
+                      setGeneratingInsights(false);
+                    }
+                  }}
+                  disabled={generatingInsights}
+                  aria-label="Generate weekly insights"
+                >
+                  {generatingInsights ? (
+                    <><svg className="animate-spin h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg> Generating...</>
+                  ) : (
+                    <><Lightbulb className="h-3.5 w-3.5" /> Generate</>)}
+                </button>
+                {insights.length > 0 && (
+                  <>
+                    <button className="p-1 rounded-full border hover:bg-gray-100" onClick={() => weeklySliderRef.current?.slickPrev()} aria-label="Previous insight">
+                      <ChevronLeft className="h-4 w-4" />
+                    </button>
+                    <button className="p-1 rounded-full border hover:bg-gray-100" onClick={() => weeklySliderRef.current?.slickNext()} aria-label="Next insight">
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
             {insights.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-8 text-center">
@@ -1371,8 +1405,8 @@ function Reports() {
                   <button
                     onClick={() => setNotifyType('automated')}
                     className={`p-3 rounded-xl border-2 transition-all ${notifyType === 'automated'
-                        ? 'border-primary bg-primary/5'
-                        : 'border-gray-200 hover:border-gray-300'
+                      ? 'border-primary bg-primary/5'
+                      : 'border-gray-200 hover:border-gray-300'
                       }`}
                   >
                     <div className="flex flex-col items-center gap-2">
@@ -1389,8 +1423,8 @@ function Reports() {
                   <button
                     onClick={() => setNotifyType('manual')}
                     className={`p-3 rounded-xl border-2 transition-all ${notifyType === 'manual'
-                        ? 'border-primary bg-primary/5'
-                        : 'border-gray-200 hover:border-gray-300'
+                      ? 'border-primary bg-primary/5'
+                      : 'border-gray-200 hover:border-gray-300'
                       }`}
                   >
                     <div className="flex flex-col items-center gap-2">
