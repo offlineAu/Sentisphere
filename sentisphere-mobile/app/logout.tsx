@@ -22,19 +22,20 @@ export default function LogoutScreen() {
     try {
       // Cleanup push notifications (unregister from backend, clear cache, remove listeners)
       await cleanupOnLogout();
-      
+
       // Clear local auth token
       if (Platform.OS === 'web') {
-        try { (window as any)?.localStorage?.removeItem('auth_token'); } catch {}
+        try { (window as any)?.localStorage?.removeItem('auth_token'); } catch { }
       } else {
-        try { await SecureStore.deleteItemAsync('auth_token'); } catch {}
+        try { await SecureStore.deleteItemAsync('auth_token'); } catch { }
       }
-      
-      console.log('[Logout] Logout complete, navigating to auth screen');
+
+      console.log('[Logout] Logout complete, navigating to Entry screen');
     } catch (error) {
       console.error('[Logout] Error during logout:', error);
     } finally {
-      router.replace('/auth');
+      // Navigate to Entry screen (/) so user goes through proper flow: Entry → Terms → Auth
+      router.replace('/');
     }
   };
 
@@ -69,19 +70,19 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFFFFF' },
   topBar: { paddingHorizontal: 16, paddingBottom: 8 },
   backBtn: { alignSelf: 'flex-start' },
-  backBtnCircle: { 
-    width: 40, 
-    height: 40, 
-    borderRadius: 20, 
-    backgroundColor: 'rgba(254, 226, 226, 0.8)', 
-    alignItems: 'center', 
-    justifyContent: 'center' 
+  backBtnCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(254, 226, 226, 0.8)',
+    alignItems: 'center',
+    justifyContent: 'center'
   },
-  centerContent: { 
-    flex: 1, 
-    alignItems: 'center', 
-    justifyContent: 'center', 
-    paddingHorizontal: 24 
+  centerContent: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24
   },
   title: { fontSize: 20, fontFamily: 'Inter_700Bold', color: '#111827', marginTop: 6 },
   subtitle: { fontSize: 13, color: '#6B7280', textAlign: 'center', marginHorizontal: 24, marginTop: 4 },

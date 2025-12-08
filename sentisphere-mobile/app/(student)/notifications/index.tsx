@@ -54,11 +54,11 @@ export default function NotificationsScreen() {
   });
 
   useEffect(() => { runEntrance(); }, []);
-  
-  useFocusEffect(useCallback(() => { 
-    runEntrance(); 
-    fetchNotifications(); 
-    return () => {}; 
+
+  useFocusEffect(useCallback(() => {
+    runEntrance();
+    fetchNotifications();
+    return () => { };
   }, []));
 
   const getAuthToken = useCallback(async (): Promise<string | null> => {
@@ -93,7 +93,7 @@ export default function NotificationsScreen() {
   const markAsRead = async (notificationId: number) => {
     // Optimistic update
     notificationStore.markAsRead(notificationId);
-    
+
     // Sync with backend
     try {
       const tok = await getAuthToken();
@@ -123,9 +123,14 @@ export default function NotificationsScreen() {
 
   const goBack = () => {
     if (Platform.OS !== 'web') {
-      try { Haptics.selectionAsync(); } catch {}
+      try { Haptics.selectionAsync(); } catch { }
     }
-    router.back();
+    // Fallback: if no history (e.g., deep link), go to dashboard instead of throwing error
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/(student)/(tabs)/dashboard');
+    }
   };
 
   const markAllAsRead = async () => {
@@ -133,14 +138,14 @@ export default function NotificationsScreen() {
     if (unreadIds.length === 0) return;
 
     if (Platform.OS !== 'web') {
-      try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
+      try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch { }
     }
 
     setMarkingAllRead(true);
-    
+
     // Optimistic update
     notificationStore.markAllAsRead();
-    
+
     // Sync with backend - mark each notification as read
     try {
       const tok = await getAuthToken();
@@ -148,7 +153,7 @@ export default function NotificationsScreen() {
         setMarkingAllRead(false);
         return;
       }
-      
+
       // Mark all unread notifications as read in parallel
       await Promise.all(
         unreadIds.map(id =>
@@ -158,7 +163,7 @@ export default function NotificationsScreen() {
           })
         )
       );
-      
+
       showToast(`${unreadIds.length} notification${unreadIds.length > 1 ? 's' : ''} marked as read`, 'success');
     } catch (e) {
       console.error('Failed to mark all notifications as read:', e);
@@ -177,15 +182,15 @@ export default function NotificationsScreen() {
       <View style={styles.container}>
         {/* Header */}
         <Animated.View style={[styles.header, makeFadeUp(entrance.header)]}>
-          <Pressable 
-            onPress={goBack} 
+          <Pressable
+            onPress={goBack}
             style={({ pressed }) => [styles.backButton, pressed && styles.backButtonPressed]}
             accessibilityRole="button"
             accessibilityLabel="Go back"
           >
             <Icon name="chevron-left" size={22} color="#374151" />
           </Pressable>
-          
+
           <View style={styles.headerCenter}>
             <ThemedText style={styles.headerTitle}>Notifications</ThemedText>
             {unreadCount > 0 && (
@@ -194,7 +199,7 @@ export default function NotificationsScreen() {
               </View>
             )}
           </View>
-          
+
           {unreadCount > 0 ? (
             <Pressable
               onPress={markAllAsRead}
@@ -260,7 +265,7 @@ export default function NotificationsScreen() {
           )}
         </Animated.View>
       </View>
-    {ToastComponent}
+      {ToastComponent}
     </GlobalScreenWrapper>
   );
 }
