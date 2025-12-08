@@ -363,13 +363,18 @@ class CounselorReportService:
         last_end = this_end - timedelta(days=7)
 
         def _counts(start_dt: datetime, end_dt: datetime) -> tuple[int, int]:
-            stmt = select(
-                func.count(func.distinct(EmotionalCheckin.user_id)),
-                func.count(EmotionalCheckin.checkin_id),
-            ).where(
-                and_(
-                    EmotionalCheckin.created_at >= start_dt,
-                    EmotionalCheckin.created_at <= end_dt,
+            stmt = (
+                select(
+                    func.count(func.distinct(EmotionalCheckin.user_id)),
+                    func.count(EmotionalCheckin.checkin_id),
+                )
+                .join(User, EmotionalCheckin.user_id == User.user_id)
+                .where(
+                    and_(
+                        EmotionalCheckin.created_at >= start_dt,
+                        EmotionalCheckin.created_at <= end_dt,
+                        User.role == UserRole.STUDENT,
+                    )
                 )
             )
             active, total = db.execute(stmt).one_or_none() or (0, 0)

@@ -92,15 +92,7 @@ class InsightGenerationService:
         except Exception:
             return {}
 
-    @staticmethod
-    def _redact(text_value: str) -> str:
-        if not text_value:
-            return text_value
-        s = text_value
-        s = re.sub(r"[A-Za-z0-9_.+-]+@[A-Za-z0-9-]+\.[A-Za-z0-9.-]+", "[REDACTED]", s)
-        s = re.sub(r"\b\+?\d[\d\s-]{7,}\b", "[REDACTED]", s)
-        s = re.sub(r"\b([A-Z][a-z]+\s+[A-Z][a-z]+)\b", "[REDACTED]", s)
-        return s
+
 
     @staticmethod
     def _match_keywords(texts: List[str]) -> Tuple[List[str], List[str]]:
