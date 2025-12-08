@@ -4123,6 +4123,70 @@ def trigger_insights_generation(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/reports/rescan-alerts")
+def rescan_alerts(
+    lookback_days: int = Query(30, description="Days to look back for data"),
+    _user: User = Depends(require_counselor),
+    db: Session = Depends(get_db),
+):
+    """
+    Rescan all users for alerts based on recent activity.
+    This is useful after code changes to regenerate alerts.
+    """
+    import logging
+    from app.services.smart_alert_service import SmartAlertService
+    
+    logging.info(f"[rescan-alerts] Starting rescan for all users (lookback={lookback_days} days)")
+    
+    # Get all students with any activity
+    from datetime import timedelta
+    cutoff = datetime.utcnow() - timedelta(days=lookback_days)
+    
+    # Get unique user IDs from check-ins and journals
+    checkin_users = list(db.scalars(
+        select(EmotionalCheckin.user_id)
+        .where(EmotionalCheckin.created_at >= cutoff)
+        .distinct()
+    ))
+    
+    journal_users = list(db.scalars(
+        select(Journal.user_id)
+        .where(Journal.created_at >= cutoff, Journal.deleted_at.is_(None))
+        .distinct()
+    ))
+    
+    all_users = list(set(checkin_users + journal_users))
+    logging.info(f"[rescan-alerts] Found {len(all_users)} users with activity in last {lookback_days} days")
+    
+    new_alerts = []
+    
+    for user_id in all_users:
+        # Check all alert types
+        for check_fn in [
+            lambda uid: SmartAlertService.check_crisis_language(db, uid, lookback_days=lookback_days),
+            lambda uid: SmartAlertService.check_user_for_alert(db, uid, lookback_days=lookback_days),
+            lambda uid: SmartAlertService.check_sentiment_threshold(db, uid, lookback_days=lookback_days),
+            lambda uid: SmartAlertService.check_escalation_risk(db, uid, lookback_days=lookback_days),
+        ]:
+            alert_data = check_fn(user_id)
+            if alert_data:
+                alert = SmartAlertService.create_smart_alert(db, alert_data, commit=True)
+                new_alerts.append({
+                    "user_id": user_id,
+                    "severity": alert.severity.value if hasattr(alert.severity, 'value') else str(alert.severity),
+                    "reason": alert.reason,
+                })
+                break  # Only one alert per user
+    
+    logging.info(f"[rescan-alerts] Created {len(new_alerts)} new alerts")
+    
+    return {
+        "status": "completed",
+        "users_scanned": len(all_users),
+        "new_alerts_created": len(new_alerts),
+        "alerts": new_alerts,
+    }
+
 @app.get("/reports/behavior-insights")
 def behavior_insights(
     _user: User = Depends(require_counselor),

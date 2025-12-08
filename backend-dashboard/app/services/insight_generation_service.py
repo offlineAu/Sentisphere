@@ -288,13 +288,38 @@ class InsightGenerationService:
 
     @staticmethod
     def _sentiment_counts(items: List[str]) -> Dict[str, int]:
-        c = Counter([str(s).lower() for s in items if s in ("positive", "neutral", "negative")])
+        # Normalize sentiments: treat strongly_negative as negative
+        normalized = []
+        for s in items:
+            s_lower = str(s).lower()
+            if s_lower == "strongly_negative":
+                normalized.append("negative")
+            elif s_lower in ("positive", "neutral", "negative"):
+                normalized.append(s_lower)
+        
+        c = Counter(normalized)
         return {"positive": c.get("positive", 0), "neutral": c.get("neutral", 0), "negative": c.get("negative", 0)}
 
     @staticmethod
     def _collect_emotions(journal_items: List[Dict[str, Any]], checkin_items: List[Dict[str, Any]]) -> Counter:
         cnt: Counter = Counter()
         def add_e(em):
+            if not em:
+                return
+            try:
+                obj = json.loads(em) if isinstance(em, str) else em
+                if isinstance(obj, dict):
+                    for k, v in obj.items():
+                        if isinstance(v, (int, float)):
+                            cnt[k] += float(v)
+                        else:
+                            cnt[k] += 1
+                elif isinstance(obj, list):
+                    for k in obj:
+                        cnt[str(k)] += 1
+            except Exception:
+                # if not JSON, treat as label
+                cnt[str(em)] += 1
             if not em:
                 return
             try:
