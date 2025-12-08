@@ -1287,7 +1287,8 @@ function Reports() {
                 <p className="text-xs text-gray-400 mt-1">Metrics will appear after counselor-student interactions.</p>
               </div>
             )}
-            {interventions.length > 0 && (
+            {/* Intervention Type section - hidden for now */}
+            {false && interventions.length > 0 && (
               <div className="space-y-2 border-t pt-3">
                 <div className="text-xs text-gray-500 font-medium mb-2">By Intervention Type</div>
                 {interventions.map((i, idx) => (
