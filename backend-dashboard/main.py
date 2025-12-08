@@ -4008,6 +4008,83 @@ def weekly_insights(
     return CounselorReportService.weekly_insights(db)
 
 
+@app.post("/reports/trigger-insights")
+def trigger_insights_generation(
+    _user: User = Depends(require_counselor),
+    db: Session = Depends(get_db),
+):
+    """
+    Manually trigger insight generation for last week.
+    Returns status indicating if new insights were generated or already up-to-date.
+    """
+    from app.models.ai_insight import AIInsight
+    
+    # Calculate last week bounds
+    today = datetime.utcnow().date()
+    monday_this_week = today - timedelta(days=today.weekday())
+    last_monday = monday_this_week - timedelta(days=7)
+    last_sunday = last_monday + timedelta(days=6)
+    
+    # Check if insight already exists for last week
+    existing = db.query(AIInsight).filter(
+        AIInsight.type == 'weekly',
+        AIInsight.user_id.is_(None),  # Global insight
+        AIInsight.timeframe_start == last_monday,
+        AIInsight.timeframe_end == last_sunday,
+    ).first()
+    
+    if existing:
+        return {
+            "status": "already_current",
+            "message": "Weekly insights are already up-to-date",
+            "generated_at": existing.generated_at.isoformat() if existing.generated_at else None,
+            "week_start": last_monday.isoformat(),
+            "week_end": last_sunday.isoformat(),
+        }
+    
+    # Generate new insight
+    start_dt = datetime.combine(last_monday, datetime.min.time())
+    end_dt = datetime.combine(last_sunday, datetime.max.time())
+    
+    payload = build_sanitized_payload(None, start_dt, end_dt)
+    
+    # Check if enough data
+    journals = payload.get("journals") or []
+    checkins = payload.get("checkins") or []
+    
+    if len(journals) + len(checkins) < 3:
+        return {
+            "status": "insufficient_data",
+            "message": f"Not enough data for insights (need 3+, have {len(journals) + len(checkins)})",
+            "week_start": last_monday.isoformat(),
+            "week_end": last_sunday.isoformat(),
+        }
+    
+    data, stored = InsightGenerationService.compute_and_store(
+        db=db,
+        user_id=None,
+        timeframe_start=last_monday,
+        timeframe_end=last_sunday,
+        payload=payload,
+        insight_type="weekly",
+    )
+    
+    if stored:
+        return {
+            "status": "generated",
+            "message": "Successfully generated new weekly insights",
+            "week_start": last_monday.isoformat(),
+            "week_end": last_sunday.isoformat(),
+            "insight_preview": data.get("title", ""),
+        }
+    else:
+        return {
+            "status": "error",
+            "message": "Failed to store insight",
+            "reason": data.get("reason", "unknown"),
+        }
+
+
 @app.get("/reports/behavior-insights")
 def behavior_insights(
     _user: User = Depends(require_counselor),

@@ -281,7 +281,11 @@ class EnsembleSentimentPipeline:
         start_time = time.time()
         
         cleaned_text = clean_text(text)
+        
+        # If no text, derive sentiment from user context (mood/energy/stress)
         if not cleaned_text:
+            if any([mood_level, energy_level, stress_level, feel_better]):
+                return self._derive_from_context(mood_level, energy_level, stress_level, feel_better)
             return self._empty_result()
         
         # Detect language composition
@@ -788,6 +792,120 @@ class EnsembleSentimentPipeline:
                 "flags": [],
                 "language_detection": {
                     "dominant": "unknown",
+                    "bisaya_ratio": 0.0,
+                    "tagalog_ratio": 0.0,
+                    "english_ratio": 0.0,
+                },
+            },
+        )
+    
+    def _derive_from_context(
+        self,
+        mood_level: Optional[str],
+        energy_level: Optional[str], 
+        stress_level: Optional[str],
+        feel_better: Optional[str],
+    ) -> EnsembleResult:
+        """
+        Derive sentiment from user-reported context when no text is provided.
+        
+        Maps mood_level to sentiment with high confidence since this is
+        explicit user input rather than NLP inference.
+        """
+        # Mood to sentiment mapping
+        MOOD_SENTIMENT_MAP = {
+            # Positive moods
+            "Awesome": ("positive", "joy", 0.95),
+            "Loved": ("positive", "love", 0.95),
+            "Great": ("positive", "happiness", 0.90),
+            "Okay": ("neutral", "calm", 0.85),
+            # Neutral
+            "Meh": ("neutral", "neutral", 0.80),
+            # Negative moods
+            "Anxious": ("negative", "anxiety", 0.85),
+            "Upset": ("negative", "sadness", 0.85),
+            "Bad": ("negative", "sadness", 0.90),
+            "Terrible": ("strongly_negative", "distress", 0.95),
+            # Alternative labels
+            "Happy": ("positive", "happiness", 0.90),
+            "Very Happy": ("positive", "joy", 0.95),
+            "Sad": ("negative", "sadness", 0.85),
+            "Very Sad": ("strongly_negative", "distress", 0.90),
+            "Neutral": ("neutral", "neutral", 0.80),
+            "Good": ("positive", "happiness", 0.85),
+            "Excellent": ("positive", "joy", 0.95),
+        }
+        
+        sentiment = "neutral"
+        emotion = "neutral"
+        confidence = 0.7
+        reasoning_parts = []
+        
+        # Primary: Use mood_level
+        if mood_level and mood_level in MOOD_SENTIMENT_MAP:
+            sentiment, emotion, confidence = MOOD_SENTIMENT_MAP[mood_level]
+            reasoning_parts.append(f"Mood: {mood_level}")
+        
+        # Adjust based on stress_level
+        if stress_level:
+            stress_lower = stress_level.lower()
+            if "high" in stress_lower or "very high" in stress_lower:
+                # High stress can push sentiment negative
+                if sentiment == "positive":
+                    sentiment = "mixed"
+                    confidence = min(confidence, 0.75)
+                elif sentiment == "neutral":
+                    sentiment = "negative"
+                    confidence = min(confidence, 0.80)
+                reasoning_parts.append(f"High stress detected")
+            elif "low" in stress_lower:
+                reasoning_parts.append(f"Low stress")
+        
+        # Adjust based on energy_level
+        if energy_level:
+            energy_lower = energy_level.lower()
+            if energy_lower == "low" and sentiment in ("neutral", "negative"):
+                # Low energy + neutral/negative = more negative
+                if sentiment == "neutral":
+                    sentiment = "negative"
+                    emotion = "fatigue"
+                reasoning_parts.append(f"Low energy")
+            elif energy_lower == "high" and sentiment in ("positive", "neutral"):
+                reasoning_parts.append(f"High energy")
+        
+        # Check feel_better
+        if feel_better:
+            if feel_better.lower() in ("no", "false"):
+                if sentiment == "positive":
+                    sentiment = "mixed"
+                reasoning_parts.append("Feel better: No")
+            else:
+                reasoning_parts.append("Feel better: Yes")
+        
+        reasoning = f"Derived from user context: {'; '.join(reasoning_parts)}"
+        
+        return EnsembleResult(
+            xlm_roberta=XLMRobertaOutput(
+                sentiment=sentiment,
+                confidence=confidence,
+                interpretation=reasoning,
+                detected_language="context",
+            ),
+            bisaya_model=None,
+            emotion_detection=EmotionOutput(
+                emotions=[emotion],
+                scores={emotion: confidence},
+                dominant_emotion=emotion,
+            ),
+            final_result={
+                "sentiment": sentiment,
+                "combined_confidence": confidence,
+                "reasoning": reasoning,
+                "emotions": [emotion],
+                "dominant_emotion": emotion,
+                "flags": ["context_derived"],
+                "language_detection": {
+                    "dominant": "context",
                     "bisaya_ratio": 0.0,
                     "tagalog_ratio": 0.0,
                     "english_ratio": 0.0,
