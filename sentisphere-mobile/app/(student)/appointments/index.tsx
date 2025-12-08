@@ -23,10 +23,10 @@ import { KeyboardAwareScrollView, KeyboardAwareScrollViewRef } from '@/component
 import { BottomToast, ToastType } from '@/components/BottomToast';
 
 // Counselor type matching backend response
-type Counselor = { 
-  user_id: number; 
-  name?: string | null; 
-  nickname?: string | null; 
+type Counselor = {
+  user_id: number;
+  name?: string | null;
+  nickname?: string | null;
   email?: string | null;
   title?: string;
 };
@@ -41,7 +41,7 @@ export default function AppointmentsScreen() {
 
   const goBack = () => {
     if (Platform.OS !== 'web') {
-      try { Haptics.selectionAsync() } catch {}
+      try { Haptics.selectionAsync() } catch { }
     }
     router.back();
   };
@@ -109,7 +109,7 @@ export default function AppointmentsScreen() {
   useFocusEffect(
     useCallback(() => {
       loadCounselors();
-      return () => {};
+      return () => { };
     }, [loadCounselors])
   );
 
@@ -167,7 +167,7 @@ export default function AppointmentsScreen() {
         if (!res.ok) return;
         const d = await res.json();
         setDisplayNickname(d?.nickname || d?.name || localName || 'student');
-      } catch {}
+      } catch { }
     })();
   }, [API]);
 
@@ -233,7 +233,7 @@ export default function AppointmentsScreen() {
       if (kind === 'success') return await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       if (kind === 'selection') return await Haptics.selectionAsync();
       return await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    } catch {}
+    } catch { }
   };
 
   const canDownload = !!(fullName && studentId && email && reason);
@@ -271,7 +271,7 @@ export default function AppointmentsScreen() {
       const nick = safeName(displayNickname) || 'student';
       const dateForName = safeName(preferredDate || new Date().toISOString().slice(0, 10));
       let fileBaseName = `${nick}-appointment-${dateForName}`;
-      if (fileBaseName.length > 80) fileBaseName = fileBaseName.slice(0, 80).replace(/-+$/,'');
+      if (fileBaseName.length > 80) fileBaseName = fileBaseName.slice(0, 80).replace(/-+$/, '');
       const html = `<!DOCTYPE html>
 <html>
 <head>
@@ -354,14 +354,14 @@ export default function AppointmentsScreen() {
         if (dir) {
           const baseDir = (dir as string).endsWith('/') ? dir : `${dir}/`;
           const desired = `${baseDir}${fileBaseName}.pdf`;
-          try { await FileSystem.deleteAsync(desired, { idempotent: true }); } catch {}
+          try { await FileSystem.deleteAsync(desired, { idempotent: true }); } catch { }
           if ((file as any)?.base64) {
             try {
               let PDFDocumentLocal: typeof import('pdf-lib')['PDFDocument'] | null = null;
               try {
                 const pdfLib = require('pdf-lib') as typeof import('pdf-lib');
                 PDFDocumentLocal = pdfLib.PDFDocument;
-              } catch {}
+              } catch { }
               if (PDFDocumentLocal) {
                 const src = `data:application/pdf;base64,${(file as any).base64}`;
                 const doc = await PDFDocumentLocal.load(src);
@@ -377,10 +377,10 @@ export default function AppointmentsScreen() {
           } else {
             await FileSystem.copyAsync({ from: file.uri, to: desired });
           }
-          try { await FileSystem.deleteAsync(file.uri, { idempotent: true }); } catch {}
+          try { await FileSystem.deleteAsync(file.uri, { idempotent: true }); } catch { }
           target = desired;
         }
-      } catch {}
+      } catch { }
 
       const canShare = await Sharing.isAvailableAsync();
       if (canShare) {
@@ -397,10 +397,25 @@ export default function AppointmentsScreen() {
           } else {
             showToast('Share not available');
           }
-        } catch {}
+        } catch { }
       }
       await doHaptic('success');
       showToast('PDF ready');
+
+      // Log download to backend (fire and forget)
+      try {
+        const tok = await getAuthToken();
+        if (tok) {
+          fetch(`${API}/api/mobile/appointment-log`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` },
+            body: JSON.stringify({
+              form_type: 'appointment_request',
+              remarks: `Counselor: ${preferredCounselor || 'Any'}, Date: ${preferredDate || 'N/A'}`
+            }),
+          }).catch(() => { });
+        }
+      } catch { }
     } catch (e) {
       showToast('Failed to generate PDF');
     }
@@ -612,7 +627,7 @@ export default function AppointmentsScreen() {
                   </View>
                   {/* Weekdays */}
                   <View style={styles.weekRow}>
-                    {['Su','Mo','Tu','We','Th','Fr','Sa'].map((w) => (
+                    {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((w) => (
                       <ThemedText key={w} style={[styles.weekdayText, { color: palette.muted }]}>{w}</ThemedText>
                     ))}
                   </View>
@@ -649,8 +664,8 @@ export default function AppointmentsScreen() {
                               isSelected
                                 ? { backgroundColor: 'rgba(17,24,39,0.92)' }
                                 : isToday
-                                ? { borderWidth: 2, borderColor: '#10B981' }
-                                : null,
+                                  ? { borderWidth: 2, borderColor: '#10B981' }
+                                  : null,
                             ])}
                           >
                             <ThemedText style={[styles.dayText, { color: isSelected ? '#FFFFFF' : palette.text }]}>{d.day}</ThemedText>
@@ -729,7 +744,7 @@ export default function AppointmentsScreen() {
                     <View style={{ padding: 20, alignItems: 'center' }}>
                       <Icon name="user" size={24} color="#9CA3AF" />
                       <ThemedText style={{ color: '#6B7280', fontSize: 13, marginTop: 8, textAlign: 'center' }}>No counselors available</ThemedText>
-                      <Pressable 
+                      <Pressable
                         onPress={() => { loadCounselors(); doHaptic('selection'); }}
                         style={{ marginTop: 12, paddingHorizontal: 16, paddingVertical: 8, backgroundColor: '#F3F4F6', borderRadius: 8 }}
                       >
@@ -740,13 +755,13 @@ export default function AppointmentsScreen() {
                     counselors.map((c) => (
                       <Pressable
                         key={c.user_id}
-                        onPress={() => { 
-                          setCounselor(c); 
-                          setPreferredCounselor(c.name || c.nickname || c.email || 'Counselor'); 
-                          LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); 
-                          setOpenCounselorList(false); 
-                          doHaptic('selection'); 
-                          showToast('Counselor selected'); 
+                        onPress={() => {
+                          setCounselor(c);
+                          setPreferredCounselor(c.name || c.nickname || c.email || 'Counselor');
+                          LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                          setOpenCounselorList(false);
+                          doHaptic('selection');
+                          showToast('Counselor selected');
                         }}
                         style={({ pressed }) => [styles.option, { backgroundColor: pressed ? '#F3F4F6' : 'transparent' }]}
                       >
@@ -798,7 +813,7 @@ export default function AppointmentsScreen() {
               <View style={styles.noticeBox}>
                 <ThemedText style={styles.noticeTitle}>MEETING TYPE: FACE-TO-FACE ONLY</ThemedText>
                 <ThemedText style={styles.noticeText}>
-                  All meetings will be conducted in person at the Student Counseling Center, Building A, 2nd Floor. Please arrive 10 minutes early for your appointment.
+                  All meetings will be conducted in person at the Guidance Office is located at the CSM building First floor room number 104. Please arrive 10 minutes early for your appointment.
                 </ThemedText>
               </View>
 
@@ -931,11 +946,11 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_700Bold',
   },
   infoItem: { fontSize: 14, color: '#1E40AF', flex: 1, lineHeight: 20 },
-  
+
   // Card Styles
   cardTitle: { fontSize: 18, fontFamily: 'Inter_700Bold', color: '#111827', marginBottom: 4 },
   cardSubtitle: { fontSize: 14, color: '#6B7280', marginBottom: 12, lineHeight: 20 },
-  
+
   // Section Headers & Labels
   sectionHeader: { marginTop: 20, marginBottom: 10, paddingTop: 8, borderBottomWidth: 2, borderBottomColor: '#E5E7EB' },
   sectionHeaderText: { fontFamily: 'Inter_700Bold', fontSize: 12, color: '#6B7280', letterSpacing: 0.5, marginBottom: 8 },
@@ -954,12 +969,12 @@ const styles = StyleSheet.create({
   radioOuter: { width: 20, height: 20, borderRadius: 10, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
   radioInner: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#111827' },
   radioLabel: { fontSize: 14, color: '#374151', flex: 1 },
-  noticeBox: { 
-    borderWidth: 1, 
-    borderRadius: 14, 
-    padding: 16, 
-    gap: 8, 
-    marginTop: 16, 
+  noticeBox: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 16,
+    gap: 8,
+    marginTop: 16,
     marginBottom: 12,
     borderColor: '#E5E7EB',
     backgroundColor: '#F9FAFB',

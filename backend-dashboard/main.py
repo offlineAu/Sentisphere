@@ -1765,6 +1765,29 @@ def mobile_mark_read(
     return {"updated": updated_count}
 
 
+@app.post("/api/mobile/appointment-log", status_code=status.HTTP_201_CREATED)
+def mobile_log_appointment_download(
+    form_type: str = Body(...),
+    remarks: str = Body(None),
+    token: str = Depends(oauth2_scheme),
+    mdb: Session = Depends(get_mobile_db),
+):
+    """Log a successful appointment form download."""
+    uid = _extract_user_id(token)
+    
+    # Insert into appointment_log table
+    mdb.execute(
+        text("""
+            INSERT INTO appointment_log (user_id, form_type, downloaded_at, remarks)
+            VALUES (:user_id, :form_type, NOW(), :remarks)
+        """),
+        {"user_id": uid, "form_type": form_type, "remarks": remarks},
+    )
+    mdb.commit()
+    
+    return {"ok": True}
+
+
 @app.patch("/api/mobile/conversations/{conversation_id}")
 async def mobile_update_conversation(
     conversation_id: int,
