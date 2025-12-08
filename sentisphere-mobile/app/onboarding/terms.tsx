@@ -145,8 +145,8 @@ export default function TermsScreen() {
         // Save acceptance
         await setTermsAccepted()
 
-        // Navigate to auth
-        router.replace('/auth')
+        // Navigate to auth (use push to preserve back navigation to Entry)
+        router.push('/auth')
     }
 
     const makeItemStyle = (anim: Animated.Value) => ({
