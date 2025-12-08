@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Any
 
 
 def _start_of_day(dt: datetime) -> datetime:
@@ -22,6 +22,28 @@ def _parse_date_str(value: Optional[str]) -> Optional[date]:
         return datetime.fromisoformat(value).date()
     except Exception:
         return None
+
+
+def safe_parse_datetime(value: Any) -> Optional[datetime]:
+    """Robustly parse a datetime from various inputs (str, date, datetime)."""
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, date):
+        return datetime.combine(value, datetime.min.time())
+    if isinstance(value, str):
+        try:
+            # Try ISO format first
+            return datetime.fromisoformat(value)
+        except ValueError:
+            try:
+                # Try simple date format
+                d = datetime.strptime(value, "%Y-%m-%d").date()
+                return datetime.combine(d, datetime.min.time())
+            except ValueError:
+                pass
+    return None
 
 
 def get_week_range(d: date) -> Tuple[date, date]:
