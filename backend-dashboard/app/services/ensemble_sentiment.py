@@ -40,6 +40,12 @@ from app.utils.mental_health_analyzer import (
     AnalysisResult as MHAnalysisResult,
     UserContext,
 )
+from app.utils.crisis_detector import (
+    CrisisDetector,
+    CrisisDetectionOutput,
+    get_crisis_detector,
+    CrisisLevel,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +102,7 @@ class EnsembleResult:
     bisaya_model: Optional[BisayaModelOutput]
     emotion_detection: EmotionOutput
     final_result: Dict[str, Any]
+    crisis_detection: Optional[CrisisDetectionOutput] = None
     processing_time_ms: float = 0.0
     
     def to_dict(self) -> Dict:
@@ -120,6 +127,25 @@ class EnsembleResult:
                 "dominant_emotion": self.emotion_detection.dominant_emotion,
             },
             "final_result": self.final_result,
+            "crisis_detection": {
+                "mental_bert": {
+                    "category": self.crisis_detection.mental_bert.category.value if self.crisis_detection and self.crisis_detection.mental_bert else None,
+                    "confidence": self.crisis_detection.mental_bert.confidence if self.crisis_detection and self.crisis_detection.mental_bert else None,
+                    "is_crisis": self.crisis_detection.mental_bert.is_crisis if self.crisis_detection and self.crisis_detection.mental_bert else False,
+                } if self.crisis_detection else None,
+                "contextual": {
+                    "risk_score": self.crisis_detection.contextual.risk_score if self.crisis_detection else 0,
+                    "flags": self.crisis_detection.contextual.flags if self.crisis_detection else [],
+                    "protective_factors": self.crisis_detection.contextual.protective_factors if self.crisis_detection else [],
+                    "coping_strength": self.crisis_detection.contextual.coping_strength if self.crisis_detection else 0,
+                } if self.crisis_detection else None,
+                "final_crisis_level": self.crisis_detection.final_crisis_level.value if self.crisis_detection else "none",
+                "combined_risk_score": self.crisis_detection.combined_risk_score if self.crisis_detection else 0,
+                "requires_alert": self.crisis_detection.requires_alert if self.crisis_detection else False,
+                "alert_severity": self.crisis_detection.alert_severity if self.crisis_detection else "LOW",
+                "reasoning": self.crisis_detection.reasoning if self.crisis_detection else "",
+                "recommendations": self.crisis_detection.recommendations if self.crisis_detection else [],
+            } if self.crisis_detection else None,
             "processing_time_ms": self.processing_time_ms,
         }
 
@@ -298,6 +324,31 @@ class EnsembleSentimentPipeline:
             bisaya_reason,
         )
         
+        # Stage 4: Crisis Detection (MentalBERT + Contextual NLP)
+        crisis_result = None
+        try:
+            crisis_detector = get_crisis_detector()
+            crisis_result = crisis_detector.analyze(cleaned_text)
+            
+            # Override sentiment if crisis detected
+            if crisis_result.requires_alert:
+                final_result["sentiment"] = "strongly_negative"
+                final_result["crisis_level"] = crisis_result.final_crisis_level.value
+                final_result["crisis_flags"] = crisis_result.contextual.flags
+                final_result["reasoning"] += f"; Crisis: {crisis_result.reasoning}"
+                
+                # Add mental health category if available
+                if crisis_result.mental_bert:
+                    final_result["mental_health_category"] = crisis_result.mental_bert.category.value
+            
+            # Add protective factors to output
+            if crisis_result.contextual.protective_factors:
+                final_result["protective_factors"] = crisis_result.contextual.protective_factors
+                final_result["coping_strength"] = crisis_result.contextual.coping_strength
+                
+        except Exception as e:
+            logger.warning(f"[Ensemble] Crisis detection failed: {e}")
+        
         processing_time = (time.time() - start_time) * 1000
         
         return EnsembleResult(
@@ -305,6 +356,7 @@ class EnsembleSentimentPipeline:
             bisaya_model=bisaya_output,
             emotion_detection=emotion_output,
             final_result=final_result,
+            crisis_detection=crisis_result,
             processing_time_ms=round(processing_time, 2),
         )
     

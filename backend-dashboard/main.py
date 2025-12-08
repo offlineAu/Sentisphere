@@ -35,6 +35,10 @@ import time
 from fastapi.security import OAuth2PasswordBearer
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from concurrent.futures import ThreadPoolExecutor
+
+# Background thread pool for async tasks (sentiment analysis)
+_sentiment_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="sentiment_")
 
 
 from app.core.config import settings
@@ -404,33 +408,72 @@ def create_checkin(
         )
     created = CheckinService.create_checkin(db, payload)
 
-    # Automatically analyze sentiment for the new check-in
-    try:
-        SentimentService.analyze_checkin(db, created.checkin_id)
-        db.commit()
-        db.refresh(created)
-    except Exception:
-        # Do not fail the check-in creation if sentiment analysis fails
-        db.rollback()
-        db.refresh(created)
-
-    # Check for smart alert trigger (2-3 consecutive negative check-ins)
-    try:
+    # ASYNC: Run sentiment analysis in background thread (don't block response)
+    def _background_sentiment_analysis(checkin_id: int, user_id: int, comment: str):
+        """Run sentiment + crisis detection in background."""
+        from app.db.session import SessionLocal
+        from app.services.sentiment_service import SentimentService
+        from app.utils.crisis_detector import get_crisis_detector
         from app.services.smart_alert_service import SmartAlertService
-        alert_data = SmartAlertService.check_user_for_alert(db, current_user.user_id)
-        if alert_data:
-            alert = SmartAlertService.create_smart_alert(db, alert_data)
-            # Notify dashboard of new alert
-            try:
-                asyncio.create_task(notify_dashboard_update("new_alert"))
-                pusher_service.broadcast_new_alert(
-                    alert.alert_id, 
-                    alert.severity.value if hasattr(alert.severity, 'value') else str(alert.severity)
-                )
-            except Exception:
-                pass
-    except Exception as e:
-        logging.warning(f"Smart alert check failed: {e}")
+        from app.models.alert import AlertSeverity
+        
+        bg_db = SessionLocal()
+        try:
+            # Run sentiment analysis
+            SentimentService.analyze_checkin(bg_db, checkin_id)
+            bg_db.commit()
+            logging.info(f"[BG] Sentiment analyzed for checkin {checkin_id}")
+            
+            # Check for crisis if there's a comment
+            if comment:
+                crisis_detector = get_crisis_detector()
+                crisis_result = crisis_detector.analyze(comment)
+                
+                if crisis_result.requires_alert:
+                    # Create HIGH priority alert
+                    crisis_alert = SmartAlertService.create_smart_alert(bg_db, {
+                        "user_id": user_id,
+                        "severity": AlertSeverity.HIGH,
+                        "reason": f"CRISIS DETECTED: {crisis_result.reasoning}",
+                        "trigger_type": "crisis_detection",
+                    })
+                    logging.info(f"[BG] Crisis alert {crisis_alert.alert_id} created for user {user_id}")
+                    
+                    # Broadcast to dashboard
+                    try:
+                        pusher_service.broadcast_new_alert(crisis_alert.alert_id, "HIGH")
+                    except Exception:
+                        pass
+            
+            # Check for consecutive negative pattern
+            alert_data = SmartAlertService.check_user_for_alert(bg_db, user_id)
+            if alert_data:
+                alert = SmartAlertService.create_smart_alert(bg_db, alert_data)
+                logging.info(f"[BG] Pattern alert {alert.alert_id} created for user {user_id}")
+                try:
+                    pusher_service.broadcast_new_alert(
+                        alert.alert_id,
+                        alert.severity.value if hasattr(alert.severity, 'value') else str(alert.severity)
+                    )
+                except Exception:
+                    pass
+                    
+        except Exception as e:
+            logging.warning(f"[BG] Sentiment/alert task failed: {e}")
+            bg_db.rollback()
+        finally:
+            bg_db.close()
+    
+    # Submit to background thread pool (non-blocking)
+    _sentiment_executor.submit(
+        _background_sentiment_analysis,
+        created.checkin_id,
+        current_user.user_id,
+        created.comment or ""
+    )
+
+    # Note: Crisis detection, smart alerts, and sentiment analysis are now
+    # handled in the background thread (_background_sentiment_analysis)
 
     # Notify dashboard WebSocket clients of the new check-in
     try:
