@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     # JWT
     JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "super-dev-secret-please-change-later")
     JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
-    JWT_EXPIRE_MINUTES: int = int(os.getenv("JWT_EXPIRE_MINUTES", "60"))
+    JWT_EXPIRE_MINUTES: int = int(os.getenv("JWT_EXPIRE_MINUTES", "43200"))  # 30 days (43200 min) for persistent login
     
     # Microsoft verification
     ALLOWED_EMAIL_DOMAINS: List[str] = [d.strip() for d in (os.getenv("ALLOWED_EMAIL_DOMAINS", "ustp.edu.ph").split(",")) if d.strip()]

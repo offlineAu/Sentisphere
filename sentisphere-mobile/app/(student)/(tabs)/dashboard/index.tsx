@@ -53,6 +53,8 @@ export default function EnhancedDashboardScreen() {
   const [displayName, setDisplayName] = useState<string>("")
   const [backendConnected, setBackendConnected] = useState<boolean | null>(null)
   const [unreadCount, setUnreadCount] = useState<number>(0)
+  const [currentEventIndex, setCurrentEventIndex] = useState<number>(0)
+  const lastEventIndexRef = useRef<number>(0)
   const navigation = useNavigation()
   const getAuthToken = useCallback(async (): Promise<string | null> => {
     if (Platform.OS === 'web') {
@@ -85,7 +87,7 @@ export default function EnhancedDashboardScreen() {
       if (!res.ok) return
       const d = await res.json()
       setDisplayName(d?.nickname || d?.name || localName || "Student")
-    } catch {}
+    } catch { }
   }, [API, getAuthToken, decodeJwtName])
   useEffect(() => { fetchCurrentUser() }, [fetchCurrentUser])
 
@@ -118,7 +120,7 @@ export default function EnhancedDashboardScreen() {
 
   // Fetch notifications on mount
   useEffect(() => { fetchNotifications() }, [fetchNotifications])
-  
+
   // Fetch notifications when screen is focused (to catch new notifications)
   useEffect(() => {
     const unsub = navigation.addListener('focus', () => {
@@ -151,9 +153,9 @@ export default function EnhancedDashboardScreen() {
   const logout = useCallback(async () => {
     try {
       if (Platform.OS === 'web') {
-        try { (window as any)?.localStorage?.removeItem('auth_token') } catch {}
+        try { (window as any)?.localStorage?.removeItem('auth_token') } catch { }
       } else {
-        try { await SecureStore.deleteItemAsync('auth_token') } catch {}
+        try { await SecureStore.deleteItemAsync('auth_token') } catch { }
       }
     } finally {
       router.replace('/auth')
@@ -273,7 +275,7 @@ export default function EnhancedDashboardScreen() {
     try {
       const msg = quote ? `“${quote.content}” — ${quote.author}` : 'Sentisphere'
       await Share.share({ message: msg })
-    } catch {}
+    } catch { }
   }
 
   const COUNSELOR_ADDRESS = 'CSM Building · Ground Floor · Room No. 104'
@@ -371,7 +373,7 @@ export default function EnhancedDashboardScreen() {
     // Re-run subtle entrance when navigating back to this screen
     useCallback(() => {
       runEntrance()
-      return () => {}
+      return () => { }
     }, [])
   )
 
@@ -461,7 +463,7 @@ export default function EnhancedDashboardScreen() {
             <View style={styles.headerActions}>
               <Pressable
                 accessibilityLabel={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : 'Notifications'}
-                onPressIn={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} } }}
+                onPressIn={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch { } } }}
                 onPress={() => router.push('/(student)/notifications')}
                 hitSlop={8}
                 style={({ pressed }) => [styles.notifBtn, pressed && { opacity: 0.85 }]}
@@ -471,7 +473,7 @@ export default function EnhancedDashboardScreen() {
               </Pressable>
               <Pressable
                 accessibilityLabel="Log out"
-                onPressIn={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} } }}
+                onPressIn={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch { } } }}
                 onPress={() => router.push('/logout')}
                 hitSlop={8}
                 style={({ pressed }) => [styles.notifBtn, pressed && { opacity: 0.85 }]}
@@ -496,10 +498,10 @@ export default function EnhancedDashboardScreen() {
                 <View style={styles.inspirationHeader}>
                   <ThemedText style={styles.inspirationTitle}>Quotes for the day</ThemedText>
                   <View style={styles.inspirationActions}>
-                    <Pressable accessibilityLabel="Refresh quote" onPress={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} } refreshQuote() }} style={({ pressed }) => [styles.inspirationActionBtn, pressed && { opacity: 0.7 }]} hitSlop={8}>
+                    <Pressable accessibilityLabel="Refresh quote" onPress={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch { } } refreshQuote() }} style={({ pressed }) => [styles.inspirationActionBtn, pressed && { opacity: 0.7 }]} hitSlop={8}>
                       <Icon name="refresh-ccw" size={18} color="rgba(255,255,255,0.95)" />
                     </Pressable>
-                    <Pressable accessibilityLabel="Share quote" onPress={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} } shareQuote() }} style={({ pressed }) => [styles.inspirationActionBtn, pressed && { opacity: 0.7 }]} hitSlop={8}>
+                    <Pressable accessibilityLabel="Share quote" onPress={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch { } } shareQuote() }} style={({ pressed }) => [styles.inspirationActionBtn, pressed && { opacity: 0.7 }]} hitSlop={8}>
                       <Icon name="share-2" size={18} color="rgba(255,255,255,0.95)" />
                     </Pressable>
                   </View>
@@ -523,7 +525,7 @@ export default function EnhancedDashboardScreen() {
             <Pressable
               onHoverIn={qa1.onHoverIn}
               onHoverOut={qa1.onHoverOut}
-              onPressIn={() => { qa1.onPressIn(); if (Platform.OS !== 'web') { try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light) } catch {} } }}
+              onPressIn={() => { qa1.onPressIn(); if (Platform.OS !== 'web') { try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light) } catch { } } }}
               onPressOut={qa1.onPressOut}
               style={({ hovered, pressed }) =>
                 StyleSheet.flatten([
@@ -550,7 +552,7 @@ export default function EnhancedDashboardScreen() {
             <Pressable
               onHoverIn={qa2.onHoverIn}
               onHoverOut={qa2.onHoverOut}
-              onPressIn={() => { qa2.onPressIn(); if (Platform.OS !== 'web') { try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light) } catch {} } }}
+              onPressIn={() => { qa2.onPressIn(); if (Platform.OS !== 'web') { try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light) } catch { } } }}
               onPressOut={qa2.onPressOut}
               style={({ hovered, pressed }) =>
                 StyleSheet.flatten([
@@ -615,28 +617,8 @@ export default function EnhancedDashboardScreen() {
             </Card>
           </Animated.View>
         )}
-
+        {/* Counselor Location - Now first */}
         <Animated.View style={makeFadeUp(entrance.mood)}>
-          <Card style={styles.cardShadow}>
-            <LinearGradient colors={["#065F46", palette.tint]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.moodGradient}>
-              <CardContent style={styles.moodContent}>
-                <View style={styles.moodHeader}>
-                  <ThemedText style={styles.moodTitle}>State of mood</ThemedText>
-                  <View style={styles.moodAvatar}><Icon name="user" size={16} color="rgba(255,255,255,0.95)" /></View>
-                </View>
-                <ThemedText style={styles.moodPrompt}>How are you feeling now?</ThemedText>
-                <Link href="/(student)/(tabs)/mood" asChild>
-                  <Pressable onPressIn={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} } }} style={styles.moodButton}>
-                    <ThemedText style={styles.moodButtonText}>Log Mood</ThemedText>
-                  </Pressable>
-                </Link>
-              </CardContent>
-            </LinearGradient>
-          </Card>
-        </Animated.View>
-
-        {/* Counselor Location (matches Mood Prompt layout) */}
-        <Animated.View style={makeFadeUp(entrance.activity)}>
           <Card style={[styles.cardShadow, styles.locationCard]}>
             <LinearGradient colors={["#065F46", palette.tint]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.moodGradient}>
               <CardContent style={[styles.moodContent, styles.locationCenter]}>
@@ -649,7 +631,7 @@ export default function EnhancedDashboardScreen() {
                 </View>
                 <Pressable
                   accessibilityLabel="Directions"
-                  onPressIn={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} } }}
+                  onPressIn={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch { } } }}
                   onPress={openDirections}
                   style={({ pressed }) => [styles.locationPill, pressed && { opacity: 0.95 }]}
                 >
@@ -659,6 +641,233 @@ export default function EnhancedDashboardScreen() {
               </CardContent>
             </LinearGradient>
           </Card>
+        </Animated.View>
+
+        {/* Events Carousel - Swipeable */}
+        <Animated.View style={makeFadeUp(entrance.activity)}>
+          <View style={styles.eventsSectionHeader}>
+            <ThemedText style={styles.eventsSectionTitle}>Upcoming Events</ThemedText>
+            <View style={styles.eventsDotsContainer}>
+              {[0, 1, 2].map((index) => (
+                <View
+                  key={index}
+                  style={[
+                    styles.eventsDot,
+                    currentEventIndex === index && styles.eventsDotActive,
+                  ]}
+                />
+              ))}
+            </View>
+          </View>
+          {/* Responsive card width: full width on phones, max 500px on tablets */}
+          {(() => {
+            const cardWidth = Math.min(screenWidth - 32, 500)
+            const cardHeight = screenWidth > 600 ? 350 : 320 // Increased for Android button visibility
+            return (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                decelerationRate="fast"
+                snapToInterval={cardWidth + 12}
+                snapToAlignment="start"
+                style={Platform.OS !== 'web' ? { overflow: 'visible' } : undefined}
+                contentContainerStyle={styles.eventsCarouselContent}
+                onScroll={(event) => {
+                  const offsetX = event.nativeEvent.contentOffset.x
+                  const newIndex = Math.round(offsetX / (cardWidth + 12))
+                  const clampedIndex = Math.max(0, Math.min(2, newIndex))
+                  if (clampedIndex !== lastEventIndexRef.current) {
+                    lastEventIndexRef.current = clampedIndex
+                    setCurrentEventIndex(clampedIndex)
+                    if (Platform.OS !== 'web') {
+                      try { Haptics.selectionAsync() } catch { }
+                    }
+                  }
+                }}
+                scrollEventThrottle={16}
+              >
+                {/* Event 1 - Wellness Workshop */}
+                <View style={[styles.eventCardWrapper, { width: cardWidth }]}>
+                  <Card style={styles.eventCardModern}>
+                    <LinearGradient
+                      colors={['#065F46', '#0d8c4f', '#10B981']}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={styles.eventGradientBg}
+                    >
+                      {/* Decorative circles */}
+                      <View style={[styles.eventDecorCircle, styles.eventDecorCircle1]} />
+                      <View style={[styles.eventDecorCircle, styles.eventDecorCircle2]} />
+
+                      <View style={styles.eventModernContent}>
+                        {/* Top Row: Date Badge + Category */}
+                        <View style={styles.eventTopRow}>
+                          <View style={styles.eventCategoryPill}>
+                            <Icon name="heart" size={12} color="#FFFFFF" />
+                            <ThemedText style={styles.eventCategoryText}>Wellness</ThemedText>
+                          </View>
+                          <View style={styles.eventDateBadgeModern}>
+                            <ThemedText style={styles.eventDateDayModern}>
+                              {new Date().getDate().toString().padStart(2, '0')}
+                            </ThemedText>
+                            <ThemedText style={styles.eventDateMonthModern}>
+                              {new Date().toLocaleString('en-US', { month: 'short' }).toUpperCase()}
+                            </ThemedText>
+                          </View>
+                        </View>
+
+                        {/* Title & Description */}
+                        <ThemedText style={styles.eventTitleModern}>Wellness Workshop</ThemedText>
+                        <ThemedText style={styles.eventDescModern} numberOfLines={2}>
+                          Join us for mindfulness and self-care with the counseling team
+                        </ThemedText>
+
+                        {/* Info Pills Row */}
+                        <View style={styles.eventInfoPillsRow}>
+                          <View style={styles.eventInfoPill}>
+                            <Icon name="map-pin" size={12} color="rgba(255,255,255,0.9)" />
+                            <ThemedText style={styles.eventInfoPillText}>Room 104</ThemedText>
+                          </View>
+                          <View style={styles.eventInfoPill}>
+                            <Icon name="clock" size={12} color="rgba(255,255,255,0.9)" />
+                            <ThemedText style={styles.eventInfoPillText}>2:00 PM</ThemedText>
+                          </View>
+                          <View style={styles.eventInfoPill}>
+                            <Icon name="users" size={12} color="rgba(255,255,255,0.9)" />
+                            <ThemedText style={styles.eventInfoPillText}>45</ThemedText>
+                          </View>
+                        </View>
+
+                        {/* CTA Button */}
+                        <Pressable
+                          onPressIn={() => { if (Platform.OS !== 'web') { try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light) } catch { } } }}
+                          onPress={() => router.push('/(student)/events/wellness')}
+                          style={({ pressed }) => [styles.eventJoinBtnModern, pressed && { opacity: 0.9, transform: [{ scale: 0.98 }] }]}
+                        >
+                          <ThemedText style={styles.eventJoinBtnTextModern}>Join Event</ThemedText>
+                          <Icon name="arrow-right" size={16} color="#0d8c4f" />
+                        </Pressable>
+                      </View>
+                    </LinearGradient>
+                  </Card>
+                </View>
+
+                {/* Event 2 - Stress Relief Session */}
+                <View style={[styles.eventCardWrapper, { width: cardWidth }]}>
+                  <Card style={styles.eventCardModern}>
+                    <LinearGradient
+                      colors={['#7C3AED', '#8B5CF6', '#A78BFA']}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={styles.eventGradientBg}
+                    >
+                      <View style={[styles.eventDecorCircle, styles.eventDecorCircle1]} />
+                      <View style={[styles.eventDecorCircle, styles.eventDecorCircle2]} />
+
+                      <View style={styles.eventModernContent}>
+                        <View style={styles.eventTopRow}>
+                          <View style={styles.eventCategoryPill}>
+                            <Icon name="sparkles" size={12} color="#FFFFFF" />
+                            <ThemedText style={styles.eventCategoryText}>Relaxation</ThemedText>
+                          </View>
+                          <View style={styles.eventDateBadgeModern}>
+                            <ThemedText style={styles.eventDateDayModern}>15</ThemedText>
+                            <ThemedText style={styles.eventDateMonthModern}>DEC</ThemedText>
+                          </View>
+                        </View>
+
+                        <ThemedText style={styles.eventTitleModern}>Stress Relief Session</ThemedText>
+                        <ThemedText style={styles.eventDescModern} numberOfLines={2}>
+                          Learn breathing techniques and stress management strategies
+                        </ThemedText>
+
+                        <View style={styles.eventInfoPillsRow}>
+                          <View style={styles.eventInfoPill}>
+                            <Icon name="map-pin" size={12} color="rgba(255,255,255,0.9)" />
+                            <ThemedText style={styles.eventInfoPillText}>Auditorium</ThemedText>
+                          </View>
+                          <View style={styles.eventInfoPill}>
+                            <Icon name="clock" size={12} color="rgba(255,255,255,0.9)" />
+                            <ThemedText style={styles.eventInfoPillText}>10:00 AM</ThemedText>
+                          </View>
+                          <View style={styles.eventInfoPill}>
+                            <Icon name="users" size={12} color="rgba(255,255,255,0.9)" />
+                            <ThemedText style={styles.eventInfoPillText}>78</ThemedText>
+                          </View>
+                        </View>
+
+                        <Pressable
+                          onPressIn={() => { if (Platform.OS !== 'web') { try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light) } catch { } } }}
+                          onPress={() => router.push('/(student)/events/stress')}
+                          style={({ pressed }) => [styles.eventJoinBtnModern, pressed && { opacity: 0.9, transform: [{ scale: 0.98 }] }]}
+                        >
+                          <ThemedText style={[styles.eventJoinBtnTextModern, { color: '#7C3AED' }]}>Join Event</ThemedText>
+                          <Icon name="arrow-right" size={16} color="#7C3AED" />
+                        </Pressable>
+                      </View>
+                    </LinearGradient>
+                  </Card>
+                </View>
+
+                {/* Event 3 - Group Counseling */}
+                <View style={[styles.eventCardWrapper, { width: cardWidth }]}>
+                  <Card style={styles.eventCardModern}>
+                    <LinearGradient
+                      colors={['#0369A1', '#0EA5E9', '#38BDF8']}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={styles.eventGradientBg}
+                    >
+                      <View style={[styles.eventDecorCircle, styles.eventDecorCircle1]} />
+                      <View style={[styles.eventDecorCircle, styles.eventDecorCircle2]} />
+
+                      <View style={styles.eventModernContent}>
+                        <View style={styles.eventTopRow}>
+                          <View style={styles.eventCategoryPill}>
+                            <Icon name="message-circle" size={12} color="#FFFFFF" />
+                            <ThemedText style={styles.eventCategoryText}>Support</ThemedText>
+                          </View>
+                          <View style={styles.eventDateBadgeModern}>
+                            <ThemedText style={styles.eventDateDayModern}>20</ThemedText>
+                            <ThemedText style={styles.eventDateMonthModern}>DEC</ThemedText>
+                          </View>
+                        </View>
+
+                        <ThemedText style={styles.eventTitleModern}>Group Counseling</ThemedText>
+                        <ThemedText style={styles.eventDescModern} numberOfLines={2}>
+                          Safe space to share experiences and support each other
+                        </ThemedText>
+
+                        <View style={styles.eventInfoPillsRow}>
+                          <View style={styles.eventInfoPill}>
+                            <Icon name="map-pin" size={12} color="rgba(255,255,255,0.9)" />
+                            <ThemedText style={styles.eventInfoPillText}>Room 104</ThemedText>
+                          </View>
+                          <View style={styles.eventInfoPill}>
+                            <Icon name="clock" size={12} color="rgba(255,255,255,0.9)" />
+                            <ThemedText style={styles.eventInfoPillText}>3:00 PM</ThemedText>
+                          </View>
+                          <View style={styles.eventInfoPill}>
+                            <Icon name="users" size={12} color="rgba(255,255,255,0.9)" />
+                            <ThemedText style={styles.eventInfoPillText}>12</ThemedText>
+                          </View>
+                        </View>
+
+                        <Pressable
+                          onPressIn={() => { if (Platform.OS !== 'web') { try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light) } catch { } } }}
+                          onPress={() => router.push('/(student)/events/counseling')}
+                          style={({ pressed }) => [styles.eventJoinBtnModern, pressed && { opacity: 0.9, transform: [{ scale: 0.98 }] }]}
+                        >
+                          <ThemedText style={[styles.eventJoinBtnTextModern, { color: '#0369A1' }]}>Join Event</ThemedText>
+                          <Icon name="arrow-right" size={16} color="#0369A1" />
+                        </Pressable>
+                      </View>
+                    </LinearGradient>
+                  </Card>
+                </View>
+              </ScrollView>
+            )
+          })()}
         </Animated.View>
 
         {/* Recent Activity (commented out) */}
@@ -791,7 +1000,7 @@ export default function EnhancedDashboardScreen() {
           </Card>
         )}
 
-              </ScrollView>
+      </ScrollView>
       {/* Logout overlay removed; handled by /logout route */}
     </GlobalScreenWrapper>
   )
@@ -811,7 +1020,7 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: 16,
     gap: 20,
-    paddingBottom: 32,
+    paddingBottom: 120, // Account for floating nav bar
   },
   greetingSection: {
     marginBottom: 8,
@@ -1666,5 +1875,318 @@ const styles = StyleSheet.create({
   insightsText: {
     fontSize: 14,
     lineHeight: 20,
+  },
+  // Event Card Styles
+  eventCard: {
+    overflow: 'hidden',
+    borderRadius: 20,
+  },
+  eventImageContainer: {
+    position: 'relative',
+    width: '100%',
+    height: 140,
+  },
+  eventImage: {
+    width: '100%',
+    height: '100%',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+  },
+  eventDateBadge: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    borderRadius: 10,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+  },
+  eventDateGradient: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  eventDateDay: {
+    fontSize: 20,
+    fontFamily: 'Inter_700Bold',
+    color: '#FFFFFF',
+    lineHeight: 24,
+  },
+  eventDateMonth: {
+    fontSize: 11,
+    fontFamily: 'Inter_600SemiBold',
+    color: 'rgba(255,255,255,0.9)',
+    letterSpacing: 0.5,
+  },
+  eventContent: {
+    padding: 16,
+    gap: 8,
+  },
+  eventTitle: {
+    fontSize: 18,
+    fontFamily: 'Inter_700Bold',
+    color: '#111827',
+    marginBottom: 2,
+  },
+  eventDescription: {
+    fontSize: 14,
+    fontFamily: 'Inter_400Regular',
+    color: '#6B7280',
+    lineHeight: 20,
+    marginBottom: 8,
+  },
+  eventInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  eventInfoText: {
+    fontSize: 14,
+    fontFamily: 'Inter_500Medium',
+    color: '#0d8c4f',
+  },
+  eventDivider: {
+    height: 1,
+    backgroundColor: '#E5E7EB',
+    marginVertical: 12,
+  },
+  eventActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  eventPrice: {
+    fontSize: 16,
+    fontFamily: 'Inter_700Bold',
+    color: '#111827',
+  },
+  eventJoinButton: {
+    backgroundColor: '#0d8c4f',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 14,
+    shadowColor: '#0d8c4f',
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+  },
+  eventJoinButtonText: {
+    fontSize: 14,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#FFFFFF',
+  },
+  eventFooterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
+  },
+  eventJoinedPill: {
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#86EFAC',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  eventJoinedText: {
+    fontSize: 12,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#0d8c4f',
+  },
+  eventOrganizer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  eventOrganizerAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F0FDF4',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  eventOrganizerName: {
+    fontSize: 13,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#111827',
+  },
+  eventOrganizerRole: {
+    fontSize: 11,
+    fontFamily: 'Inter_400Regular',
+    color: '#6B7280',
+  },
+  // Modern Event Carousel Styles
+  eventsSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  eventsSectionTitle: {
+    fontSize: 18,
+    fontFamily: 'Inter_700Bold',
+    color: '#111827',
+  },
+  eventsDotsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  eventsDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#E5E7EB',
+  },
+  eventsDotActive: {
+    backgroundColor: '#0d8c4f',
+    width: 20,
+  },
+  eventsCarouselContent: {
+    paddingRight: 16,
+    paddingTop: 8,     // Space for shadow
+    paddingBottom: 16, // Space for shadow
+    gap: 12,
+  },
+  eventCardWrapper: {
+    width: width - 32,
+    backgroundColor: 'transparent', // Required for Android shadow
+    // Match cardShadow style used by other cards
+    shadowColor: '#000',
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+  },
+  eventCardModern: {
+    borderRadius: 24,
+    overflow: 'hidden', // For gradient corner clipping only
+    backgroundColor: 'transparent', // Prevent white border on web
+  },
+  eventGradientBg: {
+    borderRadius: 24,
+    height: 320, // Increased for Android button visibility
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  eventDecorCircle: {
+    position: 'absolute',
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+  },
+  eventDecorCircle1: {
+    width: 150,
+    height: 150,
+    top: -40,
+    right: -40,
+  },
+  eventDecorCircle2: {
+    width: 100,
+    height: 100,
+    bottom: -30,
+    left: -30,
+  },
+  eventModernContent: {
+    padding: 18,
+    paddingBottom: 20, // Increased for Android button visibility
+    gap: 10,
+    flex: 1,
+    justifyContent: 'space-between',
+  },
+  eventTopRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+  },
+  eventCategoryPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  eventCategoryText: {
+    fontSize: 12,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#FFFFFF',
+  },
+  eventDateBadgeModern: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  eventDateDayModern: {
+    fontSize: 18,
+    fontFamily: 'Inter_700Bold',
+    color: '#FFFFFF',
+    lineHeight: 22,
+  },
+  eventDateMonthModern: {
+    fontSize: 10,
+    fontFamily: 'Inter_600SemiBold',
+    color: 'rgba(255,255,255,0.9)',
+    letterSpacing: 0.5,
+  },
+  eventTitleModern: {
+    fontSize: 18,
+    fontFamily: 'Inter_700Bold',
+    color: '#FFFFFF',
+    marginTop: 2,
+  },
+  eventDescModern: {
+    fontSize: 14,
+    fontFamily: 'Inter_400Regular',
+    color: 'rgba(255,255,255,0.85)',
+    lineHeight: 20,
+  },
+  eventInfoPillsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  eventInfoPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  eventInfoPillText: {
+    fontSize: 12,
+    fontFamily: 'Inter_500Medium',
+    color: 'rgba(255,255,255,0.95)',
+  },
+  eventJoinBtnModern: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 14,
+    marginTop: 8,
+  },
+  eventJoinBtnTextModern: {
+    fontSize: 14,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#0d8c4f',
   },
 })

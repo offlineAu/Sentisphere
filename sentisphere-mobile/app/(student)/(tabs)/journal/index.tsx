@@ -48,7 +48,7 @@ export default function JournalListScreen() {
   const onTabChange = (next: 0 | 1) => {
     setTab(next);
     if (Platform.OS !== 'web') {
-      try { Haptics.selectionAsync(); } catch {}
+      try { Haptics.selectionAsync(); } catch { }
     }
     Animated.timing(animTab, {
       toValue: next,
@@ -168,10 +168,10 @@ export default function JournalListScreen() {
 
   const clearAuthToken = async () => {
     if (Platform.OS === 'web') {
-      try { (window as any)?.localStorage?.removeItem('auth_token') } catch {}
+      try { (window as any)?.localStorage?.removeItem('auth_token') } catch { }
       return;
     }
-    try { await SecureStore.deleteItemAsync('auth_token') } catch {}
+    try { await SecureStore.deleteItemAsync('auth_token') } catch { }
   };
 
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -194,7 +194,7 @@ export default function JournalListScreen() {
     openSwipeRef.current = null;
     setDeleteError(null);
     if (Platform.OS !== 'web') {
-      try { Haptics.selectionAsync(); } catch {}
+      try { Haptics.selectionAsync(); } catch { }
     }
     setPendingDelete(entry);
     animateDeleteSheet(1);
@@ -219,12 +219,12 @@ export default function JournalListScreen() {
       // Soft delete - only store the ID locally, don't call backend
       // This keeps the data in backend for analytics purposes
       await addDeletedJournalId(pendingDelete.id);
-      
+
       // Remove from UI immediately
       setEntries((prev) => prev.filter((it) => it.id !== pendingDelete.id));
-      
+
       if (Platform.OS !== 'web') {
-        try { await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
+        try { await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch { }
       }
       animateDeleteSheet(0, clearDeleteState);
     } catch (e: any) {
@@ -242,10 +242,10 @@ export default function JournalListScreen() {
       const res = await fetch(`${API}/api/journals`, { headers: { Authorization: `Bearer ${tok}` } });
       if (!res.ok) { setLoadingEntries(false); return; }
       const arr = await res.json();
-      
+
       // Get soft-deleted IDs to filter them out
       const deletedIds = await getDeletedJournalIds();
-      
+
       const mapped: Entry[] = (arr || [])
         .filter((r: any) => !deletedIds.has(String(r?.journal_id)))
         .map((r: any) => {
@@ -304,7 +304,7 @@ export default function JournalListScreen() {
     if (isSaving) return;
     const titleText = title.trim();
     const contentText = body.trim();
-    
+
     // Validate both fields are required
     if (!titleText && !contentText) {
       Alert.alert('Empty Entry', 'Please add a title and content for your journal entry before saving.');
@@ -319,7 +319,7 @@ export default function JournalListScreen() {
       return;
     }
     if (Platform.OS !== 'web') {
-      try { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {}
+      try { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch { }
     }
     setIsSaving(true);
     try {
@@ -343,7 +343,7 @@ export default function JournalListScreen() {
       }
       if (!res.ok) {
         let detail = '';
-        try { const d = await res.json(); detail = d?.detail || d?.message || '' } catch {}
+        try { const d = await res.json(); detail = d?.detail || d?.message || '' } catch { }
         throw new Error(detail || `Save failed: ${res.status}`);
       }
       const d = await res.json();
@@ -359,7 +359,7 @@ export default function JournalListScreen() {
       onTabChange(1);
       showSavedToast();
       if (Platform.OS !== 'web') {
-        try { await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
+        try { await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch { }
       }
     } catch (e: any) {
       Alert.alert('Save failed', e?.message || 'Please try again.');
@@ -375,247 +375,247 @@ export default function JournalListScreen() {
         backgroundColor={scheme === 'dark' ? palette.background : '#FAFBFC'}
         contentContainerStyle={{ padding: 24, paddingTop: 20, paddingBottom: 120 }}
       >
-          <Animated.View style={makeFadeUp(entranceHeader)}>
-            <View style={{ height: 24 }} />
-            <ThemedText type="title">Journal</ThemedText>
-            <ThemedText style={{ color: palette.muted, marginTop: 6 }}>Express your thoughts and track your emotional journey</ThemedText>
-          </Animated.View>
+        <Animated.View style={makeFadeUp(entranceHeader)}>
+          <View style={{ height: 24 }} />
+          <ThemedText type="title">Journal</ThemedText>
+          <ThemedText style={{ color: palette.muted, marginTop: 6 }}>Express your thoughts and track your emotional journey</ThemedText>
+        </Animated.View>
 
-          {/* Segmented control */}
-          <Animated.View style={makeFadeUp(entranceTabs)}>
-            <View
-              style={[styles.segment, { backgroundColor: scheme === 'dark' ? '#1F2937' : '#EEF2F7', borderColor: palette.border, marginTop: 24 }]}
-              onLayout={(e) => setSegW(e.nativeEvent.layout.width)}
+        {/* Segmented control */}
+        <Animated.View style={makeFadeUp(entranceTabs)}>
+          <View
+            style={[styles.segment, { backgroundColor: scheme === 'dark' ? '#1F2937' : '#EEF2F7', borderColor: palette.border, marginTop: 24 }]}
+            onLayout={(e) => setSegW(e.nativeEvent.layout.width)}
+          >
+            {Platform.OS !== 'web' && (
+              <Animated.View pointerEvents="none" style={[styles.segmentIndicator, { backgroundColor: '#ffffff' }, indicatorStyle]} />
+            )}
+            <Pressable
+              style={[
+                styles.segmentItem,
+                Platform.OS === 'web' && tab === 0 && styles.segmentItemActiveWeb
+              ]}
+              onPress={() => onTabChange(0)}
+              accessibilityRole="button"
+              accessibilityState={tab === 0 ? { selected: true } : {}}
             >
-              {Platform.OS !== 'web' && (
-                <Animated.View pointerEvents="none" style={[styles.segmentIndicator, { backgroundColor: '#ffffff' }, indicatorStyle]} />
-              )}
-              <Pressable 
-                style={[
-                  styles.segmentItem, 
-                  Platform.OS === 'web' && tab === 0 && styles.segmentItemActiveWeb
-                ]} 
-                onPress={() => onTabChange(0)} 
-                accessibilityRole="button" 
-                accessibilityState={tab === 0 ? { selected: true } : {}}
-              >
-                <Feather name="edit-3" size={16} color={tab === 0 ? '#111827' : '#6B7280'} />
-                <ThemedText style={[styles.segmentText, { color: tab === 0 ? '#111827' : '#6B7280' }]}>Write Entry</ThemedText>
-              </Pressable>
-              <Pressable 
-                style={[
-                  styles.segmentItem,
-                  Platform.OS === 'web' && tab === 1 && styles.segmentItemActiveWeb
-                ]} 
-                onPress={() => onTabChange(1)} 
-                accessibilityRole="button" 
-                accessibilityState={tab === 1 ? { selected: true } : {}}
-              >
-                <Feather name="book-open" size={16} color={tab === 1 ? '#111827' : '#6B7280'} />
-                <ThemedText style={[styles.segmentText, { color: tab === 1 ? '#111827' : '#6B7280' }]}>My Entries</ThemedText>
-              </Pressable>
-            </View>
-          </Animated.View>
+              <Feather name="edit-3" size={16} color={tab === 0 ? '#111827' : '#6B7280'} />
+              <ThemedText style={[styles.segmentText, { color: tab === 0 ? '#111827' : '#6B7280' }]}>Write Entry</ThemedText>
+            </Pressable>
+            <Pressable
+              style={[
+                styles.segmentItem,
+                Platform.OS === 'web' && tab === 1 && styles.segmentItemActiveWeb
+              ]}
+              onPress={() => onTabChange(1)}
+              accessibilityRole="button"
+              accessibilityState={tab === 1 ? { selected: true } : {}}
+            >
+              <Feather name="book-open" size={16} color={tab === 1 ? '#111827' : '#6B7280'} />
+              <ThemedText style={[styles.segmentText, { color: tab === 1 ? '#111827' : '#6B7280' }]}>My Entries</ThemedText>
+            </Pressable>
+          </View>
+        </Animated.View>
 
-      <Animated.View style={makeFadeUp(entranceContent)}>
-      {tab === 0 ? (
-        Platform.OS === 'web' ? (
-          <Animated.View style={{ opacity: contentOpacity, transform: [{ translateY: contentTranslateY }] }}>
-            <Card style={{ marginTop: 24 }}>
-              <CardContent>
-                <ThemedText type="subtitle" style={{ marginTop: 16 }}>New Journal Entry</ThemedText>
-                <ThemedText style={{ color: palette.muted, marginTop: 4, marginBottom: 8 }}>Write about your day, thoughts, or feelings. Your entries are private and secure.</ThemedText>
+        <Animated.View style={makeFadeUp(entranceContent)}>
+          {tab === 0 ? (
+            Platform.OS === 'web' ? (
+              <Animated.View style={{ opacity: contentOpacity, transform: [{ translateY: contentTranslateY }] }}>
+                <Card style={{ marginTop: 24 }}>
+                  <CardContent>
+                    <ThemedText type="subtitle" style={{ marginTop: 16 }}>New Journal Entry</ThemedText>
+                    <ThemedText style={{ color: palette.muted, marginTop: 4, marginBottom: 8 }}>Write about your day, thoughts, or feelings. Your entries are private and secure.</ThemedText>
 
-                {/* Title input */}
-                <TextInput
-                  placeholder="Title"
-                  placeholderTextColor="#9BA1A6"
-                  value={title}
-                  onChangeText={setTitle}
-                  selectionColor={focusGreen}
-                  onFocus={() => { setTitleFocused(true); scrollToInput(280); }}
-                  onBlur={() => setTitleFocused(false)}
-                  blurOnSubmit={false}
-                  returnKeyType="next"
-                  // @ts-ignore - web outline
-                  style={[
-                    styles.titleInput,
-                    { borderColor: titleFocused ? focusGreen : palette.border },
-                    { borderWidth: titleFocused ? 1.5 : 1 },
-                    { outlineStyle: 'none' } as any,
-                  ]}
-                />
-
-                <View style={StyleSheet.flatten([styles.editorWrap, { borderColor: bodyFocused ? focusGreen : palette.border, borderWidth: bodyFocused ? 1.5 : 1 }])}> 
-                  <TextInput
-                    placeholder="What's on your mind today? Write about your thoughts, feelings, or experiences..."
-                    placeholderTextColor="#9BA1A6"
-                    multiline
-                    scrollEnabled
-                    value={body}
-                    onChangeText={setBody}
-                    selectionColor={focusGreen}
-                    onFocus={() => { setBodyFocused(true); scrollToInput(350); }}
-                    onBlur={() => setBodyFocused(false)}
-                    blurOnSubmit={false}
-                    // @ts-ignore - web outline
-                    style={[styles.textarea, { outlineStyle: 'none' }]}
-                  />
-                </View>
-
-                <View style={styles.counterRow}>
-                  <ThemedText style={{ color: palette.icon }}>{wordCount} words • {charCount} characters</ThemedText>
-                </View>
-
-                {/* Toolbar */}
-                <View style={styles.toolbar}>
-                  <Pressable 
-                    onPress={handleVoicePress}
-                    style={[
-                      styles.voiceButton,
-                      isListening && styles.voiceButtonActive
-                    ]}
-                  >
-                    <Feather name="mic" size={18} color={isListening ? '#DC2626' : '#B91C1C'} />
-                    <ThemedText style={[styles.voiceButtonText, isListening && { color: '#DC2626' }]}>
-                      {isListening ? 'Listening...' : 'Voice'}
-                    </ThemedText>
-                  </Pressable>
-                  <View style={{ flex: 1 }} />
-                  <Pressable 
-                    onPress={handleSave} 
-                    disabled={!body.trim() || isSaving}
-                    style={[
-                      styles.recordButton,
-                      (!body.trim() || isSaving) && styles.recordButtonDisabled
-                    ]}
-                  >
-                    <Feather name="check" size={18} color="#FFFFFF" />
-                    <ThemedText style={styles.recordButtonText}>
-                      {isSaving ? 'Saving...' : 'Record Journal'}
-                    </ThemedText>
-                  </Pressable>
-                </View>
-              </CardContent>
-            </Card>
-          </Animated.View>
-        ) : (
-          <TouchableWithoutFeedback accessibilityRole="none" onPress={Keyboard.dismiss}>
-            <Animated.View style={{ opacity: contentOpacity, transform: [{ translateY: contentTranslateY }] }}>
-              <Card style={{ marginTop: 24 }}>
-                <CardContent>
-                  <ThemedText type="subtitle" style={{ marginTop: 16 }}>New Journal Entry</ThemedText>
-                  <ThemedText style={{ color: palette.muted, marginTop: 4, marginBottom: 8 }}>Write about your day, thoughts, or feelings. Your entries are private and secure.</ThemedText>
-
-                  {/* Title input */}
-                  <TextInput
-                    placeholder="Title"
-                    placeholderTextColor="#9BA1A6"
-                    value={title}
-                    onChangeText={setTitle}
-                    selectionColor={focusGreen}
-                    onFocus={() => { setTitleFocused(true); scrollToInput(280); }}
-                    onBlur={() => setTitleFocused(false)}
-                    blurOnSubmit={false}
-                    returnKeyType="next"
-                    // @ts-ignore - web outline
-                    style={[
-                      styles.titleInput,
-                      { borderColor: titleFocused ? focusGreen : palette.border },
-                      { borderWidth: titleFocused ? 1.5 : 1 },
-                      { outlineStyle: 'none' } as any,
-                    ]}
-                  />
-
-                  <View style={StyleSheet.flatten([styles.editorWrap, { borderColor: bodyFocused ? focusGreen : palette.border, borderWidth: bodyFocused ? 1.5 : 1 }])}> 
+                    {/* Title input */}
                     <TextInput
-                      placeholder="What's on your mind today? Write about your thoughts, feelings, or experiences..."
+                      placeholder="Title"
                       placeholderTextColor="#9BA1A6"
-                      multiline
-                      scrollEnabled
-                      value={body}
-                      onChangeText={setBody}
+                      value={title}
+                      onChangeText={setTitle}
                       selectionColor={focusGreen}
-                      onFocus={() => { setBodyFocused(true); scrollToInput(350); }}
-                      onBlur={() => setBodyFocused(false)}
+                      onFocus={() => { setTitleFocused(true); scrollToInput(280); }}
+                      onBlur={() => setTitleFocused(false)}
                       blurOnSubmit={false}
+                      returnKeyType="next"
                       // @ts-ignore - web outline
-                      style={[styles.textarea, { outlineStyle: 'none' }]}
+                      style={[
+                        styles.titleInput,
+                        { borderColor: titleFocused ? focusGreen : palette.border },
+                        { borderWidth: titleFocused ? 1.5 : 1 },
+                        { outlineStyle: 'none' } as any,
+                      ]}
                     />
-                  </View>
 
-                  <View style={styles.counterRow}>
-                    <ThemedText style={{ color: palette.icon }}>{wordCount} words • {charCount} characters</ThemedText>
-                  </View>
+                    <View style={StyleSheet.flatten([styles.editorWrap, { borderColor: bodyFocused ? focusGreen : palette.border, borderWidth: bodyFocused ? 1.5 : 1 }])}>
+                      <TextInput
+                        placeholder="What's on your mind today? Write about your thoughts, feelings, or experiences..."
+                        placeholderTextColor="#9BA1A6"
+                        multiline
+                        scrollEnabled
+                        value={body}
+                        onChangeText={setBody}
+                        selectionColor={focusGreen}
+                        onFocus={() => { setBodyFocused(true); scrollToInput(350); }}
+                        onBlur={() => setBodyFocused(false)}
+                        blurOnSubmit={false}
+                        // @ts-ignore - web outline
+                        style={[styles.textarea, { outlineStyle: 'none' }]}
+                      />
+                    </View>
 
-                  {/* Toolbar */}
-                  <View style={styles.toolbar}>
-                    <Pressable 
-                      onPress={handleVoicePress}
-                      style={[
-                        styles.voiceButton,
-                        isListening && styles.voiceButtonActive
-                      ]}
-                    >
-                      <Feather name="mic" size={18} color={isListening ? '#DC2626' : '#B91C1C'} />
-                      <ThemedText style={[styles.voiceButtonText, isListening && { color: '#DC2626' }]}>
-                        {isListening ? 'Listening...' : 'Voice'}
-                      </ThemedText>
-                    </Pressable>
-                    <View style={{ flex: 1 }} />
-                    <Pressable 
-                      onPress={handleSave} 
-                      disabled={!body.trim() || isSaving}
-                      style={[
-                        styles.recordButton,
-                        (!body.trim() || isSaving) && styles.recordButtonDisabled
-                      ]}
-                    >
-                      <Feather name="check" size={18} color="#FFFFFF" />
-                      <ThemedText style={styles.recordButtonText}>
-                        {isSaving ? 'Saving...' : 'Record Journal'}
-                      </ThemedText>
-                    </Pressable>
-                  </View>
-                </CardContent>
-              </Card>
-            </Animated.View>
-          </TouchableWithoutFeedback>
-        )
-      ) : (
-        <Animated.View style={{ marginTop: 16, opacity: contentOpacity, transform: [{ translateY: contentTranslateY }] }}>
-          {entries.length > 0 ? (
-            <>
-              <View style={{ gap: 10 }}>
-                {entries.map((e) => (
-                  <EntryRow
-                    key={e.id}
-                    entry={e}
-                    onDeleteRequest={handleRequestDelete}
-                    getOpenRef={() => openSwipeRef.current}
-                    setOpenRef={(inst) => (openSwipeRef.current = inst)}
-                  />
-                ))}
-              </View>
-            </>
+                    <View style={styles.counterRow}>
+                      <ThemedText style={{ color: palette.icon }}>{wordCount} words • {charCount} characters</ThemedText>
+                    </View>
+
+                    {/* Toolbar */}
+                    <View style={styles.toolbar}>
+                      <Pressable
+                        onPress={handleVoicePress}
+                        style={[
+                          styles.voiceButton,
+                          isListening && styles.voiceButtonActive
+                        ]}
+                      >
+                        <Feather name="mic" size={18} color={isListening ? '#DC2626' : '#B91C1C'} />
+                        <ThemedText style={[styles.voiceButtonText, isListening && { color: '#DC2626' }]}>
+                          {isListening ? 'Listening...' : 'Voice'}
+                        </ThemedText>
+                      </Pressable>
+                      <View style={{ flex: 1 }} />
+                      <Pressable
+                        onPress={handleSave}
+                        disabled={!body.trim() || isSaving}
+                        style={[
+                          styles.recordButton,
+                          (!body.trim() || isSaving) && styles.recordButtonDisabled
+                        ]}
+                      >
+                        <Feather name="check" size={18} color="#FFFFFF" />
+                        <ThemedText style={styles.recordButtonText}>
+                          {isSaving ? 'Saving...' : 'Record Journal'}
+                        </ThemedText>
+                      </Pressable>
+                    </View>
+                  </CardContent>
+                </Card>
+              </Animated.View>
+            ) : (
+              <TouchableWithoutFeedback accessibilityRole="none" onPress={Keyboard.dismiss}>
+                <Animated.View style={{ opacity: contentOpacity, transform: [{ translateY: contentTranslateY }] }}>
+                  <Card style={{ marginTop: 24 }}>
+                    <CardContent>
+                      <ThemedText type="subtitle" style={{ marginTop: 16 }}>New Journal Entry</ThemedText>
+                      <ThemedText style={{ color: palette.muted, marginTop: 4, marginBottom: 8 }}>Write about your day, thoughts, or feelings. Your entries are private and secure.</ThemedText>
+
+                      {/* Title input */}
+                      <TextInput
+                        placeholder="Title"
+                        placeholderTextColor="#9BA1A6"
+                        value={title}
+                        onChangeText={setTitle}
+                        selectionColor={focusGreen}
+                        onFocus={() => { setTitleFocused(true); scrollToInput(280); }}
+                        onBlur={() => setTitleFocused(false)}
+                        blurOnSubmit={false}
+                        returnKeyType="next"
+                        // @ts-ignore - web outline
+                        style={[
+                          styles.titleInput,
+                          { borderColor: titleFocused ? focusGreen : palette.border },
+                          { borderWidth: titleFocused ? 1.5 : 1 },
+                          { outlineStyle: 'none' } as any,
+                        ]}
+                      />
+
+                      <View style={StyleSheet.flatten([styles.editorWrap, { borderColor: bodyFocused ? focusGreen : palette.border, borderWidth: bodyFocused ? 1.5 : 1 }])}>
+                        <TextInput
+                          placeholder="What's on your mind today? Write about your thoughts, feelings, or experiences..."
+                          placeholderTextColor="#9BA1A6"
+                          multiline
+                          scrollEnabled
+                          value={body}
+                          onChangeText={setBody}
+                          selectionColor={focusGreen}
+                          onFocus={() => { setBodyFocused(true); scrollToInput(350); }}
+                          onBlur={() => setBodyFocused(false)}
+                          blurOnSubmit={false}
+                          // @ts-ignore - web outline
+                          style={[styles.textarea, { outlineStyle: 'none' }]}
+                        />
+                      </View>
+
+                      <View style={styles.counterRow}>
+                        <ThemedText style={{ color: palette.icon }}>{wordCount} words • {charCount} characters</ThemedText>
+                      </View>
+
+                      {/* Toolbar */}
+                      <View style={styles.toolbar}>
+                        <Pressable
+                          onPress={handleVoicePress}
+                          style={[
+                            styles.voiceButton,
+                            isListening && styles.voiceButtonActive
+                          ]}
+                        >
+                          <Feather name="mic" size={18} color={isListening ? '#DC2626' : '#B91C1C'} />
+                          <ThemedText style={[styles.voiceButtonText, isListening && { color: '#DC2626' }]}>
+                            {isListening ? 'Listening...' : 'Voice'}
+                          </ThemedText>
+                        </Pressable>
+                        <View style={{ flex: 1 }} />
+                        <Pressable
+                          onPress={handleSave}
+                          disabled={!body.trim() || isSaving}
+                          style={[
+                            styles.recordButton,
+                            (!body.trim() || isSaving) && styles.recordButtonDisabled
+                          ]}
+                        >
+                          <Feather name="check" size={18} color="#FFFFFF" />
+                          <ThemedText style={styles.recordButtonText}>
+                            {isSaving ? 'Saving...' : 'Record Journal'}
+                          </ThemedText>
+                        </Pressable>
+                      </View>
+                    </CardContent>
+                  </Card>
+                </Animated.View>
+              </TouchableWithoutFeedback>
+            )
           ) : (
-            <View style={{ alignItems: 'center', paddingVertical: 40 }}>
-              <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
-                <Feather name="book-open" size={28} color="#9CA3AF" />
-              </View>
-              <ThemedText style={{ fontSize: 16, fontFamily: 'Inter_600SemiBold', color: '#374151', marginBottom: 4 }}>
-                {loadingEntries ? 'Loading entries...' : 'No entries yet'}
-              </ThemedText>
-              {!loadingEntries && (
-                <ThemedText style={{ textAlign: 'center', color: '#9CA3AF', fontSize: 14 }}>
-                  Start writing to see your entries here
-                </ThemedText>
+            <Animated.View style={{ marginTop: 16, opacity: contentOpacity, transform: [{ translateY: contentTranslateY }] }}>
+              {entries.length > 0 ? (
+                <>
+                  <View style={{ gap: 10 }}>
+                    {entries.map((e) => (
+                      <EntryRow
+                        key={e.id}
+                        entry={e}
+                        onDeleteRequest={handleRequestDelete}
+                        getOpenRef={() => openSwipeRef.current}
+                        setOpenRef={(inst) => (openSwipeRef.current = inst)}
+                      />
+                    ))}
+                  </View>
+                </>
+              ) : (
+                <View style={{ alignItems: 'center', paddingVertical: 40 }}>
+                  <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
+                    <Feather name="book-open" size={28} color="#9CA3AF" />
+                  </View>
+                  <ThemedText style={{ fontSize: 16, fontFamily: 'Inter_600SemiBold', color: '#374151', marginBottom: 4 }}>
+                    {loadingEntries ? 'Loading entries...' : 'No entries yet'}
+                  </ThemedText>
+                  {!loadingEntries && (
+                    <ThemedText style={{ textAlign: 'center', color: '#9CA3AF', fontSize: 14 }}>
+                      Start writing to see your entries here
+                    </ThemedText>
+                  )}
+                </View>
               )}
-            </View>
+            </Animated.View>
           )}
         </Animated.View>
-      )}
-          </Animated.View>
       </KeyboardAwareScrollView>
       {/* Saved toast */}
       <Animated.View
@@ -624,7 +624,7 @@ export default function JournalListScreen() {
           position: 'absolute',
           left: 16,
           right: 16,
-          bottom: 24,
+          bottom: 120, // Above floating nav bar
           transform: [{ translateY: toast.interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }],
           opacity: toast,
         }}
@@ -759,7 +759,7 @@ function EntryRow({ entry, onDeleteRequest, getOpenRef, setOpenRef }: { entry: E
     const contentTx = dragX.interpolate({ inputRange: [-120, 0], outputRange: [-6, 0], extrapolate: 'clamp' });
     const confirmDelete = () => {
       if (Platform.OS !== 'web') {
-        try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); } catch {}
+        try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); } catch { }
       }
       onDeleteRequest(entry);
       if (getOpenRef?.() === swipeRef.current) setOpenRef?.(null);

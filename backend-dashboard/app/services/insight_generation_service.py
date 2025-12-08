@@ -501,6 +501,13 @@ class InsightGenerationService:
             t = safe_parse_datetime(j.get("created_at"))
             if t and 0 <= t.hour <= 4:
                 late_night_count += 1
+            dt = j.get("created_at")
+            try:
+                t = datetime.fromisoformat(dt) if isinstance(dt, str) else dt
+                if isinstance(t, datetime) and 0 <= t.hour <= 4:
+                    late_night_count += 1
+            except Exception:
+                continue
         
         # Enhanced risk scoring
         score, reason, level = InsightGenerationService._risk_score(

@@ -104,7 +104,7 @@ export default function LearnScreen() {
   useFocusEffect(
     useCallback(() => {
       runEntrance();
-      return () => {};
+      return () => { };
     }, [])
   );
 
@@ -131,7 +131,7 @@ export default function LearnScreen() {
       const res = await fetch(`${API}/api/saved-resources?resource_type=topic`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      
+
       if (res.ok) {
         const data = await res.json();
         const ids = new Set<string>(data.resources?.map((r: any) => r.resource_id) || []);
@@ -148,7 +148,7 @@ export default function LearnScreen() {
   useFocusEffect(
     useCallback(() => {
       loadSavedResources();
-      return () => {};
+      return () => { };
     }, [loadSavedResources])
   );
 
@@ -165,7 +165,7 @@ export default function LearnScreen() {
   const toggleSave = async (id: string) => {
     const wasSaved = savedIds.has(id);
     const c = courses.find((x) => x.id === id);
-    
+
     // Optimistic update
     const next = new Set(savedIds);
     if (wasSaved) {
@@ -177,10 +177,10 @@ export default function LearnScreen() {
 
     // Show haptic feedback and toast
     if (wasSaved) {
-      if (Platform.OS !== 'web') { try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning); } catch {} }
+      if (Platform.OS !== 'web') { try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning); } catch { } }
       showToast('Removed from saved', 'info');
     } else {
-      if (Platform.OS !== 'web') { try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {} }
+      if (Platform.OS !== 'web') { try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch { } }
       showToast('Saved to collection', 'success');
     }
 
@@ -199,7 +199,7 @@ export default function LearnScreen() {
         // Add to saved
         await fetch(`${API}/api/saved-resources`, {
           method: 'POST',
-          headers: { 
+          headers: {
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json',
           },
@@ -234,7 +234,7 @@ export default function LearnScreen() {
     if (nextIndex === tabIndex) return;
     setTabIndex(nextIndex);
     setActiveTab(tabs[nextIndex]);
-    if (Platform.OS !== 'web') { try { Haptics.selectionAsync(); } catch {} }
+    if (Platform.OS !== 'web') { try { Haptics.selectionAsync(); } catch { } }
     Animated.timing(animTab, {
       toValue: nextIndex,
       duration: 260,
@@ -256,7 +256,7 @@ export default function LearnScreen() {
   // Animate course list on segmented tab change
   const listOpacity = useRef(new Animated.Value(1)).current;
   const listTranslateY = useRef(new Animated.Value(0)).current;
-  
+
   useEffect(() => {
     listOpacity.setValue(0);
     listTranslateY.setValue(8);
@@ -291,8 +291,8 @@ export default function LearnScreen() {
     return (
       <Link href={{ pathname: '/(student)/(tabs)/learn/[id]', params: { id: item.id } }} asChild>
         <Pressable
-          onPressIn={() => { 
-            if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} } 
+          onPressIn={() => {
+            if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch { } }
             cardSpringTo(0.98);
           }}
           onPressOut={() => cardSpringTo(1)}
@@ -310,10 +310,10 @@ export default function LearnScreen() {
                     accessibilityLabel={saved ? 'Unsave topic' : 'Save topic'}
                     hitSlop={8}
                     onPress={(e) => { e.stopPropagation(); onToggle(item.id); }}
-                    onPressIn={(e) => { 
+                    onPressIn={(e) => {
                       e.stopPropagation();
-                      if (Platform.OS !== 'web') { try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light) } catch {} } 
-                      to(1.1, 90); 
+                      if (Platform.OS !== 'web') { try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light) } catch { } }
+                      to(1.1, 90);
                     }}
                     onPressOut={(e) => { e.stopPropagation(); springTo(1); }}
                     style={({ pressed }) => [{ opacity: pressed ? 0.9 : 1 }]}
@@ -409,23 +409,23 @@ export default function LearnScreen() {
             activeTab === 'Saved'
               ? courses.filter((c) => savedIds.has(c.id))
               : courses
-            ).length === 0 && activeTab === 'Saved' ? (
-              <View style={{ alignItems: 'center', justifyContent: 'center', paddingVertical: 48, gap: 10 }}>
-                <Icon name="bookmark" size={32} color="#9CA3AF" />
-                <ThemedText style={{ color: '#6B7280', fontSize: 16, fontFamily: 'Inter_600SemiBold', textAlign: 'center' }}>No saved topics yet</ThemedText>
-                <ThemedText style={{ color: '#9CA3AF', fontSize: 13, textAlign: 'center' }}>Save topics to access them later</ThemedText>
-              </View>
-            ) : (
-              (activeTab === 'Saved' ? courses.filter((c) => savedIds.has(c.id)) : courses).map((c) => (
-                <CourseCard key={c.id} item={c} saved={savedIds.has(c.id)} onToggle={toggleSave} />
-              ))
-            )
+          ).length === 0 && activeTab === 'Saved' ? (
+            <View style={{ alignItems: 'center', justifyContent: 'center', paddingVertical: 48, gap: 10 }}>
+              <Icon name="bookmark" size={32} color="#9CA3AF" />
+              <ThemedText style={{ color: '#6B7280', fontSize: 16, fontFamily: 'Inter_600SemiBold', textAlign: 'center' }}>No saved topics yet</ThemedText>
+              <ThemedText style={{ color: '#9CA3AF', fontSize: 13, textAlign: 'center' }}>Save topics to access them later</ThemedText>
+            </View>
+          ) : (
+            (activeTab === 'Saved' ? courses.filter((c) => savedIds.has(c.id)) : courses).map((c) => (
+              <CourseCard key={c.id} item={c} saved={savedIds.has(c.id)} onToggle={toggleSave} />
+            ))
+          )
           }
         </Animated.View>
 
 
 
-        
+
       </ScrollView>
 
       {/* Bottom Toast */}
@@ -441,7 +441,7 @@ export default function LearnScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  scrollContent: { padding: 16, gap: 16, paddingBottom: 32 },
+  scrollContent: { padding: 16, gap: 16, paddingBottom: 120 }, // Account for floating nav bar
   headerWrap: { alignItems: 'center', gap: 8, marginTop: 6 },
   headerIcon: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#E5E7EB' },
   headerImage: { width: 48, height: 48 },

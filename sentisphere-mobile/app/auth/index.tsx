@@ -499,6 +499,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: Platform.select({ ios: 12, default: 10 }) as number,
+    textAlign: 'left',
   },
   colButtons: { marginTop: 16, alignItems: 'stretch' },
   buttonSmall: { paddingVertical: 14, alignSelf: 'stretch' },

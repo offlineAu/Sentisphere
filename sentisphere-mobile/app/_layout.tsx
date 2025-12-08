@@ -32,9 +32,7 @@ const loadingStyles = StyleSheet.create({
   },
 });
 
-export const unstable_settings = {
-  anchor: '(student)',
-};
+// Note: No anchor setting here - let index.tsx be the initial route for onboarding flow
 
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
@@ -58,7 +56,7 @@ export default function RootLayout() {
   // Smooth pulse animation for loading state
   const pulseScale = useSharedValue(1);
   const pulseOpacity = useSharedValue(0.6);
-  
+
   useEffect(() => {
     if (!fontsLoaded) {
       pulseScale.value = withRepeat(
@@ -83,8 +81,8 @@ export default function RootLayout() {
     return (
       <View style={loadingStyles.container}>
         <Animated.View style={[loadingStyles.logoWrapper, logoAnimatedStyle]}>
-          <Image 
-            source={require('@/assets/images/sentisphere-logo.png')} 
+          <Image
+            source={require('@/assets/images/sentisphere-logo.png')}
             style={loadingStyles.logo}
           />
         </Animated.View>
@@ -95,21 +93,22 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ThemeProvider
-      value={{
-        ...DefaultTheme,
-        dark: false,
-        colors: {
-          ...DefaultTheme.colors,
-          background: Colors.light.background, // scene background
-          card: Colors.light.background,       // header/tab bar background
-          text: Colors.light.text,
-          border: Colors.light.border,
-          primary: Colors.light.tint,
-        },
-      }}
+        value={{
+          ...DefaultTheme,
+          dark: false,
+          colors: {
+            ...DefaultTheme.colors,
+            background: Colors.light.background, // scene background
+            card: Colors.light.background,       // header/tab bar background
+            text: Colors.light.text,
+            border: Colors.light.border,
+            primary: Colors.light.tint,
+          },
+        }}
       >
         <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: Colors.light.background } }}>
           <Stack.Screen name="index" options={{ headerShown: false }} />
+          <Stack.Screen name="onboarding/terms" options={{ headerShown: false, animation: 'fade' }} />
           <Stack.Screen name="(student)" options={{ headerShown: false }} />
           <Stack.Screen name="(auth)/login" options={{ headerShown: false }} />
           <Stack.Screen name="auth/index" options={{ headerShown: false }} />
