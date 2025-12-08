@@ -142,32 +142,6 @@ CREATE TABLE notification (
         ON DELETE SET NULL
 );
 
--- ============================
--- RESOURCE LOG
--- ============================
-CREATE TABLE resource_log (
-    resource_id INT PRIMARY KEY AUTO_INCREMENT,
-    title VARCHAR(100),
-    content TEXT,
-    category VARCHAR(50),
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
--- ============================
--- USER ACTIVITIES
--- ============================
-CREATE TABLE user_activities (
-    activity_id INT PRIMARY KEY AUTO_INCREMENT,
-    user_id INT,
-    action VARCHAR(50),
-    target_type VARCHAR(50),
-    target_id INT,
-    started_at DATETIME,
-    ended_at DATETIME,
-    duration_seconds INT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES user(user_id)
-);
 
 -- ============================
 -- CONVERSATIONS / MESSAGES

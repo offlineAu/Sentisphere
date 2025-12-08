@@ -1,0 +1,13 @@
+{
+  "base_model": "OfflineAu/sentisphere-bisaya-sentiment",
+  "finetuned_at": "2025-12-08T02:53:38.250671",
+  "num_epochs": 5,
+  "training_samples": 123,
+  "eval_loss": 0.8517776131629944,
+  "eval_accuracy": 0.41935483870967744,
+  "label_mapping": {
+    "0": "negative",
+    "1": "neutral",
+    "2": "positive"
+  }
+}

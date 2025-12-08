@@ -1,0 +1,803 @@
+{
+  "evaluation_date": "2025-12-07T21:56:05.808868",
+  "total_samples": 41,
+  "metrics": {
+    "accuracy": 0.7073,
+    "macro_avg": {
+      "precision": 0.7003,
+      "recall": 0.4838,
+      "f1_score": 0.5098
+    },
+    "weighted_avg": {
+      "precision": 0.739,
+      "recall": 0.7073,
+      "f1_score": 0.6633
+    },
+    "per_class": {
+      "positive": {
+        "precision": 0.9091,
+        "recall": 0.7692,
+        "f1_score": 0.8333,
+        "support": 13,
+        "tp": 10,
+        "fp": 1,
+        "fn": 3
+      },
+      "neutral": {
+        "precision": 1.0,
+        "recall": 0.4,
+        "f1_score": 0.5714,
+        "support": 5,
+        "tp": 2,
+        "fp": 0,
+        "fn": 3
+      },
+      "mixed": {
+        "precision": 0,
+        "recall": 0.0,
+        "f1_score": 0,
+        "support": 3,
+        "tp": 0,
+        "fp": 0,
+        "fn": 3
+      },
+      "negative": {
+        "precision": 0.5926,
+        "recall": 1.0,
+        "f1_score": 0.7442,
+        "support": 16,
+        "tp": 16,
+        "fp": 11,
+        "fn": 0
+      },
+      "strongly_negative": {
+        "precision": 1.0,
+        "recall": 0.25,
+        "f1_score": 0.4,
+        "support": 4,
+        "tp": 1,
+        "fp": 0,
+        "fn": 3
+      }
+    },
+    "total_samples": 41,
+    "correct_predictions": 29
+  },
+  "confusion_matrix": {
+    "labels": [
+      "positive",
+      "neutral",
+      "mixed",
+      "negative",
+      "strongly_negative"
+    ],
+    "matrix": [
+      [
+        10,
+        0,
+        0,
+        3,
+        0
+      ],
+      [
+        1,
+        2,
+        0,
+        2,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        3,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        16,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        3,
+        1
+      ]
+    ]
+  },
+  "predictions": [
+    {
+      "id": 1,
+      "text": "Nalipay kaayo ko karon! Happy ra gyud. Nice kaayo ...",
+      "expected": "positive",
+      "predicted": "positive",
+      "correct": true,
+      "confidence": 0.741,
+      "emotions": [
+        "joy",
+        "happiness",
+        "optimism"
+      ],
+      "language_type": "bisaya",
+      "category": "genuine_positive",
+      "time_ms": 27404.8
+    },
+    {
+      "id": 2,
+      "text": "Grateful kaayo ko sa akong family. Blessed gyud mi...",
+      "expected": "positive",
+      "predicted": "negative",
+      "correct": false,
+      "confidence": 0.424,
+      "emotions": [
+        "anger",
+        "gratitude",
+        "optimism"
+      ],
+      "language_type": "bisaya",
+      "category": "genuine_positive",
+      "time_ms": 220.3
+    },
+    {
+      "id": 3,
+      "text": "Nindot kaayo ang weather today, perfect for joggin...",
+      "expected": "positive",
+      "predicted": "positive",
+      "correct": true,
+      "confidence": 0.689,
+      "emotions": [
+        "excitement",
+        "appreciation",
+        "optimism"
+      ],
+      "language_type": "mixed",
+      "category": "genuine_positive",
+      "time_ms": 216.1
+    },
+    {
+      "id": 4,
+      "text": "Finally naka-graduate na ko! Proud kaayo akong par...",
+      "expected": "positive",
+      "predicted": "positive",
+      "correct": true,
+      "confidence": 0.674,
+      "emotions": [
+        "pride",
+        "optimism"
+      ],
+      "language_type": "bisaya",
+      "category": "achievement",
+      "time_ms": 223.3
+    },
+    {
+      "id": 5,
+      "text": "Lipay kaayo ko kay naka-pass ko sa exam.",
+      "expected": "positive",
+      "predicted": "positive",
+      "correct": true,
+      "confidence": 0.515,
+      "emotions": [
+        "joy",
+        "anger",
+        "happiness"
+      ],
+      "language_type": "bisaya",
+      "category": "achievement",
+      "time_ms": 197.8
+    },
+    {
+      "id": 6,
+      "text": "I'm feeling great today, everything is going well!",
+      "expected": "positive",
+      "predicted": "positive",
+      "correct": true,
+      "confidence": 1.0,
+      "emotions": [
+        "anger",
+        "neutral",
+        "optimism"
+      ],
+      "language_type": "english",
+      "category": "genuine_positive",
+      "time_ms": 90.6
+    },
+    {
+      "id": 7,
+      "text": "Just got promoted at work, so happy and grateful!",
+      "expected": "positive",
+      "predicted": "positive",
+      "correct": true,
+      "confidence": 1.0,
+      "emotions": [
+        "joy",
+        "gratitude",
+        "optimism"
+      ],
+      "language_type": "english",
+      "category": "achievement",
+      "time_ms": 100.1
+    },
+    {
+      "id": 8,
+      "text": "The team morale is high and everyone is excited ab...",
+      "expected": "positive",
+      "predicted": "positive",
+      "correct": true,
+      "confidence": 1.0,
+      "emotions": [
+        "excitement",
+        "anger",
+        "optimism"
+      ],
+      "language_type": "english",
+      "category": "work_positive",
+      "time_ms": 94.9
+    },
+    {
+      "id": 9,
+      "text": "Kapoy na kaayo ko, di ko na kaya.",
+      "expected": "negative",
+      "predicted": "negative",
+      "correct": true,
+      "confidence": 0.856,
+      "emotions": [
+        "anger",
+        "exhaustion",
+        "joy"
+      ],
+      "language_type": "bisaya",
+      "category": "exhaustion",
+      "time_ms": 221.0
+    },
+    {
+      "id": 10,
+      "text": "Lisod kaayo ang life karon, stressed gyud ko.",
+      "expected": "negative",
+      "predicted": "negative",
+      "correct": true,
+      "confidence": 0.877,
+      "emotions": [
+        "difficulty",
+        "sadness",
+        "stress"
+      ],
+      "language_type": "bisaya",
+      "category": "stress",
+      "time_ms": 197.5
+    },
+    {
+      "id": 11,
+      "text": "Naguba akong plano, frustrated kaayo ko.",
+      "expected": "negative",
+      "predicted": "negative",
+      "correct": true,
+      "confidence": 0.875,
+      "emotions": [
+        "joy",
+        "sadness",
+        "frustration"
+      ],
+      "language_type": "bisaya",
+      "category": "frustration",
+      "time_ms": 192.0
+    },
+    {
+      "id": 12,
+      "text": "Gikapoy na ko sa tanan, wala na koy gana.",
+      "expected": "negative",
+      "predicted": "negative",
+      "correct": true,
+      "confidence": 0.891,
+      "emotions": [
+        "anger",
+        "joy",
+        "sadness"
+      ],
+      "language_type": "bisaya",
+      "category": "burnout",
+      "time_ms": 203.5
+    },
+    {
+      "id": 13,
+      "text": "Sakit kaayo akong ulo, di ko ka focus sa work.",
+      "expected": "negative",
+      "predicted": "negative",
+      "correct": true,
+      "confidence": 0.862,
+      "emotions": [
+        "anger",
+        "sadness",
+        "pain"
+      ],
+      "language_type": "bisaya",
+      "category": "physical_distress",
+      "time_ms": 224.1
+    },
+    {
+      "id": 14,
+      "text": "Ambot oy kapoy na kaayo ko pero sige lang gud. kap...",
+      "expected": "negative",
+      "predicted": "negative",
+      "correct": true,
+      "confidence": 0.767,
+      "emotions": [
+        "anger",
+        "coping",
+        "sadness"
+      ],
+      "language_type": "bisaya",
+      "category": "masked_distress",
+      "time_ms": 263.1
+    },
+    {
+      "id": 15,
+      "text": "Wala nako kasabot sa akong gibati ron, it feels li...",
+      "expected": "negative",
+      "predicted": "negative",
+      "correct": true,
+      "confidence": 0.482,
+      "emotions": [
+        "sadness",
+        "neutral"
+      ],
+      "language_type": "mixed",
+      "category": "emotional_confusion",
+      "time_ms": 254.7
+    },
+    {
+      "id": 16,
+      "text": "Stress sa school tapos problems pa sa bahay, overw...",
+      "expected": "negative",
+      "predicted": "negative",
+      "correct": true,
+      "confidence": 0.874,
+      "emotions": [
+        "stress",
+        "sadness",
+        "overwhelm"
+      ],
+      "language_type": "mixed",
+      "category": "multiple_stressors",
+      "time_ms": 221.2
+    },
+    {
+      "id": 17,
+      "text": "Gusto nlng ko mag hikog, di na ko ganahan mag pada...",
+      "expected": "strongly_negative",
+      "predicted": "negative",
+      "correct": false,
+      "confidence": 0.498,
+      "emotions": [
+        "interest",
+        "anger",
+        "joy"
+      ],
+      "language_type": "bisaya",
+      "category": "crisis",
+      "time_ms": 214.1
+    },
+    {
+      "id": 18,
+      "text": "Ayoko na talaga, I just want everything to end.",
+      "expected": "strongly_negative",
+      "predicted": "strongly_negative",
+      "correct": true,
+      "confidence": 1.0,
+      "emotions": [
+        "joy",
+        "sadness",
+        "breakpoint"
+      ],
+      "language_type": "mixed",
+      "category": "crisis",
+      "time_ms": 91.2
+    },
+    {
+      "id": 19,
+      "text": "Wala na koy pulos, burden lang ko sa tanan.",
+      "expected": "strongly_negative",
+      "predicted": "negative",
+      "correct": false,
+      "confidence": 0.521,
+      "emotions": [
+        "joy",
+        "sadness",
+        "anger"
+      ],
+      "language_type": "bisaya",
+      "category": "hopelessness",
+      "time_ms": 228.6
+    },
+    {
+      "id": 20,
+      "text": "Nag-abot ko sa opisina alas otso.",
+      "expected": "neutral",
+      "predicted": "negative",
+      "correct": false,
+      "confidence": 0.461,
+      "emotions": [
+        "anger",
+        "joy",
+        "sadness"
+      ],
+      "language_type": "bisaya",
+      "category": "factual",
+      "time_ms": 186.7
+    },
+    {
+      "id": 21,
+      "text": "Today I had rice and chicken for lunch.",
+      "expected": "neutral",
+      "predicted": "positive",
+      "correct": false,
+      "confidence": 1.0,
+      "emotions": [
+        "neutral",
+        "optimism"
+      ],
+      "language_type": "english",
+      "category": "factual",
+      "time_ms": 81.2
+    },
+    {
+      "id": 22,
+      "text": "The meeting was moved to 3pm.",
+      "expected": "neutral",
+      "predicted": "neutral",
+      "correct": true,
+      "confidence": 1.0,
+      "emotions": [
+        "joy",
+        "sadness",
+        "anger"
+      ],
+      "language_type": "english",
+      "category": "factual",
+      "time_ms": 70.0
+    },
+    {
+      "id": 23,
+      "text": "Chill ra kaayo, pero murag stress gamay sa exams. ...",
+      "expected": "mixed",
+      "predicted": "negative",
+      "correct": false,
+      "confidence": 0.647,
+      "emotions": [
+        "motivation",
+        "stress",
+        "anger"
+      ],
+      "language_type": "bisaya",
+      "category": "stress_with_coping",
+      "time_ms": 220.9
+    },
+    {
+      "id": 24,
+      "text": "Happy sa uyab pero stressed sa trabaho.",
+      "expected": "mixed",
+      "predicted": "negative",
+      "correct": false,
+      "confidence": 0.421,
+      "emotions": [
+        "stress",
+        "anger",
+        "relationship_support"
+      ],
+      "language_type": "bisaya",
+      "category": "dual_emotion",
+      "time_ms": 191.0
+    },
+    {
+      "id": 25,
+      "text": "Kapoy pero worth it ra, proud ko sa akong sarili.",
+      "expected": "mixed",
+      "predicted": "negative",
+      "correct": false,
+      "confidence": 0.424,
+      "emotions": [
+        "pride",
+        "anger",
+        "mixed"
+      ],
+      "language_type": "bisaya",
+      "category": "effort_reward",
+      "time_ms": 196.6
+    },
+    {
+      "id": 26,
+      "text": "Kapoy na kaayo ko HAHAHA pero sige lang gud.",
+      "expected": "negative",
+      "predicted": "negative",
+      "correct": true,
+      "confidence": 0.752,
+      "emotions": [
+        "coping",
+        "exhaustion",
+        "optimism"
+      ],
+      "language_type": "bisaya",
+      "category": "coping_humor",
+      "time_ms": 180.0
+    },
+    {
+      "id": 27,
+      "text": "Stress na stress na ko LOL bahala na.",
+      "expected": "negative",
+      "predicted": "negative",
+      "correct": true,
+      "confidence": 0.785,
+      "emotions": [
+        "stress",
+        "sadness",
+        "humor"
+      ],
+      "language_type": "mixed",
+      "category": "coping_humor",
+      "time_ms": 178.5
+    },
+    {
+      "id": 28,
+      "text": "Gimingaw na ko sa akong family, dugay na ko wala k...",
+      "expected": "negative",
+      "predicted": "negative",
+      "correct": true,
+      "confidence": 0.469,
+      "emotions": [
+        "anger",
+        "joy",
+        "sadness"
+      ],
+      "language_type": "bisaya",
+      "category": "longing",
+      "time_ms": 192.7
+    },
+    {
+      "id": 29,
+      "text": "Maayo ra man ko, okay lang tanan.",
+      "expected": "neutral",
+      "predicted": "negative",
+      "correct": false,
+      "confidence": 0.495,
+      "emotions": [
+        "contentment",
+        "anger",
+        "joy"
+      ],
+      "language_type": "bisaya",
+      "category": "neutral_bisaya",
+      "time_ms": 177.7
+    },
+    {
+      "id": 30,
+      "text": "Excited kaayo ko for tomorrow, naa koy date!",
+      "expected": "positive",
+      "predicted": "positive",
+      "correct": true,
+      "confidence": 1.0,
+      "emotions": [
+        "excitement",
+        "optimism"
+      ],
+      "language_type": "bisaya",
+      "category": "anticipation",
+      "time_ms": 85.3
+    },
+    {
+      "id": 31,
+      "text": "Nag-away na usab mi sa akong uyab, kapoy na kaayo.",
+      "expected": "negative",
+      "predicted": "negative",
+      "correct": true,
+      "confidence": 0.485,
+      "emotions": [
+        "relationship_support",
+        "anger",
+        "joy"
+      ],
+      "language_type": "bisaya",
+      "category": "relationship_conflict",
+      "time_ms": 191.3
+    },
+    {
+      "id": 32,
+      "text": "Break up mi sa akong boyfriend, devastated kaayo k...",
+      "expected": "strongly_negative",
+      "predicted": "negative",
+      "correct": false,
+      "confidence": 0.871,
+      "emotions": [
+        "relational_conflict",
+        "sadness"
+      ],
+      "language_type": "bisaya",
+      "category": "relationship_crisis",
+      "time_ms": 177.8
+    },
+    {
+      "id": 33,
+      "text": "Daghan kaayo deadline, di ko ka-catch up.",
+      "expected": "negative",
+      "predicted": "negative",
+      "correct": true,
+      "confidence": 0.523,
+      "emotions": [
+        "anger",
+        "joy",
+        "sadness"
+      ],
+      "language_type": "bisaya",
+      "category": "academic_stress",
+      "time_ms": 172.7
+    },
+    {
+      "id": 34,
+      "text": "Failed ko sa exam, disappointed kaayo ko sa akong ...",
+      "expected": "negative",
+      "predicted": "negative",
+      "correct": true,
+      "confidence": 0.444,
+      "emotions": [
+        "sadness",
+        "neutral"
+      ],
+      "language_type": "bisaya",
+      "category": "academic_failure",
+      "time_ms": 195.8
+    },
+    {
+      "id": 35,
+      "text": "Na-promote ko finally! Thankful sa support.",
+      "expected": "positive",
+      "predicted": "positive",
+      "correct": true,
+      "confidence": 0.522,
+      "emotions": [
+        "anger",
+        "gratitude",
+        "optimism"
+      ],
+      "language_type": "mixed",
+      "category": "career_positive",
+      "time_ms": 182.7
+    },
+    {
+      "id": 36,
+      "text": "I think I need a mental health day, burned out na ...",
+      "expected": "negative",
+      "predicted": "negative",
+      "correct": true,
+      "confidence": 1.0,
+      "emotions": [
+        "burnout",
+        "sadness"
+      ],
+      "language_type": "mixed",
+      "category": "burnout",
+      "time_ms": 96.1
+    },
+    {
+      "id": 37,
+      "text": "Sobrang pagod na ako, hindi ko na kayang mag-aral.",
+      "expected": "negative",
+      "predicted": "negative",
+      "correct": true,
+      "confidence": 0.824,
+      "emotions": [
+        "plea",
+        "anger",
+        "joy"
+      ],
+      "language_type": "tagalog",
+      "category": "exhaustion",
+      "time_ms": 195.9
+    },
+    {
+      "id": 38,
+      "text": "Masaya ako ngayon, ang ganda ng araw!",
+      "expected": "positive",
+      "predicted": "negative",
+      "correct": false,
+      "confidence": 0.496,
+      "emotions": [
+        "joy",
+        "anger",
+        "optimism"
+      ],
+      "language_type": "tagalog",
+      "category": "genuine_positive",
+      "time_ms": 189.8
+    },
+    {
+      "id": 39,
+      "text": "Ni-volunteer kami sa barangay, nakatabang mi distr...",
+      "expected": "positive",
+      "predicted": "negative",
+      "correct": false,
+      "confidence": 0.444,
+      "emotions": [
+        "anger",
+        "joy",
+        "sadness"
+      ],
+      "language_type": "bisaya",
+      "category": "altruism",
+      "time_ms": 210.3
+    },
+    {
+      "id": 40,
+      "text": "The interface design is smoother but we need clear...",
+      "expected": "neutral",
+      "predicted": "neutral",
+      "correct": true,
+      "confidence": 1.0,
+      "emotions": [
+        "anger",
+        "joy",
+        "sadness"
+      ],
+      "language_type": "english",
+      "category": "work_feedback",
+      "time_ms": 87.4
+    },
+    {
+      "id": 41,
+      "text": "We had lechon for dinner and my lolo told jokes, f...",
+      "expected": "positive",
+      "predicted": "positive",
+      "correct": true,
+      "confidence": 1.0,
+      "emotions": [
+        "humor",
+        "optimism"
+      ],
+      "language_type": "mixed",
+      "category": "family_connection",
+      "time_ms": 92.3
+    }
+  ],
+  "per_category_accuracy": {
+    "genuine_positive": 0.6,
+    "achievement": 1.0,
+    "work_positive": 1.0,
+    "exhaustion": 1.0,
+    "stress": 1.0,
+    "frustration": 1.0,
+    "burnout": 1.0,
+    "physical_distress": 1.0,
+    "masked_distress": 1.0,
+    "emotional_confusion": 1.0,
+    "multiple_stressors": 1.0,
+    "crisis": 0.5,
+    "hopelessness": 0.0,
+    "factual": 0.3333333333333333,
+    "stress_with_coping": 0.0,
+    "dual_emotion": 0.0,
+    "effort_reward": 0.0,
+    "coping_humor": 1.0,
+    "longing": 1.0,
+    "neutral_bisaya": 0.0,
+    "anticipation": 1.0,
+    "relationship_conflict": 1.0,
+    "relationship_crisis": 0.0,
+    "academic_stress": 1.0,
+    "academic_failure": 1.0,
+    "career_positive": 1.0,
+    "altruism": 0.0,
+    "work_feedback": 1.0,
+    "family_connection": 1.0
+  },
+  "per_language_accuracy": {
+    "bisaya": 0.6,
+    "mixed": 1.0,
+    "english": 0.8333333333333334,
+    "tagalog": 0.5
+  },
+  "processing_stats": {
+    "total_time_seconds": 34.41,
+    "average_time_ms": 839.3
+  }
+}

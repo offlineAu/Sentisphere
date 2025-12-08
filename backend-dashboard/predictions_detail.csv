@@ -1,0 +1,42 @@
+id,text,expected,predicted,correct,confidence,language,category
+1,"Nalipay kaayo ko karon! Happy ra gyud. Nice kaayo ...",positive,positive,True,0.741,bisaya,genuine_positive
+2,"Grateful kaayo ko sa akong family. Blessed gyud mi...",positive,negative,False,0.424,bisaya,genuine_positive
+3,"Nindot kaayo ang weather today; perfect for joggin...",positive,positive,True,0.689,mixed,genuine_positive
+4,"Finally naka-graduate na ko! Proud kaayo akong par...",positive,positive,True,0.674,bisaya,achievement
+5,"Lipay kaayo ko kay naka-pass ko sa exam.",positive,positive,True,0.515,bisaya,achievement
+6,"I'm feeling great today; everything is going well!",positive,positive,True,1.0,english,genuine_positive
+7,"Just got promoted at work; so happy and grateful!",positive,positive,True,1.0,english,achievement
+8,"The team morale is high and everyone is excited ab...",positive,positive,True,1.0,english,work_positive
+9,"Kapoy na kaayo ko; di ko na kaya.",negative,negative,True,0.856,bisaya,exhaustion
+10,"Lisod kaayo ang life karon; stressed gyud ko.",negative,negative,True,0.877,bisaya,stress
+11,"Naguba akong plano; frustrated kaayo ko.",negative,negative,True,0.875,bisaya,frustration
+12,"Gikapoy na ko sa tanan; wala na koy gana.",negative,negative,True,0.891,bisaya,burnout
+13,"Sakit kaayo akong ulo; di ko ka focus sa work.",negative,negative,True,0.862,bisaya,physical_distress
+14,"Ambot oy kapoy na kaayo ko pero sige lang gud. kap...",negative,negative,True,0.767,bisaya,masked_distress
+15,"Wala nako kasabot sa akong gibati ron; it feels li...",negative,negative,True,0.482,mixed,emotional_confusion
+16,"Stress sa school tapos problems pa sa bahay; overw...",negative,negative,True,0.874,mixed,multiple_stressors
+17,"Gusto nlng ko mag hikog; di na ko ganahan mag pada...",strongly_negative,negative,False,0.498,bisaya,crisis
+18,"Ayoko na talaga; I just want everything to end.",strongly_negative,strongly_negative,True,1.0,mixed,crisis
+19,"Wala na koy pulos; burden lang ko sa tanan.",strongly_negative,negative,False,0.521,bisaya,hopelessness
+20,"Nag-abot ko sa opisina alas otso.",neutral,negative,False,0.461,bisaya,factual
+21,"Today I had rice and chicken for lunch.",neutral,positive,False,1.0,english,factual
+22,"The meeting was moved to 3pm.",neutral,neutral,True,1.0,english,factual
+23,"Chill ra kaayo; pero murag stress gamay sa exams. ...",mixed,negative,False,0.647,bisaya,stress_with_coping
+24,"Happy sa uyab pero stressed sa trabaho.",mixed,negative,False,0.421,bisaya,dual_emotion
+25,"Kapoy pero worth it ra; proud ko sa akong sarili.",mixed,negative,False,0.424,bisaya,effort_reward
+26,"Kapoy na kaayo ko HAHAHA pero sige lang gud.",negative,negative,True,0.752,bisaya,coping_humor
+27,"Stress na stress na ko LOL bahala na.",negative,negative,True,0.785,mixed,coping_humor
+28,"Gimingaw na ko sa akong family; dugay na ko wala k...",negative,negative,True,0.469,bisaya,longing
+29,"Maayo ra man ko; okay lang tanan.",neutral,negative,False,0.495,bisaya,neutral_bisaya
+30,"Excited kaayo ko for tomorrow; naa koy date!",positive,positive,True,1.0,bisaya,anticipation
+31,"Nag-away na usab mi sa akong uyab; kapoy na kaayo.",negative,negative,True,0.485,bisaya,relationship_conflict
+32,"Break up mi sa akong boyfriend; devastated kaayo k...",strongly_negative,negative,False,0.871,bisaya,relationship_crisis
+33,"Daghan kaayo deadline; di ko ka-catch up.",negative,negative,True,0.523,bisaya,academic_stress
+34,"Failed ko sa exam; disappointed kaayo ko sa akong ...",negative,negative,True,0.444,bisaya,academic_failure
+35,"Na-promote ko finally! Thankful sa support.",positive,positive,True,0.522,mixed,career_positive
+36,"I think I need a mental health day; burned out na ...",negative,negative,True,1.0,mixed,burnout
+37,"Sobrang pagod na ako; hindi ko na kayang mag-aral.",negative,negative,True,0.824,tagalog,exhaustion
+38,"Masaya ako ngayon; ang ganda ng araw!",positive,negative,False,0.496,tagalog,genuine_positive
+39,"Ni-volunteer kami sa barangay; nakatabang mi distr...",positive,negative,False,0.444,bisaya,altruism
+40,"The interface design is smoother but we need clear...",neutral,neutral,True,1.0,english,work_feedback
+41,"We had lechon for dinner and my lolo told jokes; f...",positive,positive,True,1.0,mixed,family_connection

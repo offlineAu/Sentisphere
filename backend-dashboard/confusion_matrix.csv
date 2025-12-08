@@ -1,0 +1,6 @@
+,positive,neutral,mixed,negative,strongly_negative
+positive,10,0,0,3,0
+neutral,1,2,0,2,0
+mixed,0,0,0,3,0
+negative,0,0,0,16,0
+strongly_negative,0,0,0,3,1
