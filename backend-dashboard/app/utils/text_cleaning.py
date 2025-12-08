@@ -44,6 +44,19 @@ def clean_text(text: str | None) -> str:
     return cleaned
 
 
-def tokenize(text: str) -> list[str]:
     t = clean_text(text)
     return t.split()
+
+
+def redact_pii(text_value: str) -> str:
+    """Redact email addresses, phone numbers, and proper names."""
+    if not text_value:
+        return text_value
+    s = text_value
+    # Emails
+    s = re.sub(r"[A-Za-z0-9_.+-]+@[A-Za-z0-9-]+\.[A-Za-z0-9.-]+", "[REDACTED]", s)
+    # Phones
+    s = re.sub(r"\b\+?\d[\d\s-]{7,}\b", "[REDACTED]", s)
+    # Proper names/capitalized phrases (simplified)
+    s = re.sub(r"\b([A-Z][a-z]+\s+[A-Z][a-z]+)\b", "[REDACTED]", s)
+    return s

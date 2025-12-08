@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import text
 
 from app.db.database import engine
-from app.services.insight_generation_service import InsightGenerationService
+from app.utils.text_cleaning import redact_pii
 
 
 def _iso(dt: Optional[datetime]) -> Optional[str]:
@@ -106,7 +106,7 @@ def build_sanitized_payload(user_id: Optional[int], start_dt: datetime, end_dt: 
         for r in jr_rows:
             content = r["content"] or ""
             text_hash = hashlib.sha256(content.encode("utf-8", errors="ignore")).hexdigest()
-            excerpt = InsightGenerationService._redact(content[:200])
+            excerpt = redact_pii(content[:200])
             s = sentiments_map.get(int(r["journal_id"]))
             payload["journals"].append(
                 {
