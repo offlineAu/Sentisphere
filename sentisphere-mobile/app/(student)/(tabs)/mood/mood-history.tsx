@@ -1,15 +1,15 @@
-import { StyleSheet, View, ScrollView, Pressable, Animated, Easing, Platform, RefreshControl } from 'react-native';
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { StyleSheet, View, ScrollView, Pressable, Animated, Easing, Platform, RefreshControl, Text } from 'react-native';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { ThemedText } from '@/components/themed-text';
 import { GlobalScreenWrapper } from '@/components/GlobalScreenWrapper';
 import { Icon } from '@/components/ui/icon';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors } from '@/constants/theme';
 import * as SecureStore from 'expo-secure-store';
+import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { parseTimestamp } from '@/utils/time';
 import dayjs from 'dayjs';
 
 type CheckinEntry = {
@@ -22,77 +22,132 @@ type CheckinEntry = {
     created_at: string;
 };
 
-const MOOD_EMOJI_MAP: Record<string, string> = {
-    'Awesome': '🤩',
-    'Great': '😊',
+// Mood emoji mapping - using standard Unicode emojis for cross-platform support
+// These render consistently as they are standard Unicode characters
+const MOOD_EMOJI: Record<string, string> = {
+    'Awesome': '😊',
+    'Great': '😄',
     'Loved': '🥰',
-    'Okay': '😐',
-    'Meh': '😒',
-    'Anxious': '😨',
+    'Okay': '🙂',
+    'Meh': '😐',
+    'Anxious': '😰',
     'Bad': '😢',
     'Terrible': '😫',
-    'Upset': '😡',
+    'Upset': '😠',
     'Neutral': '😐',
+    'Fine': '🙂',
+    'Not Great': '😕',
+    'Rough': '😞',
 };
 
-const ENERGY_EMOJI_MAP: Record<string, string> = {
-    'Very High': '⚡',
-    'High': '🔥',
-    'Moderate': '✨',
-    'Low': '🌙',
-    'Very Low': '😴',
+// Soft pastel background colors for Week view cards (Sentisphere brand-aligned)
+const MOOD_CARD_BG: Record<string, string> = {
+    'Awesome': '#FEF3C7',     // Warm amber
+    'Great': '#D1FAE5',       // Soft mint
+    'Loved': '#FCE7F3',       // Soft pink
+    'Okay': '#E0F2FE',        // Light sky
+    'Meh': '#F3F4F6',         // Light gray
+    'Anxious': '#EDE9FE',     // Soft lavender
+    'Bad': '#DBEAFE',         // Light blue
+    'Terrible': '#FEE2E2',    // Soft red
+    'Upset': '#FECACA',       // Light coral
+    'Neutral': '#F9FAFB',     // Off white
+    'Fine': '#FCE7F3',        // Soft pink
+    'Not Great': '#DBEAFE',   // Light blue
+    'Rough': '#EDE9FE',       // Soft lavender
 };
 
-const STRESS_EMOJI_MAP: Record<string, string> = {
-    'No Stress': '😌',
-    'Low Stress': '🙂',
-    'Moderate': '😐',
-    'High Stress': '😓',
-    'Very High': '🤯',
+// Calendar circle colors - vibrant but soft (matches reference design)
+const MOOD_CIRCLE_COLOR: Record<string, string> = {
+    'Awesome': '#FBBF24',     // Amber
+    'Great': '#34D399',       // Emerald
+    'Loved': '#F472B6',       // Pink
+    'Okay': '#60A5FA',        // Blue
+    'Meh': '#9CA3AF',         // Gray
+    'Anxious': '#A78BFA',     // Purple
+    'Bad': '#60A5FA',         // Blue
+    'Terrible': '#F87171',    // Red
+    'Upset': '#FB7185',       // Rose
+    'Neutral': '#94A3B8',     // Slate
+    'Fine': '#F472B6',        // Pink
+    'Not Great': '#60A5FA',   // Blue
+    'Rough': '#A78BFA',       // Purple
 };
 
-const MOOD_COLOR_MAP: Record<string, string> = {
-    'Awesome': '#FB923C',
-    'Great': '#FBBF24',
-    'Loved': '#FDBA74',
-    'Okay': '#FDE68A',
-    'Meh': '#9CA3AF',
-    'Anxious': '#6EE7B7',
-    'Bad': '#7DD3FC',
-    'Terrible': '#C4B5FD',
-    'Upset': '#FCA5A5',
-    'Neutral': '#E5E7EB',
+// Generate mood tags from entry data
+const getMoodTags = (entry: CheckinEntry): string[] => {
+    const tags: string[] = [];
+    if (entry.energy_level) {
+        const energy = entry.energy_level.toLowerCase();
+        if (energy !== 'moderate') tags.push(energy);
+    }
+    if (entry.stress_level) {
+        const stress = entry.stress_level.toLowerCase().replace(' stress', '').replace('no ', '');
+        if (stress && stress !== 'moderate') tags.push(stress);
+    }
+    return tags.slice(0, 4);
 };
+
+const BRAND_GREEN = '#0D8C4F';
 
 export default function MoodHistoryScreen() {
     const [entries, setEntries] = useState<CheckinEntry[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [tab, setTab] = useState<0 | 1>(0);
+    const [segW, setSegW] = useState(0);
+    const [monthOffset, setMonthOffset] = useState(0);
     const scheme = useColorScheme() ?? 'light';
     const palette = Colors[scheme] as any;
     const insets = useSafeAreaInsets();
     const API = process.env.EXPO_PUBLIC_API_URL || 'https://sentisphere-production.up.railway.app';
 
-    // Entrance animations
+    // Animations
+    const animTab = useRef(new Animated.Value(0)).current;
     const entrance = useRef({
         header: new Animated.Value(0),
         content: new Animated.Value(0),
     }).current;
+    const contentFade = useRef(new Animated.Value(1)).current;
+
+    const doHaptic = async (type: 'light' | 'selection' = 'selection') => {
+        if (Platform.OS === 'web') return;
+        try {
+            if (type === 'selection') await Haptics.selectionAsync();
+            else await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        } catch { }
+    };
 
     const runEntrance = useCallback(() => {
         entrance.header.setValue(0);
         entrance.content.setValue(0);
-        Animated.stagger(120, [
-            Animated.timing(entrance.header, { toValue: 1, duration: 400, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-            Animated.timing(entrance.content, { toValue: 1, duration: 450, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+        Animated.stagger(100, [
+            Animated.timing(entrance.header, { toValue: 1, duration: 280, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+            Animated.timing(entrance.content, { toValue: 1, duration: 320, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
         ]).start();
     }, []);
 
-    const makeFadeUp = (v: Animated.Value) => ({
+    const fadeUp = (v: Animated.Value) => ({
         opacity: v,
-        transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }],
+        transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }],
     });
+
+    const switchTab = (newTab: 0 | 1) => {
+        if (newTab === tab) return;
+        doHaptic('selection');
+        Animated.timing(animTab, { toValue: newTab, duration: 180, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start();
+        setTab(newTab);
+        contentFade.setValue(0);
+        Animated.timing(contentFade, { toValue: 1, duration: 180, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+    };
+
+    const indicatorStyle = useMemo(() => {
+        const pad = 4;
+        const itemW = (segW - pad * 2) / 2;
+        const tx = animTab.interpolate({ inputRange: [0, 1], outputRange: [0, itemW] });
+        return { width: itemW, transform: [{ translateX: tx }], opacity: segW > 0 ? 1 : 0 };
+    }, [segW, animTab]);
 
     const getAuthToken = async (): Promise<string | null> => {
         if (Platform.OS === 'web') {
@@ -106,102 +161,111 @@ export default function MoodHistoryScreen() {
             if (isRefresh) setRefreshing(true);
             else setLoading(true);
             setError(null);
-
             const token = await getAuthToken();
-            if (!token) {
-                setError('Not signed in');
-                return;
-            }
-
-            const res = await fetch(`${API}/api/emotional-checkins?days=31&limit=100`, {
+            if (!token) { setError('Not signed in'); return; }
+            const res = await fetch(`${API}/api/emotional-checkins`, {
                 headers: { Authorization: `Bearer ${token}` },
             });
-
-            if (!res.ok) {
-                throw new Error(`Failed to load entries: ${res.status}`);
-            }
-
+            if (!res.ok) throw new Error(`Failed: ${res.status}`);
             const data = await res.json();
-            // API returns array directly
             setEntries(Array.isArray(data) ? data : []);
         } catch (e: any) {
-            setError(e?.message || 'Failed to load mood history');
+            setError(e?.message || 'Failed to load');
         } finally {
             setLoading(false);
             setRefreshing(false);
         }
     }, [API]);
 
-    useEffect(() => {
-        fetchEntries();
-    }, [fetchEntries]);
+    useEffect(() => { fetchEntries(); }, [fetchEntries]);
+    useFocusEffect(useCallback(() => { runEntrance(); fetchEntries(); return () => { }; }, [runEntrance, fetchEntries]));
 
-    useFocusEffect(
-        useCallback(() => {
-            runEntrance();
-            fetchEntries();
-            return () => { };
-        }, [runEntrance, fetchEntries])
-    );
+    // Group entries by date
+    const grouped = useMemo(() => {
+        const map = new Map<string, CheckinEntry[]>();
+        entries.forEach(e => {
+            const key = dayjs(e.created_at).format('YYYY-MM-DD');
+            if (!map.has(key)) map.set(key, []);
+            map.get(key)!.push(e);
+        });
+        return map;
+    }, [entries]);
 
-    const formatDateTime = (isoString: string) => {
-        const date = dayjs(isoString);
+    // Last 7 days
+    const week = useMemo(() => {
+        const arr: string[] = [];
+        for (let i = 0; i < 7; i++) arr.push(dayjs().subtract(i, 'day').format('YYYY-MM-DD'));
+        return arr;
+    }, []);
+
+    // Current month calendar
+    const month = useMemo(() => dayjs().add(monthOffset, 'month'), [monthOffset]);
+    const calendar = useMemo(() => {
+        const start = month.startOf('month');
+        const days = month.daysInMonth();
+        const dow = start.day();
+        const pad = dow === 0 ? 6 : dow - 1; // Monday start
+        const cells: Array<{ date: string; day: number; entries: CheckinEntry[]; today: boolean; empty: boolean }> = [];
+        for (let i = 0; i < pad; i++) cells.push({ date: '', day: 0, entries: [], today: false, empty: true });
+        for (let d = 1; d <= days; d++) {
+            const dt = start.date(d);
+            const key = dt.format('YYYY-MM-DD');
+            cells.push({ date: key, day: d, entries: grouped.get(key) || [], today: dt.isSame(dayjs(), 'day'), empty: false });
+        }
+        return cells;
+    }, [month, grouped]);
+
+    // Mood summary
+    const summary = useMemo(() => {
+        const ms = month.startOf('month');
+        const me = month.endOf('month');
+        const counts: Record<string, number> = {};
+        entries.filter(e => { const d = dayjs(e.created_at); return d.isAfter(ms.subtract(1, 'day')) && d.isBefore(me.add(1, 'day')); })
+            .forEach(e => { counts[e.mood_level] = (counts[e.mood_level] || 0) + 1; });
+        return Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 4);
+    }, [entries, month]);
+
+    const dayLabel = (date: string) => {
+        const d = dayjs(date);
         const now = dayjs();
-        const isToday = date.isSame(now, 'day');
-        const isYesterday = date.isSame(now.subtract(1, 'day'), 'day');
-
-        const timeStr = date.format('h:mm A');
-
-        if (isToday) return `Today at ${timeStr}`;
-        if (isYesterday) return `Yesterday at ${timeStr}`;
-        return date.format('MMM D') + ` at ${timeStr}`;
+        if (d.isSame(now, 'day')) return { num: d.format('D'), mo: d.format('MMM'), text: 'Today', sub: d.format('dddd') };
+        if (d.isSame(now.subtract(1, 'day'), 'day')) return { num: d.format('D'), mo: d.format('MMM'), text: 'Yesterday', sub: d.format('dddd') };
+        return { num: d.format('D'), mo: d.format('MMM'), text: d.format('dddd'), sub: '' };
     };
 
-    const EntryCard = ({ entry, index }: { entry: CheckinEntry; index: number }) => {
-        const moodEmoji = MOOD_EMOJI_MAP[entry.mood_level] || '😐';
-        const energyEmoji = ENERGY_EMOJI_MAP[entry.energy_level] || '✨';
-        const stressEmoji = STRESS_EMOJI_MAP[entry.stress_level] || '😐';
-        const moodColor = MOOD_COLOR_MAP[entry.mood_level] || '#E5E7EB';
+    // Unified emoji component - uses Text for consistent cross-platform rendering
+    const Emoji = ({ code, size = 20 }: { code: string; size?: number }) => (
+        <Text style={{ fontSize: size, lineHeight: size * 1.2, textAlign: 'center' }}>{code}</Text>
+    );
 
+    // Week View Card
+    const WeekCard = ({ entry }: { entry: CheckinEntry }) => {
+        const emoji = MOOD_EMOJI[entry.mood_level] || '😐';
+        const bg = MOOD_CARD_BG[entry.mood_level] || '#F9FAFB';
+        const time = dayjs(entry.created_at).format('h:mm A');
+        const tags = getMoodTags(entry);
         const scale = useRef(new Animated.Value(1)).current;
-        const handlePressIn = () => {
-            Animated.spring(scale, { toValue: 0.98, useNativeDriver: true, stiffness: 300, damping: 15 }).start();
-        };
-        const handlePressOut = () => {
-            Animated.spring(scale, { toValue: 1, useNativeDriver: true, stiffness: 300, damping: 15 }).start();
-        };
 
         return (
-            <Pressable onPressIn={handlePressIn} onPressOut={handlePressOut}>
-                <Animated.View style={[styles.entryCard, { transform: [{ scale }] }]}>
-                    {/* Header with mood and time */}
-                    <View style={styles.entryHeader}>
-                        <View style={[styles.moodBadge, { backgroundColor: `${moodColor}20` }]}>
-                            <ThemedText style={styles.moodEmoji}>{moodEmoji}</ThemedText>
-                            <ThemedText style={[styles.moodLabel, { color: moodColor }]}>{entry.mood_level}</ThemedText>
+            <Pressable
+                onPressIn={() => Animated.spring(scale, { toValue: 0.97, useNativeDriver: true, stiffness: 400, damping: 18 }).start()}
+                onPressOut={() => Animated.spring(scale, { toValue: 1, useNativeDriver: true, stiffness: 400, damping: 18 }).start()}
+            >
+                <Animated.View style={[styles.card, { backgroundColor: bg, transform: [{ scale }] }]}>
+                    <View style={styles.cardTop}>
+                        <View style={styles.cardLeft}>
+                            <Emoji code={emoji} size={22} />
+                            <ThemedText style={styles.cardMood}>{entry.mood_level}</ThemedText>
                         </View>
-                        <ThemedText style={styles.entryTime}>{formatDateTime(entry.created_at)}</ThemedText>
+                        <ThemedText style={styles.cardTime}>{time}</ThemedText>
                     </View>
-
-                    {/* Details row */}
-                    <View style={styles.detailsRow}>
-                        <View style={styles.detailItem}>
-                            <ThemedText style={styles.detailEmoji}>{energyEmoji}</ThemedText>
-                            <ThemedText style={styles.detailLabel}>{entry.energy_level}</ThemedText>
-                        </View>
-                        <View style={styles.detailDivider} />
-                        <View style={styles.detailItem}>
-                            <ThemedText style={styles.detailEmoji}>{stressEmoji}</ThemedText>
-                            <ThemedText style={styles.detailLabel}>{entry.stress_level}</ThemedText>
-                        </View>
-                    </View>
-
-                    {/* Comment if present */}
-                    {entry.comment && (
-                        <View style={styles.commentSection}>
-                            <ThemedText style={styles.commentText} numberOfLines={3}>
-                                "{entry.comment}"
-                            </ThemedText>
+                    {tags.length > 0 && (
+                        <View style={styles.cardTags}>
+                            {tags.map((t, i) => (
+                                <View key={i} style={styles.tag}>
+                                    <ThemedText style={styles.tagText}>{t}</ThemedText>
+                                </View>
+                            ))}
                         </View>
                     )}
                 </Animated.View>
@@ -209,65 +273,142 @@ export default function MoodHistoryScreen() {
         );
     };
 
+    // Calendar Day Cell
+    const CalCell = ({ cell }: { cell: typeof calendar[0] }) => {
+        if (cell.empty) return <View style={styles.cell} />;
+        const has = cell.entries.length > 0;
+        const latest = has ? cell.entries[cell.entries.length - 1] : null;
+        const emoji = latest ? MOOD_EMOJI[latest.mood_level] || '😐' : null;
+        const color = latest ? MOOD_CIRCLE_COLOR[latest.mood_level] || '#E5E7EB' : '#F3F4F6';
+
+        return (
+            <Pressable style={styles.cell} onPress={() => has && doHaptic('light')}>
+                <View style={[styles.circle, { backgroundColor: color }]}>
+                    {emoji ? <Emoji code={emoji} size={16} /> : <ThemedText style={styles.plus}>+</ThemedText>}
+                </View>
+                <ThemedText style={[styles.cellDay, cell.today && styles.cellDayToday]}>{cell.day}</ThemedText>
+            </Pressable>
+        );
+    };
+
+    const WeekView = () => (
+        <ScrollView
+            style={styles.scroll}
+            contentContainerStyle={[styles.scrollPad, { paddingBottom: insets.bottom + 100 }]}
+            showsVerticalScrollIndicator={false}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => fetchEntries(true)} tintColor={BRAND_GREEN} colors={[BRAND_GREEN]} />}
+        >
+            {week.map(date => {
+                const dayEntries = grouped.get(date);
+                if (!dayEntries?.length) return null;
+                const { num, mo, text, sub } = dayLabel(date);
+                return (
+                    <View key={date} style={styles.dayBlock}>
+                        <View style={styles.dayRow}>
+                            <View style={styles.dayNum}>
+                                <ThemedText style={styles.dayNumText}>{num}</ThemedText>
+                                <ThemedText style={styles.dayMo}>{mo}</ThemedText>
+                            </View>
+                            <View>
+                                <ThemedText style={styles.dayText}>{text}</ThemedText>
+                                {sub ? <ThemedText style={styles.daySub}>{sub}</ThemedText> : null}
+                            </View>
+                        </View>
+                        {dayEntries.map(e => <WeekCard key={e.checkin_id} entry={e} />)}
+                    </View>
+                );
+            })}
+            {entries.length === 0 && (
+                <View style={styles.empty}>
+                    <View style={styles.emptyIcon}><Emoji code="🌱" size={44} /></View>
+                    <ThemedText style={styles.emptyTitle}>No mood entries yet</ThemedText>
+                    <ThemedText style={styles.emptySub}>Start tracking how you feel each day</ThemedText>
+                    <Pressable style={styles.emptyBtn} onPress={() => { doHaptic(); router.push('/(student)/(tabs)/mood'); }}>
+                        <ThemedText style={styles.emptyBtnText}>Check In Now</ThemedText>
+                    </Pressable>
+                </View>
+            )}
+        </ScrollView>
+    );
+
+    const MonthView = () => (
+        <ScrollView
+            style={styles.scroll}
+            contentContainerStyle={[styles.scrollPad, { paddingBottom: insets.bottom + 100 }]}
+            showsVerticalScrollIndicator={false}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => fetchEntries(true)} tintColor={BRAND_GREEN} colors={[BRAND_GREEN]} />}
+        >
+            <View style={styles.monthNav}>
+                <Pressable style={styles.monthArrow} onPress={() => { doHaptic('light'); setMonthOffset(m => m - 1); }}>
+                    <Icon name="chevron-left" size={20} color="#374151" />
+                </Pressable>
+                <ThemedText style={styles.monthTitle}>{month.format('MMMM YYYY')}</ThemedText>
+                <Pressable style={styles.monthArrow} onPress={() => { doHaptic('light'); setMonthOffset(m => m + 1); }}>
+                    <Icon name="chevron-right" size={20} color="#374151" />
+                </Pressable>
+            </View>
+            <View style={styles.weekRow}>
+                {['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].map(d => (
+                    <ThemedText key={d} style={styles.weekLabel}>{d}</ThemedText>
+                ))}
+            </View>
+            <View style={styles.grid}>
+                {calendar.map((c, i) => <CalCell key={i} cell={c} />)}
+            </View>
+            <View style={styles.summaryBox}>
+                <ThemedText style={styles.summaryTitle}>Mood summary</ThemedText>
+                {summary.length > 0 ? (
+                    <View style={styles.summaryRow}>
+                        {summary.map(([mood, count]) => (
+                            <View key={mood} style={styles.summaryItem}>
+                                <View style={[styles.summaryCircle, { backgroundColor: MOOD_CIRCLE_COLOR[mood] || '#E5E7EB' }]}>
+                                    <Emoji code={MOOD_EMOJI[mood] || '😐'} size={20} />
+                                </View>
+                                <ThemedText style={styles.summaryLabel}>{mood}</ThemedText>
+                                <ThemedText style={styles.summaryCount}>{count}x</ThemedText>
+                            </View>
+                        ))}
+                    </View>
+                ) : (
+                    <ThemedText style={styles.summaryNone}>No entries this month</ThemedText>
+                )}
+            </View>
+        </ScrollView>
+    );
+
     return (
         <GlobalScreenWrapper backgroundColor="#FFFFFF">
-            {/* Header */}
-            <Animated.View style={[styles.header, makeFadeUp(entrance.header)]}>
-                <Pressable onPress={() => router.back()} style={styles.backButton}>
-                    <Icon name="chevron-left" size={24} color="#111827" />
+            <Animated.View style={[styles.header, fadeUp(entrance.header)]}>
+                <Pressable onPress={() => { doHaptic(); router.back(); }} style={styles.headerBtn}>
+                    <Icon name="chevron-left" size={22} color="#374151" />
                 </Pressable>
-                <ThemedText style={styles.headerTitle}>Mood Log</ThemedText>
-                <View style={{ width: 40 }} />
+                <View style={styles.seg} onLayout={e => setSegW(e.nativeEvent.layout.width)}>
+                    {Platform.OS !== 'web' && <Animated.View pointerEvents="none" style={[styles.segInd, indicatorStyle]} />}
+                    <Pressable style={[styles.segBtn, Platform.OS === 'web' && tab === 0 && styles.segBtnActive]} onPress={() => switchTab(0)}>
+                        <ThemedText style={[styles.segText, tab === 0 && styles.segTextActive]}>Week</ThemedText>
+                    </Pressable>
+                    <Pressable style={[styles.segBtn, Platform.OS === 'web' && tab === 1 && styles.segBtnActive]} onPress={() => switchTab(1)}>
+                        <ThemedText style={[styles.segText, tab === 1 && styles.segTextActive]}>Month</ThemedText>
+                    </Pressable>
+                </View>
+                <Pressable style={styles.headerBtn}><Icon name="search" size={20} color="#374151" /></Pressable>
             </Animated.View>
 
-            {/* Content */}
-            <Animated.View style={[{ flex: 1 }, makeFadeUp(entrance.content)]}>
+            <Animated.View style={[{ flex: 1 }, fadeUp(entrance.content)]}>
                 {loading && !refreshing ? (
-                    <View style={styles.centerContainer}>
-                        <ThemedText style={styles.loadingText}>Loading your mood history...</ThemedText>
-                    </View>
+                    <View style={styles.center}><ThemedText style={styles.loadText}>Loading...</ThemedText></View>
                 ) : error ? (
-                    <View style={styles.centerContainer}>
-                        <Icon name="alert-circle" size={48} color="#DC2626" />
-                        <ThemedText style={styles.errorText}>{error}</ThemedText>
-                        <Pressable style={styles.retryButton} onPress={() => fetchEntries()}>
-                            <ThemedText style={styles.retryButtonText}>Try Again</ThemedText>
-                        </Pressable>
-                    </View>
-                ) : entries.length === 0 ? (
-                    <View style={styles.centerContainer}>
-                        <View style={styles.emptyIconWrap}>
-                            <Icon name="smile" size={48} color="#9CA3AF" />
-                        </View>
-                        <ThemedText style={styles.emptyTitle}>No check-ins yet</ThemedText>
-                        <ThemedText style={styles.emptySubtitle}>
-                            Start tracking your mood to see your history here
-                        </ThemedText>
-                        <Pressable style={styles.checkinButton} onPress={() => router.push('/(student)/(tabs)/mood')}>
-                            <ThemedText style={styles.checkinButtonText}>Check In Now</ThemedText>
+                    <View style={styles.center}>
+                        <Icon name="alert-circle" size={44} color="#DC2626" />
+                        <ThemedText style={styles.errText}>{error}</ThemedText>
+                        <Pressable style={styles.retryBtn} onPress={() => fetchEntries()}>
+                            <ThemedText style={styles.retryText}>Try Again</ThemedText>
                         </Pressable>
                     </View>
                 ) : (
-                    <ScrollView
-                        style={styles.scrollView}
-                        contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 24 }]}
-                        showsVerticalScrollIndicator={false}
-                        refreshControl={
-                            <RefreshControl
-                                refreshing={refreshing}
-                                onRefresh={() => fetchEntries(true)}
-                                tintColor="#0D8C4F"
-                                colors={['#0D8C4F']}
-                            />
-                        }
-                    >
-                        <ThemedText style={styles.sectionTitle}>
-                            {entries.length} {entries.length === 1 ? 'check-in' : 'check-ins'} this month
-                        </ThemedText>
-                        {entries.map((entry, index) => (
-                            <EntryCard key={entry.checkin_id} entry={entry} index={index} />
-                        ))}
-                    </ScrollView>
+                    <Animated.View style={{ flex: 1, opacity: contentFade }}>
+                        {tab === 0 ? <WeekView /> : <MonthView />}
+                    </Animated.View>
                 )}
             </Animated.View>
         </GlobalScreenWrapper>
@@ -275,177 +416,65 @@ export default function MoodHistoryScreen() {
 }
 
 const styles = StyleSheet.create({
-    header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingHorizontal: 16,
-        paddingVertical: 12,
-    },
-    backButton: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: '#F3F4F6',
-    },
-    headerTitle: {
-        fontSize: 18,
-        fontFamily: 'Inter_600SemiBold',
-        color: '#111827',
-    },
-    centerContainer: {
-        flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingHorizontal: 24,
-    },
-    loadingText: {
-        fontSize: 16,
-        color: '#6B7280',
-    },
-    errorText: {
-        fontSize: 16,
-        color: '#DC2626',
-        textAlign: 'center',
-        marginTop: 12,
-    },
-    retryButton: {
-        marginTop: 16,
-        backgroundColor: '#F3F4F6',
-        paddingVertical: 12,
-        paddingHorizontal: 24,
-        borderRadius: 50,
-    },
-    retryButtonText: {
-        fontSize: 14,
-        fontFamily: 'Inter_600SemiBold',
-        color: '#374151',
-    },
-    emptyIconWrap: {
-        width: 80,
-        height: 80,
-        borderRadius: 40,
-        backgroundColor: '#F3F4F6',
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginBottom: 16,
-    },
-    emptyTitle: {
-        fontSize: 18,
-        fontFamily: 'Inter_600SemiBold',
-        color: '#111827',
-        marginBottom: 8,
-    },
-    emptySubtitle: {
-        fontSize: 14,
-        color: '#6B7280',
-        textAlign: 'center',
-        marginBottom: 20,
-    },
-    checkinButton: {
-        backgroundColor: '#0D8C4F',
-        paddingVertical: 12,
-        paddingHorizontal: 24,
-        borderRadius: 50,
-    },
-    checkinButtonText: {
-        color: '#FFFFFF',
-        fontSize: 14,
-        fontFamily: 'Inter_600SemiBold',
-    },
-    scrollView: {
-        flex: 1,
-    },
-    scrollContent: {
-        paddingHorizontal: 16,
-        paddingTop: 8,
-    },
-    sectionTitle: {
-        fontSize: 14,
-        fontFamily: 'Inter_500Medium',
-        color: '#6B7280',
-        marginBottom: 12,
-    },
-    entryCard: {
-        backgroundColor: '#FFFFFF',
-        borderRadius: 16,
-        borderWidth: 1,
-        borderColor: '#E5E7EB',
-        padding: 16,
-        marginBottom: 12,
-        shadowColor: '#000',
-        shadowOpacity: 0.04,
-        shadowRadius: 8,
-        shadowOffset: { width: 0, height: 2 },
-        elevation: 2,
-    },
-    entryHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: 12,
-    },
-    moodBadge: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingVertical: 6,
-        paddingHorizontal: 12,
-        borderRadius: 50,
-        gap: 6,
-    },
-    moodEmoji: {
-        fontSize: 20,
-        lineHeight: 26,
-    },
-    moodLabel: {
-        fontSize: 14,
-        fontFamily: 'Inter_600SemiBold',
-    },
-    entryTime: {
-        fontSize: 13,
-        color: '#9CA3AF',
-        fontFamily: 'Inter_500Medium',
-    },
-    detailsRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: '#F9FAFB',
-        borderRadius: 12,
-        padding: 12,
-    },
-    detailItem: {
-        flex: 1,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 6,
-    },
-    detailDivider: {
-        width: 1,
-        height: 24,
-        backgroundColor: '#E5E7EB',
-    },
-    detailEmoji: {
-        fontSize: 18,
-        lineHeight: 24,
-    },
-    detailLabel: {
-        fontSize: 13,
-        color: '#374151',
-        fontFamily: 'Inter_500Medium',
-    },
-    commentSection: {
-        marginTop: 12,
-        paddingTop: 12,
-        borderTopWidth: 1,
-        borderTopColor: '#F3F4F6',
-    },
-    commentText: {
-        fontSize: 14,
-        color: '#6B7280',
-        fontStyle: 'italic',
-        lineHeight: 20,
-    },
+    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 10, gap: 12 },
+    headerBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+    seg: { flex: 1, maxWidth: 180, flexDirection: 'row', backgroundColor: '#F3F4F6', borderRadius: 24, padding: 4 },
+    segInd: { position: 'absolute', top: 4, left: 4, bottom: 4, backgroundColor: '#FFF', borderRadius: 20, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 3 },
+    segBtn: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 8, borderRadius: 20 },
+    segBtnActive: { backgroundColor: '#FFF' },
+    segText: { fontSize: 14, fontFamily: 'Inter_500Medium', color: '#6B7280' },
+    segTextActive: { color: '#111827', fontFamily: 'Inter_600SemiBold' },
+    center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
+    loadText: { fontSize: 15, color: '#6B7280' },
+    errText: { fontSize: 15, color: '#DC2626', marginTop: 10, textAlign: 'center' },
+    retryBtn: { marginTop: 14, backgroundColor: '#F3F4F6', paddingVertical: 10, paddingHorizontal: 22, borderRadius: 50 },
+    retryText: { fontSize: 14, fontFamily: 'Inter_600SemiBold', color: '#374151' },
+    scroll: { flex: 1 },
+    scrollPad: { paddingHorizontal: 16, paddingTop: 6 },
+
+    // Week View
+    dayBlock: { marginBottom: 18 },
+    dayRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
+    dayNum: { width: 34, alignItems: 'center' },
+    dayNumText: { fontSize: 20, fontFamily: 'Inter_700Bold', color: '#111827', lineHeight: 24 },
+    dayMo: { fontSize: 10, fontFamily: 'Inter_500Medium', color: '#9CA3AF', textTransform: 'uppercase' },
+    dayText: { fontSize: 14, fontFamily: 'Inter_600SemiBold', color: '#111827' },
+    daySub: { fontSize: 12, color: '#6B7280' },
+    card: { borderRadius: 14, padding: 12, marginBottom: 8, marginLeft: 44 },
+    cardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    cardLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    cardMood: { fontSize: 15, fontFamily: 'Inter_600SemiBold', color: '#111827' },
+    cardTime: { fontSize: 11, fontFamily: 'Inter_500Medium', color: '#6B7280' },
+    cardTags: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 8 },
+    tag: { backgroundColor: 'rgba(255,255,255,0.75)', paddingVertical: 3, paddingHorizontal: 9, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(0,0,0,0.04)' },
+    tagText: { fontSize: 11, fontFamily: 'Inter_500Medium', color: '#374151' },
+
+    // Month View
+    monthNav: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 16, marginBottom: 14 },
+    monthArrow: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+    monthTitle: { fontSize: 17, fontFamily: 'Inter_600SemiBold', color: '#111827' },
+    weekRow: { flexDirection: 'row', marginBottom: 6 },
+    weekLabel: { flex: 1, textAlign: 'center', fontSize: 10, fontFamily: 'Inter_500Medium', color: '#9CA3AF' },
+    grid: { flexDirection: 'row', flexWrap: 'wrap' },
+    cell: { width: '14.28%', alignItems: 'center', paddingVertical: 3, marginBottom: 6 },
+    circle: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
+    plus: { fontSize: 16, color: '#D1D5DB' },
+    cellDay: { fontSize: 10, fontFamily: 'Inter_500Medium', color: '#6B7280', marginTop: 3 },
+    cellDayToday: { color: '#0D8C4F', fontFamily: 'Inter_700Bold' },
+    summaryBox: { marginTop: 20, paddingTop: 18, borderTopWidth: 1, borderTopColor: '#E5E7EB' },
+    summaryTitle: { fontSize: 15, fontFamily: 'Inter_600SemiBold', color: '#111827', marginBottom: 14 },
+    summaryRow: { flexDirection: 'row', justifyContent: 'space-around' },
+    summaryItem: { alignItems: 'center' },
+    summaryCircle: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', marginBottom: 5 },
+    summaryLabel: { fontSize: 11, fontFamily: 'Inter_500Medium', color: '#374151' },
+    summaryCount: { fontSize: 10, color: '#9CA3AF', marginTop: 2 },
+    summaryNone: { fontSize: 13, color: '#9CA3AF', textAlign: 'center' },
+
+    // Empty
+    empty: { alignItems: 'center', paddingVertical: 50 },
+    emptyIcon: { width: 80, height: 80, borderRadius: 40, backgroundColor: '#ECFDF5', alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
+    emptyTitle: { fontSize: 17, fontFamily: 'Inter_600SemiBold', color: '#111827', marginBottom: 5 },
+    emptySub: { fontSize: 13, color: '#6B7280', marginBottom: 18 },
+    emptyBtn: { backgroundColor: '#0D8C4F', paddingVertical: 11, paddingHorizontal: 26, borderRadius: 50 },
+    emptyBtnText: { color: '#FFF', fontSize: 14, fontFamily: 'Inter_600SemiBold' },
 });

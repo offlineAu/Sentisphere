@@ -813,7 +813,7 @@ export default function AppointmentsScreen() {
               <View style={styles.noticeBox}>
                 <ThemedText style={styles.noticeTitle}>MEETING TYPE: FACE-TO-FACE ONLY</ThemedText>
                 <ThemedText style={styles.noticeText}>
-                  All meetings will be conducted in person at the Student Counseling Center, Building A, 2nd Floor. Please arrive 10 minutes early for your appointment.
+                  All meetings will be conducted in person at the Guidance Office is located at the CSM building First floor room number 104. Please arrive 10 minutes early for your appointment.
                 </ThemedText>
               </View>
 
