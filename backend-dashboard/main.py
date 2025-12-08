@@ -5557,8 +5557,18 @@ def get_top_stats(
     q_totals = text(
         """
         SELECT 
-            (SELECT COUNT(*) FROM user WHERE role = 'student') AS total_students,
-            (SELECT COUNT(*) FROM user WHERE is_active = TRUE) AS active_users
+            (SELECT COUNT(*) FROM user WHERE role = 'student') AS total_students
+        """
+    )
+    
+    q_active_users = text(
+        """
+        SELECT COUNT(DISTINCT ec.user_id) AS active_users
+        FROM emotional_checkin ec
+        JOIN user u ON ec.user_id = u.user_id
+        WHERE u.role = 'student'
+          AND ec.created_at >= :start
+          AND ec.created_at <= :end
         """
     )
 
@@ -5597,6 +5607,10 @@ def get_top_stats(
 
     with engine.connect() as conn:
         totals_row = conn.execute(q_totals).mappings().first()
+        active_row = conn.execute(
+            q_active_users,
+            {"start": start_dt.strftime("%Y-%m-%d %H:%M:%S"), "end": end_dt.strftime("%Y-%m-%d %H:%M:%S")},
+        ).mappings().first()
         at_risk_row = conn.execute(
             q_at_risk,
             {"start": start_dt.strftime("%Y-%m-%d %H:%M:%S"), "end": end_dt.strftime("%Y-%m-%d %H:%M:%S")},
@@ -5608,7 +5622,7 @@ def get_top_stats(
 
         return {
             "total_students": totals_row["total_students"],
-            "active_users": totals_row["active_users"],
+            "active_users": active_row["active_users"] if active_row else 0,
             "at_risk_students": at_risk_row["at_risk_students"] if at_risk_row else 0,
             "avg_wellness_score": float(wellness_row["avg_wellness_score"] or 0) if wellness_row else 0.0,
         }
