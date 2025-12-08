@@ -144,7 +144,7 @@ function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
               key={route.key}
               onPress={onPress}
               onLongPress={onLongPress}
-              onPressIn={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch {} } }}
+              onPressIn={() => { if (Platform.OS !== 'web') { try { Haptics.selectionAsync() } catch { } } }}
               accessibilityRole="button"
               accessibilityState={isFocused ? { selected: true } : {}}
               style={styles.tabItem}
@@ -166,40 +166,48 @@ function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
 
 const styles = StyleSheet.create({
   tabWrap: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
     backgroundColor: 'transparent',
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
+    pointerEvents: 'box-none',
   },
   tabBar: {
     flexDirection: 'row',
-    backgroundColor: '#F8F9FA',
-    borderRadius: 24,
-    paddingVertical: 8,
-    paddingHorizontal: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.92)',
+    borderRadius: 28,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.12,
-    shadowRadius: 14,
-    elevation: 6,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
+    elevation: 8,
     gap: 8,
     overflow: 'visible',
+    // iOS blur effect fallback with border
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.6)',
   },
   tabItem: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 10,
-    borderRadius: 18,
+    borderRadius: 20,
     minHeight: 54,
     overflow: 'hidden',
   },
   activeBg: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: '#1F2937',
-    borderRadius: 18,
+    borderRadius: 20,
   },
   indicator: {
     position: 'absolute',
-    bottom: 6,
+    bottom: 8,
     left: 0,
     height: 3,
     borderRadius: 3,
@@ -216,7 +224,6 @@ export default function StudentTabsLayout() {
       tabBar={(props) => <CustomTabBar {...props} />}
       screenOptions={{
         headerShown: false,
-        // Note: tabBar styling handled by CustomTabBar
         tabBarActiveTintColor: tint,
         tabBarInactiveTintColor: palette.icon,
       }}

@@ -12,6 +12,7 @@ import * as SecureStore from 'expo-secure-store';
 import { router } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 
 const TOTAL_STEPS = 5;
 
@@ -433,26 +434,174 @@ export default function MoodScreen() {
 
   const getSelectedMoodEmoji = () => moods.find(m => m.key === selectedMood)?.emoji || '😊';
 
+  // Success overlay animations
+  const successOverlayAnim = useRef(new Animated.Value(0)).current;
+  const successIconAnim = useRef(new Animated.Value(0)).current;
+  const successTextAnim = useRef(new Animated.Value(0)).current;
+  const successSubtextAnim = useRef(new Animated.Value(0)).current;
+  const successButtonAnim = useRef(new Animated.Value(0)).current;
+
+  const runSuccessAnimation = useCallback(() => {
+    successOverlayAnim.setValue(0);
+    successIconAnim.setValue(0);
+    successTextAnim.setValue(0);
+    successSubtextAnim.setValue(0);
+    successButtonAnim.setValue(0);
+
+    if (Platform.OS !== 'web') { try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success) } catch { } }
+
+    Animated.sequence([
+      Animated.timing(successOverlayAnim, {
+        toValue: 1,
+        duration: 400,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.stagger(100, [
+        Animated.spring(successIconAnim, {
+          toValue: 1,
+          stiffness: 180,
+          damping: 12,
+          useNativeDriver: true,
+        }),
+        Animated.timing(successTextAnim, {
+          toValue: 1,
+          duration: 400,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(successSubtextAnim, {
+          toValue: 1,
+          duration: 400,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(successButtonAnim, {
+          toValue: 1,
+          duration: 400,
+          easing: Easing.out(Easing.back(1.1)),
+          useNativeDriver: true,
+        }),
+      ]),
+    ]).start();
+  }, []);
+
+  useEffect(() => {
+    if (submitted) {
+      runSuccessAnimation();
+    }
+  }, [submitted, runSuccessAnimation]);
+
   if (submitted) {
+    const moodData = moods.find(m => m.key === selectedMood);
+    const moodColor = moodData?.color || '#10B981';
+    const moodEmoji = moodData?.emoji || '😊';
+
+    // Dynamic gradient based on mood
+    const getGradientColors = (): [string, string, string] => {
+      switch (selectedMood) {
+        case 'awesome': return ['#EA580C', '#F97316', '#FB923C'];
+        case 'great': return ['#D97706', '#F59E0B', '#FBBF24'];
+        case 'loved': return ['#DB2777', '#EC4899', '#F472B6'];
+        case 'okay': return ['#0D8C4F', '#10B981', '#34D399'];
+        case 'anxious': return ['#059669', '#10B981', '#6EE7B7'];
+        case 'meh': return ['#4B5563', '#6B7280', '#9CA3AF'];
+        case 'bad': return ['#0284C7', '#0EA5E9', '#38BDF8'];
+        case 'terrible': return ['#7C3AED', '#8B5CF6', '#A78BFA'];
+        case 'upset': return ['#DC2626', '#EF4444', '#F87171'];
+        default: return ['#0D8C4F', '#10B981', '#34D399'];
+      }
+    };
+
     return (
       <GlobalScreenWrapper backgroundColor="#FFFFFF">
-        <View style={styles.successContainer}>
-          <Animated.View style={{ alignItems: 'center', gap: 16, opacity: successAnim, transform: [{ scale: successAnim.interpolate({ inputRange: [0, 1], outputRange: [0.8, 1] }) }] }}>
-            <View style={styles.successIconWrap}>
-              <Image source={require('../../../../assets/images/verified.png')} style={{ width: 100, height: 100 }} accessibilityLabel="Success" />
-            </View>
-            <ThemedText style={styles.successTitle}>Thanks for checking in!</ThemedText>
-            <ThemedText style={styles.successSubtitle}>Your mood has been recorded. Keep tracking to see your patterns.</ThemedText>
-            <View style={styles.successActions}>
-              <Pressable style={styles.primaryButton} onPress={() => router.push('/(student)/(tabs)/mood/mood-history')}>
-                <ThemedText style={styles.primaryButtonText}>Mood Log</ThemedText>
+        <Animated.View style={[styles.successOverlay, { opacity: successOverlayAnim }]}>
+          <LinearGradient
+            colors={getGradientColors()}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.successGradient}
+          >
+            {/* Decorative circles */}
+            <View style={[styles.successDecor, styles.successDecor1]} />
+            <View style={[styles.successDecor, styles.successDecor2]} />
+            <View style={[styles.successDecor, styles.successDecor3]} />
+            <View style={[styles.successDecor, styles.successDecor4]} />
+
+            {/* Success icon with emoji */}
+            <Animated.View style={[
+              styles.successIconWrapNew,
+              {
+                width: isSmallScreen ? 100 : 120,
+                height: isSmallScreen ? 100 : 120,
+                borderRadius: isSmallScreen ? 50 : 60,
+                opacity: successIconAnim,
+                transform: [
+                  { scale: successIconAnim.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1] }) },
+                ],
+              },
+            ]}>
+              <ThemedText style={[styles.successEmojiLarge, { fontSize: isSmallScreen ? 44 : 56 }]}>{moodEmoji}</ThemedText>
+            </Animated.View>
+
+            {/* Success title */}
+            <Animated.View style={[
+              styles.successTextWrap,
+              {
+                opacity: successTextAnim,
+                transform: [{ translateY: successTextAnim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
+              },
+            ]}>
+              <ThemedText style={[styles.successTitleNew, { fontSize: isSmallScreen ? 28 : 36 }]}>Mood Logged!</ThemedText>
+              <ThemedText style={[styles.successBadge, { fontSize: isSmallScreen ? 14 : 16 }]}>
+                {moodData?.label || 'Good'} vibes recorded ✨
+              </ThemedText>
+            </Animated.View>
+
+            {/* Encouraging message */}
+            <Animated.View style={[
+              styles.successMessageWrap,
+              {
+                maxWidth: isSmallScreen ? 300 : 340,
+                opacity: successSubtextAnim,
+                transform: [{ translateY: successSubtextAnim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
+              },
+            ]}>
+              <View style={[styles.successMessageCard, { padding: isSmallScreen ? 14 : 18 }]}>
+                <View style={[styles.successMessageIconWrap, { width: isSmallScreen ? 32 : 40, height: isSmallScreen ? 32 : 40 }]}>
+                  <Icon name="heart" size={isSmallScreen ? 16 : 20} color={moodColor} />
+                </View>
+                <ThemedText style={[styles.successMessageText, { fontSize: isSmallScreen ? 13 : 15 }]}>
+                  Thanks for checking in, {displayName || 'friend'}! Keep tracking to discover your mood patterns.
+                </ThemedText>
+              </View>
+            </Animated.View>
+
+            {/* Action buttons */}
+            <Animated.View style={[
+              styles.successButtonWrap,
+              {
+                bottom: insets.bottom + 100, // Account for floating nav bar
+                opacity: successButtonAnim,
+                transform: [{ translateY: successButtonAnim.interpolate({ inputRange: [0, 1], outputRange: [30, 0] }) }],
+              },
+            ]}>
+              <Pressable
+                onPress={() => router.push('/(student)/(tabs)/mood/mood-history')}
+                style={({ pressed }) => [styles.successPrimaryBtn, { paddingVertical: isSmallScreen ? 14 : 16 }, pressed && { opacity: 0.9, transform: [{ scale: 0.98 }] }]}
+              >
+                <Icon name="activity" size={isSmallScreen ? 16 : 18} color={moodColor} />
+                <ThemedText style={[styles.successPrimaryBtnText, { color: moodColor, fontSize: isSmallScreen ? 14 : 16 }]}>View Mood History</ThemedText>
               </Pressable>
-              <Pressable style={styles.secondaryButton} onPress={reset}>
-                <ThemedText style={styles.secondaryButtonText}>Check in again</ThemedText>
+              <Pressable
+                onPress={reset}
+                style={({ pressed }) => [styles.successSecondaryBtn, pressed && { opacity: 0.8 }]}
+              >
+                <ThemedText style={[styles.successSecondaryBtnText, { fontSize: isSmallScreen ? 13 : 15 }]}>Check In Again</ThemedText>
               </Pressable>
-            </View>
-          </Animated.View>
-        </View>
+            </Animated.View>
+          </LinearGradient>
+        </Animated.View>
       </GlobalScreenWrapper>
     );
   }
@@ -609,7 +758,7 @@ export default function MoodScreen() {
         </Animated.View>
 
         {step === 4 && (
-          <Animated.View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 16), paddingHorizontal: HORIZONTAL_PADDING }, makeFadeUp(entrance.footer)]}>
+          <Animated.View style={[styles.footer, { paddingBottom: insets.bottom + 100, paddingHorizontal: HORIZONTAL_PADDING }, makeFadeUp(entrance.footer)]}>
             <Pressable
               style={[styles.continueButton, saving && styles.continueButtonDisabled]}
               onPress={handleSubmit}
@@ -671,7 +820,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   stepScrollInner: {
-    paddingBottom: 32,
+    paddingBottom: 120, // Account for floating nav bar
     flexGrow: 1,
   },
   stepHeader: {
@@ -907,5 +1056,147 @@ const styles = StyleSheet.create({
     color: '#DC2626',
     fontSize: 14,
     textAlign: 'center',
+  },
+  // New gradient success overlay styles
+  successOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 100,
+  },
+  successGradient: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  successDecor: {
+    position: 'absolute',
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  successDecor1: {
+    width: 280,
+    height: 280,
+    top: -100,
+    right: -80,
+  },
+  successDecor2: {
+    width: 200,
+    height: 200,
+    bottom: -80,
+    left: -60,
+  },
+  successDecor3: {
+    width: 140,
+    height: 140,
+    top: '35%',
+    left: -50,
+  },
+  successDecor4: {
+    width: 100,
+    height: 100,
+    bottom: '25%',
+    right: -30,
+  },
+  successIconWrapNew: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 24,
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 10,
+  },
+  successEmojiLarge: {
+    fontSize: 56,
+    lineHeight: 72,
+    includeFontPadding: false,
+  },
+  successTextWrap: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  successTitleNew: {
+    fontSize: 36,
+    fontFamily: 'Inter_700Bold',
+    color: '#FFFFFF',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  successBadge: {
+    fontSize: 16,
+    fontFamily: 'Inter_500Medium',
+    color: 'rgba(255,255,255,0.9)',
+    textAlign: 'center',
+  },
+  successMessageWrap: {
+    width: '100%',
+    maxWidth: 340,
+    marginBottom: 20,
+  },
+  successMessageCard: {
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    borderRadius: 20,
+    padding: 18,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 14,
+  },
+  successMessageIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  successMessageText: {
+    flex: 1,
+    fontSize: 15,
+    fontFamily: 'Inter_500Medium',
+    color: '#FFFFFF',
+    lineHeight: 22,
+  },
+  successButtonWrap: {
+    position: 'absolute',
+    bottom: 50,
+    left: 24,
+    right: 24,
+    gap: 12,
+  },
+  successPrimaryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 16,
+    borderRadius: 50,
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+  },
+  successPrimaryBtnText: {
+    fontSize: 16,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  successSecondaryBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+  },
+  successSecondaryBtnText: {
+    fontSize: 15,
+    fontFamily: 'Inter_500Medium',
+    color: 'rgba(255,255,255,0.9)',
   },
 });
