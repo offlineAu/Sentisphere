@@ -30,19 +30,23 @@ export default function SplashIntro() {
   const [isExiting, setIsExiting] = useState(false)
   const [isChecking, setIsChecking] = useState(true) // Check auth/terms on mount
 
-  // Auto-redirect: If terms accepted AND authenticated, skip to student dashboard
+  // Auto-redirect: Only skip to dashboard if user is FULLY authenticated
+  // This means: terms accepted AND token exists AND token is VALID (verified with backend)
   useEffect(() => {
+    const API = process.env.EXPO_PUBLIC_API_URL || 'https://sentisphere-production.up.railway.app'
+
     const checkAndRedirect = async () => {
       try {
-        // Check if terms are accepted
+        // 1. Check if terms are accepted
         const termsAccepted = await hasAcceptedTerms()
         if (!termsAccepted) {
-          // Terms not accepted - show splash, user needs to go through onboarding
+          // Terms not accepted - show Entry screen
+          console.log('[Splash] Terms not accepted - showing Entry screen')
           setIsChecking(false)
           return
         }
 
-        // Check if user has auth token
+        // 2. Check if user has auth token
         let token: string | null = null
         if (Platform.OS === 'web') {
           token = typeof window !== 'undefined' ? window.localStorage?.getItem('auth_token') ?? null : null
@@ -50,12 +54,42 @@ export default function SplashIntro() {
           token = await SecureStore.getItemAsync('auth_token')
         }
 
-        if (token) {
-          // Both terms accepted AND has token - go directly to student dashboard
-          router.replace('/(student)/(tabs)/dashboard')
-        } else {
-          // Terms accepted but no token - go to auth
-          router.replace('/auth')
+        if (!token) {
+          // No token - show Entry screen
+          console.log('[Splash] No token found - showing Entry screen')
+          setIsChecking(false)
+          return
+        }
+
+        // 3. VALIDATE token with backend before allowing skip to dashboard
+        // This prevents invalid/expired tokens from bypassing Entry and causing flash/loop
+        console.log('[Splash] Token found, validating with backend...')
+        try {
+          const response = await fetch(`${API}/api/auth/mobile/me`, {
+            headers: { Authorization: `Bearer ${token}` }
+          })
+
+          if (response.ok) {
+            // Token is VALID - skip to dashboard
+            console.log('[Splash] ✓ Token valid - skipping to dashboard')
+            router.replace('/(student)/(tabs)/dashboard')
+          } else {
+            // Token is INVALID/EXPIRED - clear it and show Entry screen
+            console.log('[Splash] ✗ Token invalid (status:', response.status, ') - showing Entry screen')
+
+            // Clear the invalid token
+            if (Platform.OS === 'web') {
+              try { window.localStorage?.removeItem('auth_token') } catch { }
+            } else {
+              try { await SecureStore.deleteItemAsync('auth_token') } catch { }
+            }
+
+            setIsChecking(false)
+          }
+        } catch (networkError) {
+          // Network error - show Entry screen (don't assume token is valid)
+          console.log('[Splash] ✗ Token validation failed (network error) - showing Entry screen')
+          setIsChecking(false)
         }
       } catch (e) {
         // On error, show splash normally
@@ -207,9 +241,11 @@ export default function SplashIntro() {
       // Check if terms already accepted
       const termsAccepted = await hasAcceptedTerms()
       if (termsAccepted) {
-        router.replace('/auth')
+        // Terms accepted - go to auth (use push to preserve back navigation)
+        router.push('/auth')
       } else {
-        router.replace('/onboarding/terms')
+        // Terms not accepted - go to onboarding (use push to preserve back navigation)
+        router.push('/onboarding/terms')
       }
     })
   }, [isExiting, buttonScale, screenOpacity])
