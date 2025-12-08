@@ -615,25 +615,7 @@ export default function CounselorDashboard() {
               ? (appointmentLogsRes as any).data
               : []
         );
-        // Ensure we show ALL logs (aggregate all pages and dedupe)
-        try {
-          const allLogs = await fetchAllPaginated('/appointment-logs', { range: 'all' });
-          if (Array.isArray(allLogs) && allLogs.length) {
-            const seen = new Set<string>();
-            const unique = allLogs.filter((log: any) => {
-              const key = `${log?.log_id ?? ''}-${log?.user_id ?? ''}-${log?.downloaded_at ?? log?.created_at ?? ''}-${log?.form_type ?? ''}`;
-              if (seen.has(key)) return false;
-              seen.add(key);
-              return true;
-            });
-            setAppointmentLogs(unique);
-          }
-        } catch (e) {
-          console.warn('Failed to fetch all appointment logs', e);
-        }
-
-        // Add a small delay to ensure all data is rendered before hiding the spinner
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        // Note: Removed duplicate fetchAllPaginated call that was causing 50+ repeated requests
       } catch (error) {
         console.error('Error fetching dashboard data:', error);
       } finally {
