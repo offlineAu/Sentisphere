@@ -71,3 +71,40 @@ export async function clearTermsAccepted(): Promise<void> {
 export function getTermsVersion(): string {
     return TERMS_VERSION;
 }
+
+// =============================================================================
+// DEV-ONLY: Force onboarding flow after logout (for demo purposes)
+// This is an in-memory flag that does NOT persist to storage.
+// It only works in __DEV__ mode and is used to show Entry → Terms → Auth
+// even if the user has already accepted terms.
+// =============================================================================
+
+let _forceOnboardingAfterLogout = false;
+
+/**
+ * [DEV-ONLY] Set flag to force onboarding flow on next Entry screen visit.
+ * This makes the Entry screen navigate to Terms even if already accepted.
+ * Only works in __DEV__ mode.
+ */
+export function setForceOnboardingAfterLogout(value: boolean): void {
+    if (__DEV__) {
+        _forceOnboardingAfterLogout = value;
+        if (value) {
+            console.log('[Onboarding] DEV: Force onboarding flag SET - Terms will show after Get Started');
+        }
+    }
+}
+
+/**
+ * [DEV-ONLY] Check if onboarding should be forced.
+ * Returns true only if: __DEV__ is true AND flag is set.
+ * Automatically clears the flag after reading (one-time use).
+ */
+export function shouldForceOnboarding(): boolean {
+    if (__DEV__ && _forceOnboardingAfterLogout) {
+        _forceOnboardingAfterLogout = false; // Clear after reading (one-time use)
+        console.log('[Onboarding] DEV: Force onboarding flag CONSUMED - showing Terms');
+        return true;
+    }
+    return false;
+}
