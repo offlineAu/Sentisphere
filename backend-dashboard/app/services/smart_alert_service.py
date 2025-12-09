@@ -489,24 +489,20 @@ class SmartAlertService:
         commit: bool = True
     ) -> bool:
         """
-        Mark alert as resolved when notification is successfully sent.
+        DISABLED: Previously marked alerts as resolved when notification was sent.
+        
+        Now does nothing - alerts should only be resolved through:
+        1. Counselor conversation with student (check_conversation_for_resolution)
+        2. Manual resolution by counselor
+        
+        Kept for backward compatibility with push_notification_service.
         """
-        alert = db.get(Alert, alert_id)
-        if not alert:
-            return False
-        
-        if alert.status == AlertStatus.RESOLVED:
-            return True
-        
-        alert.status = AlertStatus.RESOLVED
-        alert.resolved_at = datetime.utcnow()
-        db.add(alert)
-        
-        if commit:
-            db.commit()
-        
-        logger.info(f"Alert {alert_id} resolved via notification")
-        return True
+        # Log but DO NOT resolve - alerts require meaningful intervention
+        logger.info(
+            f"Alert {alert_id}: notification sent. "
+            "Alert remains OPEN - requires counselor intervention to resolve."
+        )
+        return False  # Indicate no resolution occurred
 
     @staticmethod
     def check_conversation_for_resolution(
