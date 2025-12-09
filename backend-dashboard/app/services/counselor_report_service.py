@@ -491,9 +491,18 @@ class CounselorReportService:
                 description += f" ({direction} {abs(change_percent):.1f}% from previous week)"
             
             # Build recommendation based on data
+            # Handle dominant_emotions as either list of strings or list of dicts
+            emotion_labels = []
+            if dominant_emotions:
+                for e in dominant_emotions[:3]:
+                    if isinstance(e, dict):
+                        emotion_labels.append(e.get('emotion', ''))
+                    elif isinstance(e, str):
+                        emotion_labels.append(e)
+            
             recommendation = cls._build_recommendation(
                 int(change_percent) if change_percent else 0,
-                [e.get('emotion', '') for e in dominant_emotions[:3]] if dominant_emotions else []
+                emotion_labels
             )
             
             records.append({
