@@ -448,9 +448,20 @@ class CounselorReportService:
             end_date = end.date() if isinstance(end, datetime) else end
             filters.append(AIInsight.timeframe_end <= end_date)
         
+        # DEBUG LOGGING
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"[weekly_insights] Query filters: start={start}, end={end}")
+        logger.info(f"[weekly_insights] Date range: {start_date if start else 'None'} to {end_date if end else 'None'}")
+        logger.info(f"[weekly_insights] Weeks limit: {weeks}")
+        
         stored_insights = db.query(AIInsight).filter(
             *filters
         ).order_by(AIInsight.timeframe_start.desc()).limit(weeks).all()
+        
+        logger.info(f"[weekly_insights] Found {len(stored_insights)} insights")
+        for idx, ins in enumerate(stored_insights):
+            logger.info(f"[weekly_insights] Insight {idx}: id={ins.insight_id}, timeframe={ins.timeframe_start} to {ins.timeframe_end}, user_id={ins.user_id}")
         
         records: List[Dict[str, Any]] = []
         
