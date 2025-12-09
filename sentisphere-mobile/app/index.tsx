@@ -6,7 +6,7 @@ import { Colors } from '@/constants/theme'
 import { Icon } from '@/components/ui/icon'
 import * as Haptics from 'expo-haptics'
 import { SvgUri } from 'react-native-svg'
-import { hasAcceptedTerms } from '@/utils/onboarding'
+import { hasAcceptedTerms, shouldForceOnboarding } from '@/utils/onboarding'
 import * as SecureStore from 'expo-secure-store'
 
 // Floating icon configuration
@@ -238,13 +238,17 @@ export default function SplashIntro() {
       easing: Easing.in(Easing.cubic),
       useNativeDriver: true,
     }).start(async () => {
+      // DEV-ONLY: Check if we should force onboarding flow (for demo purposes after logout)
+      const forceOnboarding = shouldForceOnboarding()
+
       // Check if terms already accepted
       const termsAccepted = await hasAcceptedTerms()
-      if (termsAccepted) {
-        // Terms accepted - go to auth (use push to preserve back navigation)
+
+      if (termsAccepted && !forceOnboarding) {
+        // Terms accepted and not forcing - go to auth (use push to preserve back navigation)
         router.push('/auth')
       } else {
-        // Terms not accepted - go to onboarding (use push to preserve back navigation)
+        // Terms not accepted OR forcing onboarding - go to terms screen
         router.push('/onboarding/terms')
       }
     })

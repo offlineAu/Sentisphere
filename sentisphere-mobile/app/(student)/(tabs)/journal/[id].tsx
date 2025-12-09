@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { 
-  StyleSheet, 
-  View, 
-  Animated, 
-  Easing, 
-  Pressable, 
-  Platform, 
-  Modal, 
-  ScrollView, 
+import {
+  StyleSheet,
+  View,
+  Animated,
+  Easing,
+  Pressable,
+  Platform,
+  Modal,
+  ScrollView,
   TextInput,
   KeyboardAvoidingView,
   ActivityIndicator,
@@ -36,19 +36,19 @@ export default function JournalDetailScreen() {
   const [apiTitle, setApiTitle] = useState<string | null>(null);
   const [content, setContent] = useState('');
   const [createdAt, setCreatedAt] = useState<string | null>(null);
-  
+
   // Edit mode state
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
-  
+
   // Delete state
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  
+
   // Animation refs
   const confirmScale = useRef(new Animated.Value(0)).current;
   const cardOpacity = useRef(new Animated.Value(0)).current;
@@ -73,7 +73,7 @@ export default function JournalDetailScreen() {
   });
 
   useEffect(() => { runEntrance(); }, []);
-  useFocusEffect(useCallback(() => { runEntrance(); return () => {}; }, []));
+  useFocusEffect(useCallback(() => { runEntrance(); return () => { }; }, []));
 
   const getAuthToken = async (): Promise<string | null> => {
     if (Platform.OS === 'web') {
@@ -81,10 +81,10 @@ export default function JournalDetailScreen() {
     }
     try { return await SecureStore.getItemAsync('auth_token') } catch { return null }
   };
-  
+
   const clearAuthToken = async () => {
-    if (Platform.OS === 'web') { try { (window as any)?.localStorage?.removeItem('auth_token') } catch {} ; return; }
-    try { await SecureStore.deleteItemAsync('auth_token') } catch {}
+    if (Platform.OS === 'web') { try { (window as any)?.localStorage?.removeItem('auth_token') } catch { }; return; }
+    try { await SecureStore.deleteItemAsync('auth_token') } catch { }
   };
 
   // Fetch journal entry function (reusable for initial load and after save)
@@ -94,12 +94,12 @@ export default function JournalDetailScreen() {
     try {
       const tok = await getAuthToken();
       if (!tok) { setError('Not signed in'); setLoading(false); return; }
-      
+
       // No trailing slash - correct endpoint
-      const res = await fetch(`${API}/api/journals/${id}`, { 
-        headers: { Authorization: `Bearer ${tok}` } 
+      const res = await fetch(`${API}/api/journals/${id}`, {
+        headers: { Authorization: `Bearer ${tok}` }
       });
-      
+
       if (res.status === 401) {
         await clearAuthToken();
         router.replace('/auth');
@@ -170,7 +170,7 @@ export default function JournalDetailScreen() {
   // === EDIT MODE HANDLERS ===
   const handleStartEdit = () => {
     if (Platform.OS !== 'web') {
-      try { Haptics.selectionAsync(); } catch {}
+      try { Haptics.selectionAsync(); } catch { }
     }
     setEditContent(content);
     setSaveError(null);
@@ -179,7 +179,7 @@ export default function JournalDetailScreen() {
 
   const handleCancelEdit = () => {
     if (Platform.OS !== 'web') {
-      try { Haptics.selectionAsync(); } catch {}
+      try { Haptics.selectionAsync(); } catch { }
     }
     setIsEditing(false);
     setEditContent('');
@@ -188,30 +188,30 @@ export default function JournalDetailScreen() {
 
   const handleSaveEdit = async () => {
     if (isSaving) return;
-    
+
     // Dismiss keyboard first
     Keyboard.dismiss();
-    
+
     const trimmedContent = editContent.trim();
     if (!trimmedContent) {
       setSaveError('Content cannot be empty');
       return;
     }
-    
+
     setIsSaving(true);
     setSaveError(null);
-    
+
     // Store previous content for rollback
     const previousContent = content;
-    
+
     try {
       const tok = await getAuthToken();
       if (!tok) throw new Error('Not signed in');
-      
+
       // Correct PATCH request - no trailing slash, correct body shape
       const url = `${API}/api/journals/${id}`;
       console.log('[Journal] PATCH request to:', url);
-      
+
       const res = await fetch(url, {
         method: 'PATCH',
         headers: {
@@ -220,46 +220,46 @@ export default function JournalDetailScreen() {
         },
         body: JSON.stringify({ content: trimmedContent }),
       });
-      
+
       console.log('[Journal] PATCH response status:', res.status);
-      
+
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
         console.error('[Journal] PATCH error:', res.status, errData);
         throw new Error(errData.detail || `Failed to save (${res.status})`);
       }
-      
+
       // Parse response to get updated data
       const updatedData = await res.json().catch(() => null);
       console.log('[Journal] PATCH success, updated data:', updatedData);
-      
+
       // Update local state with server response or our edited content
       if (updatedData?.content) {
         setContent(updatedData.content);
       } else {
         setContent(trimmedContent);
       }
-      
+
       // Re-fetch to ensure we have the latest data from server
       await fetchJournalEntry(false);
-      
+
       // Success feedback
       if (Platform.OS !== 'web') {
-        try { await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
+        try { await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch { }
       }
-      
+
       // Exit edit mode and show toast
       setIsEditing(false);
       setEditContent('');
       setShowSaveSuccess(true);
-      
+
     } catch (e: any) {
       console.error('[Journal] Save failed:', e);
       // Revert to previous content
       setContent(previousContent);
       setSaveError(e?.message || 'Unable to save changes');
       if (Platform.OS !== 'web') {
-        try { await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error); } catch {}
+        try { await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error); } catch { }
       }
     } finally {
       setIsSaving(false);
@@ -287,7 +287,7 @@ export default function JournalDetailScreen() {
 
   const handleDeletePress = () => {
     if (Platform.OS !== 'web') {
-      try { Haptics.selectionAsync(); } catch {}
+      try { Haptics.selectionAsync(); } catch { }
     }
     setDeleteError(null);
     confirmScale.setValue(0);
@@ -302,7 +302,7 @@ export default function JournalDetailScreen() {
     try {
       await addDeletedJournalId(id);
       if (Platform.OS !== 'web') {
-        try { await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
+        try { await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch { }
       }
       closeConfirm(() => router.replace('/(student)/(tabs)/journal'));
     } catch (e: any) {
@@ -319,7 +319,7 @@ export default function JournalDetailScreen() {
       <View style={[styles.container, { paddingTop: insets.top }]}>
         {/* Edit mode header */}
         <View style={styles.editHeader}>
-          <Pressable 
+          <Pressable
             onPress={handleCancelEdit}
             disabled={isSaving}
             style={({ pressed }) => [styles.headerBtn, pressed && { opacity: 0.7 }, isSaving && { opacity: 0.5 }]}
@@ -329,10 +329,10 @@ export default function JournalDetailScreen() {
             <Icon name="x" size={20} color="#6B7280" />
             <ThemedText style={styles.cancelText}>Cancel</ThemedText>
           </Pressable>
-          
+
           <ThemedText style={styles.editHeaderTitle}>Editing</ThemedText>
-          
-          <Pressable 
+
+          <Pressable
             onPress={handleSaveEdit}
             disabled={isSaving}
             style={({ pressed }) => [
@@ -355,8 +355,8 @@ export default function JournalDetailScreen() {
           </Pressable>
         </View>
 
-        <KeyboardAvoidingView 
-          style={{ flex: 1 }} 
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
           <ScrollView
@@ -370,12 +370,6 @@ export default function JournalDetailScreen() {
             <View style={styles.dateLine}>
               <Icon name="calendar" size={14} color="#9CA3AF" />
               <ThemedText style={styles.dateText}>{when}</ThemedText>
-              {timeStr ? (
-                <>
-                  <View style={styles.dateDot} />
-                  <ThemedText style={styles.dateText}>{timeStr}</ThemedText>
-                </>
-              ) : null}
             </View>
 
             {/* Full-page TextInput - Apple Notes style */}
@@ -419,17 +413,17 @@ export default function JournalDetailScreen() {
 
       {/* View mode header */}
       <Animated.View style={[styles.viewHeader, makeFadeUp(entranceHeader)]}>
-        <Pressable 
-          onPress={() => router.replace('/(student)/(tabs)/journal')} 
-          accessibilityRole="button" 
+        <Pressable
+          onPress={() => router.replace('/(student)/(tabs)/journal')}
+          accessibilityRole="button"
           style={({ pressed }) => [styles.headerBtn, pressed && { opacity: 0.7 }]}
           accessibilityLabel="Go back to journal list"
         >
           <Icon name="arrow-left" size={20} color="#047857" />
         </Pressable>
-        
+
         <View style={styles.headerActions}>
-          <Pressable 
+          <Pressable
             onPress={handleStartEdit}
             style={({ pressed }) => [styles.headerIconBtn, pressed && { opacity: 0.7 }]}
             accessibilityRole="button"
@@ -437,7 +431,7 @@ export default function JournalDetailScreen() {
           >
             <Icon name="edit-2" size={20} color="#047857" />
           </Pressable>
-          <Pressable 
+          <Pressable
             onPress={handleDeletePress}
             style={({ pressed }) => [styles.headerIconBtn, pressed && { opacity: 0.7 }]}
             accessibilityRole="button"
@@ -471,17 +465,11 @@ export default function JournalDetailScreen() {
           >
             {/* Title */}
             <ThemedText style={styles.viewTitle}>{title}</ThemedText>
-            
+
             {/* Date line */}
             <View style={styles.dateLine}>
               <Icon name="calendar" size={14} color="#9CA3AF" />
               <ThemedText style={styles.dateText}>{when}</ThemedText>
-              {timeStr ? (
-                <>
-                  <View style={styles.dateDot} />
-                  <ThemedText style={styles.dateText}>{timeStr}</ThemedText>
-                </>
-              ) : null}
             </View>
 
             {/* Subtle divider */}
@@ -548,7 +536,7 @@ export default function JournalDetailScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FAFAF8', // Warm off-white/cream background
+    backgroundColor: '#FFFFFF', // Pure white background
   },
   // === HEADERS === (transparent, no white box)
   editHeader: {
