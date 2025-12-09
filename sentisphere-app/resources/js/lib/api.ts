@@ -11,13 +11,15 @@ if (existing) {
   api.defaults.headers.common['Authorization'] = `Bearer ${existing}`;
 }
 
-// Response interceptor to handle 401 Unauthorized responses
+// Response interceptor to handle errors globally
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    const status = error.response?.status;
+    const url = error.config?.url || '';
+    
+    if (status === 401) {
       // Don't trigger on login/auth endpoints
-      const url = error.config?.url || '';
       if (!url.includes('/auth/token') && !url.includes('/auth/login')) {
         // Dispatch custom event for session manager to handle
         if (typeof window !== 'undefined') {
@@ -26,7 +28,14 @@ api.interceptors.response.use(
           }));
         }
       }
+    } else if (status === 404) {
+      // Log 404s at debug level - these are often expected (deleted resources)
+      console.debug(`[API] Resource not found: ${url}`);
+    } else if (status >= 500) {
+      // Log server errors
+      console.error(`[API] Server error (${status}): ${url}`, error.response?.data);
     }
+    
     return Promise.reject(error);
   }
 );

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useSidebar } from "./SidebarContext";
 import { router, usePage } from '@inertiajs/react';
 import { logoutFastApi, sessionStatus } from '../lib/auth';
@@ -6,8 +6,7 @@ import { Home as HomeOutline, MessageDots as MessageDotsOutline, FileLines as Fi
 import { Home as HomeSolid, MessageDots as MessageDotsSolid, FileLines as FileLinesSolid, User as UserSolid } from "flowbite-react-icons/solid";
 import { motion, AnimatePresence } from "framer-motion";
 import styles from "./Sidebar.module.css";
-import api from '../lib/api';
-import Pusher from 'pusher-js';
+import { useUnreadCount } from '@/contexts/PusherContext';
 
 const mainNavLinks: Array<{
   href: string;
@@ -26,8 +25,10 @@ export default function Sidebar() {
   const currentPath = window.location.pathname;
   const [isAuthed, setIsAuthed] = useState<boolean>(false);
   const [checked, setChecked] = useState<boolean>(false);
-  const [unreadCount, setUnreadCount] = useState<number>(0);
-  const pusherRef = useRef<Pusher | null>(null);
+  
+  // Get unread count from global Pusher context
+  const unreadCount = useUnreadCount();
+  
   const page: any = usePage();
   const hideSidebar = Boolean(page?.props?.hideSidebar);
 
@@ -47,77 +48,6 @@ export default function Sidebar() {
     });
     return () => { mounted = false; };
   }, []);
-  
-  // Fetch unread count for chat badge
-  useEffect(() => {
-    if (!isAuthed) return;
-    
-    const fetchUnreadCount = async () => {
-      try {
-        const res = await api.get<{ total_unread: number }>('/counselor/conversations/unread-count');
-        setUnreadCount(res.data.total_unread || 0);
-      } catch {
-        // Ignore errors
-      }
-    };
-    
-    // Initial fetch
-    fetchUnreadCount();
-    
-    // Poll every 30 seconds
-    const interval = setInterval(fetchUnreadCount, 30000);
-    
-    // Also set up Pusher for real-time updates
-    const pusherKey = (import.meta as any).env?.VITE_PUSHER_APP_KEY;
-    const pusherCluster = (import.meta as any).env?.VITE_PUSHER_APP_CLUSTER || 'ap1';
-    
-    if (pusherKey) {
-      try {
-        const pusher = new Pusher(pusherKey, { cluster: pusherCluster });
-        pusherRef.current = pusher;
-        
-        const channel = pusher.subscribe('conversations');
-        
-        // Refetch unread count when new message arrives
-        channel.bind('new_message', () => {
-          console.log('[Sidebar] new_message event received');
-          fetchUnreadCount();
-        });
-        
-        // Refetch when conversation status changes (opened/ended)
-        channel.bind('status_changed', () => {
-          console.log('[Sidebar] status_changed event received');
-          fetchUnreadCount();
-        });
-        
-        // Refetch when a new conversation is created
-        channel.bind('new_conversation', () => {
-          console.log('[Sidebar] new_conversation event received');
-          fetchUnreadCount();
-        });
-        
-        // Refetch when messages are marked as read
-        channel.bind('messages_read', () => {
-          console.log('[Sidebar] messages_read event received');
-          fetchUnreadCount();
-        });
-        
-        pusher.connection.bind('connected', () => {
-          console.log('[Sidebar] Pusher connected');
-        });
-      } catch {
-        // Ignore Pusher errors
-      }
-    }
-    
-    return () => {
-      clearInterval(interval);
-      if (pusherRef.current) {
-        pusherRef.current.disconnect();
-        pusherRef.current = null;
-      }
-    };
-  }, [isAuthed]);
 
   // Only render after we checked the session; and only if authenticated
   if (!checked || !isAuthed) return null;
@@ -237,12 +167,9 @@ export default function Sidebar() {
         className={styles.signoutBtn}
         tabIndex={open ? 0 : -1}
         onClick={async () => {
-          const res = await logoutFastApi();
-          if (res?.ok) {
-            router.visit('/login');
-          } else {
-            router.visit('/login');
-          }
+          // Pusher is managed globally by PusherProvider - no need to disconnect here
+          await logoutFastApi();
+          router.visit('/login');
         }}
       >
         <div className={styles.iconWrap}>

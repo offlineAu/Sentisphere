@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import text
 
 from app.db.database import engine
-from app.services.insight_generation_service import InsightGenerationService
+from app.utils.text_cleaning import redact_pii
 
 
 def _iso(dt: Optional[datetime]) -> Optional[str]:
@@ -106,7 +106,7 @@ def build_sanitized_payload(user_id: Optional[int], start_dt: datetime, end_dt: 
         for r in jr_rows:
             content = r["content"] or ""
             text_hash = hashlib.sha256(content.encode("utf-8", errors="ignore")).hexdigest()
-            excerpt = InsightGenerationService._redact(content[:200])
+            excerpt = redact_pii(content[:200])
             s = sentiments_map.get(int(r["journal_id"]))
             payload["journals"].append(
                 {
@@ -211,14 +211,14 @@ def build_sanitized_payload(user_id: Optional[int], start_dt: datetime, end_dt: 
             {"action": r.get("action"), "count": int(r.get("cnt") or 0)} for r in act_rows
         ]
 
-        # Appointments (counts by form_type) - coalesce downloaded_at with created_at fallback
+        # Appointments (counts by form_type)
         app_rows = conn.execute(
             text(
                 """
                 SELECT form_type, COUNT(*) AS cnt
                 FROM appointment_log
-                WHERE COALESCE(downloaded_at, created_at) >= :start 
-                  AND COALESCE(downloaded_at, created_at) <= :end
+                WHERE downloaded_at >= :start 
+                  AND downloaded_at <= :end
                 {user_filter}
                 GROUP BY form_type
                 """.format(user_filter=("AND user_id = :uid" if user_id is not None else ""))

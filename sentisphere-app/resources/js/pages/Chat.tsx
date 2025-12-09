@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { motion } from "framer-motion";
 import { Send, MessageSquare, User, Search, X, Calendar, Mail, Activity, AlertTriangle } from "lucide-react";
 import { useSidebar } from "../components/SidebarContext";
@@ -9,6 +9,8 @@ import api from "../lib/api";
 import { sessionStatus } from "../lib/auth";
 import { router } from "@inertiajs/react";
 import Pusher from "pusher-js";
+import { usePusher } from "@/contexts/PusherContext";
+import { parseApiError } from "@/lib/error-handler";
 
 // -----------------------------
 // Types
@@ -27,19 +29,31 @@ interface Conversation {
   initiator_email?: string;
 }
 
-// Helper to format time in PHT (Asia/Manila)
+// Helper to format time - timestamp from API is already in Philippine time
 const formatTimePHT = (timestamp: string | null | undefined): string => {
   if (!timestamp) return '';
   try {
-    return new Date(timestamp).toLocaleTimeString('en-PH', {
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true,
-      timeZone: 'Asia/Manila',
-    });
+    // Parse the timestamp string directly (it's already in PH time from backend)
+    // Format: "2025-12-06T13:05:00" or "2025-12-06 13:05:00"
+    const normalized = timestamp.replace(' ', 'T');
+    const parts = normalized.split('T');
+    if (parts.length < 2) return '';
+    
+    const timePart = parts[1].split(':');
+    const hours = parseInt(timePart[0], 10);
+    const minutes = timePart[1] || '00';
+    
+    // Convert 24-hour to 12-hour format
+    const period = hours >= 12 ? 'PM' : 'AM';
+    const hours12 = hours % 12 || 12; // Convert 0 to 12, 13 to 1, etc.
+    
+    return `${hours12}:${minutes} ${period}`;
   } catch {
-    return new Date(timestamp).toLocaleTimeString([], {
-      hour: '2-digit',
+    // Fallback: try native parsing
+    const date = new Date(timestamp);
+    if (isNaN(date.getTime())) return '';
+    return date.toLocaleTimeString('en-US', {
+      hour: 'numeric',
       minute: '2-digit',
       hour12: true,
     });
@@ -95,6 +109,15 @@ export default function Chat() {
   } | null>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
 
+  // Global Pusher context for cross-page real-time updates
+  const { 
+    onNewMessage, 
+    onStatusChange, 
+    markConversationRead,
+    refreshUnreadCount,
+    conversationStatuses,
+  } = usePusher();
+
   const normalizeMessage = (m: any): ChatMessage => ({
     ...m,
     message_id: m?.message_id ?? m?.id,
@@ -142,6 +165,47 @@ export default function Chat() {
     }
   };
 
+  // Register callbacks with global Pusher context for cross-page updates
+  useEffect(() => {
+    // When a new message arrives from any page, update our local state
+    onNewMessage.current = (msg: any) => {
+      console.log('[Chat] Global new message callback:', msg);
+      if (msg?.conversation_id) {
+        upsertMessage(Number(msg.conversation_id), msg);
+      }
+    };
+
+    // When conversation status changes globally
+    onStatusChange.current = (data: any) => {
+      console.log('[Chat] Global status change callback:', data);
+      if (data?.conversation_id && data?.status) {
+        setConversations(prev => prev.map(c => 
+          c.conversation_id === Number(data.conversation_id) 
+            ? { ...c, status: data.status as 'open' | 'ended' } 
+            : c
+        ));
+      }
+    };
+
+    return () => {
+      onNewMessage.current = null;
+      onStatusChange.current = null;
+    };
+  }, [activeConversation, userId]);
+
+  // Sync conversation statuses from global context (fallback polling)
+  useEffect(() => {
+    if (conversationStatuses.size === 0) return;
+    
+    setConversations(prev => prev.map(c => {
+      const globalStatus = conversationStatuses.get(c.conversation_id);
+      if (globalStatus && globalStatus !== c.status) {
+        return { ...c, status: globalStatus };
+      }
+      return c;
+    }));
+  }, [conversationStatuses]);
+
   // Check session authentication and redirect if needed
   useEffect(() => {
     let mounted = true;
@@ -172,27 +236,35 @@ export default function Chat() {
         const unique = Array.from(new Map(res.data.map(c => [c.conversation_id, c])).values());
 
         // Enrich with initiator nickname and email for display
-        const withNicknames = await Promise.all(
+        // Use Promise.allSettled to continue even if some user fetches fail
+        const enrichResults = await Promise.allSettled(
           unique.map(async (c) => {
-            try {
-              const { data } = await api.get<{ nickname: string; email?: string }>(`/users/${c.initiator_user_id}`);
-              return { 
-                ...c, 
-                initiator_nickname: data.nickname || c.initiator_nickname,
-                initiator_email: data.email || undefined,
-              };
-            } catch {
-              return c;
-            }
+            const { data } = await api.get<{ nickname: string; email?: string }>(`/users/${c.initiator_user_id}`);
+            return { 
+              ...c, 
+              initiator_nickname: data.nickname || c.initiator_nickname,
+              initiator_email: data.email || undefined,
+            };
           })
         );
+
+        const withNicknames = enrichResults.map((result, index) => {
+          if (result.status === 'fulfilled') {
+            return result.value;
+          }
+          // If user fetch failed, use original conversation data
+          return unique[index];
+        });
 
         setConversations(withNicknames);
         if (withNicknames.length > 0) {
           setActiveConversation(withNicknames[0].conversation_id);
         }
       } catch (err) {
-        console.error("Error fetching conversations:", err);
+        const apiError = parseApiError(err);
+        console.error("Error fetching conversations:", apiError.message);
+        // Don't crash - just show empty state
+        setConversations([]);
       } finally {
         setLoading(false);
       }
@@ -201,19 +273,86 @@ export default function Chat() {
     fetchConversations();
   }, [userId, authenticated]);
 
-  // Fetch messages when active conversation changes
+  // Fetch messages when active conversation changes - with immediate refresh
   useEffect(() => {
     if (!activeConversation || !authenticated) return;
-    api
-      .get<ChatMessage[]>(`/conversations/${activeConversation}/messages`)
-      .then((res) => {
+    
+    // IMPORTANT: Clear messages immediately when switching conversations
+    // Use cached messages if available, otherwise show empty
+    const cachedMessages = messagesByConversation[activeConversation] || [];
+    setMessages(cachedMessages);
+    
+    // Also clear typing indicator when switching
+    setIsTyping(false);
+    
+    // Track which conversation we're fetching for
+    const fetchingForConversation = activeConversation;
+    
+    const fetchMessagesAndStatus = async () => {
+      try {
+        // Fetch messages
+        const res = await api.get<ChatMessage[]>(`/conversations/${fetchingForConversation}/messages`);
         const data = (res.data || []).map(normalizeMessage);
-        setMessages(data);
-        setMessagesByConversation((prev) => ({ ...prev, [activeConversation]: data }));
-        const unread = res.data.filter((m) => !Boolean((m as any).is_read) && m.sender_id !== userId).length;
-        setUnreadCounts((prev) => ({ ...prev, [activeConversation]: unread }));
-      })
-      .catch((err) => console.error("Error fetching messages:", err));
+        
+        // Also fetch conversation details to get latest status
+        let convStatus: 'open' | 'ended' | null = null;
+        try {
+          const convRes = await api.get<Conversation>(`/conversations/${fetchingForConversation}`);
+          convStatus = convRes.data?.status || null;
+        } catch (convErr) {
+          // Conversation details fetch failed - continue with messages
+          const apiError = parseApiError(convErr);
+          if (apiError.isNotFound) {
+            console.log(`[Chat] Conversation ${fetchingForConversation} not found`);
+          }
+        }
+        
+        // Only update if we're still on the same conversation
+        if (fetchingForConversation === activeConversation) {
+          setMessages(data);
+          setMessagesByConversation((prev) => ({ ...prev, [fetchingForConversation]: data }));
+          const unread = res.data.filter((m) => !Boolean((m as any).is_read) && m.sender_id !== userId).length;
+          setUnreadCounts((prev) => ({ ...prev, [fetchingForConversation]: unread }));
+          
+          // Update conversation status from fresh data
+          if (convStatus) {
+            setConversations(prev => prev.map(c => 
+              c.conversation_id === fetchingForConversation 
+                ? { ...c, status: convStatus as 'open' | 'ended' } 
+                : c
+            ));
+          }
+          
+          // Mark messages as read when opening conversation
+          if (unread > 0) {
+            try {
+              await api.post(`/conversations/${fetchingForConversation}/read`);
+              setUnreadCounts((prev) => ({ ...prev, [fetchingForConversation]: 0 }));
+              // Refresh global unread count for sidebar badge
+              refreshUnreadCount();
+            } catch {
+              // Ignore read marking errors
+            }
+          }
+        }
+      } catch (err) {
+        const apiError = parseApiError(err);
+        if (apiError.isNotFound) {
+          // Conversation was deleted - remove from list and clear active
+          console.log(`[Chat] Conversation ${fetchingForConversation} deleted, removing`);
+          setConversations(prev => prev.filter(c => c.conversation_id !== fetchingForConversation));
+          if (fetchingForConversation === activeConversation) {
+            setActiveConversation(null);
+            setMessages([]);
+          }
+        } else {
+          console.error("Error fetching messages:", err);
+        }
+      }
+    };
+    
+    // Fetch immediately
+    fetchMessagesAndStatus();
   }, [activeConversation, authenticated, userId]);
 
   // Fetch participant nickname when conversation changes
@@ -240,31 +379,64 @@ export default function Chat() {
   }, [currentConversation]);
 
   // Lightweight polling to fetch messages per conversation and compute unread via is_read
+  // Use a ref to track the current active conversation to avoid stale closure issues
+  const activeConversationRef = useRef(activeConversation);
+  useEffect(() => {
+    activeConversationRef.current = activeConversation;
+  }, [activeConversation]);
+  
   useEffect(() => {
     if (conversations.length === 0 || !authenticated) return;
+    
     const poll = async () => {
       const ids = conversations.map((c) => c.conversation_id);
+      const currentActive = activeConversationRef.current;
+      const deletedIds: number[] = [];
+      
       for (const id of ids) {
         try {
           const { data } = await api.get<ChatMessage[]>(`/conversations/${id}/messages`);
           const norm = (data || []).map(normalizeMessage);
           setMessagesByConversation((prev) => ({ ...prev, [id]: norm }));
-          if (id === activeConversation) {
+          
+          // Only update messages state if this is STILL the active conversation
+          if (id === currentActive && id === activeConversationRef.current) {
             setMessages(norm);
           }
           const unread = data.filter((m) => !Boolean((m as any).is_read) && m.sender_id !== userId).length;
           setUnreadCounts((prev) => ({ ...prev, [id]: unread }));
         } catch (e) {
-          // noop
+          const apiError = parseApiError(e);
+          if (apiError.isNotFound) {
+            // Conversation was deleted - mark for removal
+            console.log(`[Chat] Conversation ${id} not found (deleted), removing from list`);
+            deletedIds.push(id);
+          }
+          // Continue processing other conversations
+        }
+      }
+      
+      // Remove deleted conversations from state
+      if (deletedIds.length > 0) {
+        setConversations(prev => prev.filter(c => !deletedIds.includes(c.conversation_id)));
+        setMessagesByConversation(prev => {
+          const next = { ...prev };
+          deletedIds.forEach(id => delete next[id]);
+          return next;
+        });
+        // If active conversation was deleted, clear it
+        if (currentActive && deletedIds.includes(currentActive)) {
+          setActiveConversation(null);
+          setMessages([]);
         }
       }
     };
-    // initial
-    poll();
-    // interval - poll every 5 seconds for faster updates
-    const interval = setInterval(poll, 5000);
+    
+    // Don't poll immediately - let the conversation switch effect handle initial fetch
+    // interval - poll every 10 seconds (reduced frequency to avoid race conditions)
+    const interval = setInterval(poll, 10000);
     return () => clearInterval(interval);
-  }, [conversations]);
+  }, [conversations, authenticated, userId]);
 
   // Auto-scroll to bottom on new messages
   const messagesScrollRef = useRef<HTMLDivElement | null>(null);
@@ -274,8 +446,8 @@ export default function Chat() {
     el.scrollTop = el.scrollHeight;
   }, [messages, activeConversation]);
 
-  // Handle send
-  const handleSend = () => {
+  // Handle send - with fresh status check
+  const handleSend = async () => {
     if (
       !newMessage.trim() ||
       !activeConversation ||
@@ -283,6 +455,24 @@ export default function Chat() {
       currentConversation.status !== "open"
     )
       return;
+    
+    // Double-check conversation status before sending (prevents sending to ended chats)
+    try {
+      const statusCheck = await api.get<Conversation>(`/conversations/${activeConversation}`);
+      if (statusCheck.data?.status === 'ended') {
+        // Update local state to reflect ended status
+        setConversations(prev => prev.map(c => 
+          c.conversation_id === activeConversation 
+            ? { ...c, status: 'ended' } 
+            : c
+        ));
+        alert('This conversation has ended. You cannot send more messages.');
+        return;
+      }
+    } catch {
+      // Continue if status check fails
+    }
+    
     api
       .post<ChatMessage>(`/conversations/${activeConversation}/messages`, {
         sender_id: userId,
@@ -305,7 +495,25 @@ export default function Chat() {
         });
         setUnreadCounts((prev) => ({ ...prev, [activeConversation]: prev[activeConversation] || 0 }));
       })
-      .catch((err) => console.error("Error sending message:", err));
+      .catch((err) => {
+        const apiError = parseApiError(err);
+        if (apiError.isNotFound) {
+          // Conversation was deleted
+          setConversations(prev => prev.filter(c => c.conversation_id !== activeConversation));
+          setActiveConversation(null);
+          setMessages([]);
+        } else if (apiError.status === 400) {
+          // Conversation ended - update status
+          setConversations(prev => prev.map(c => 
+            c.conversation_id === activeConversation 
+              ? { ...c, status: 'ended' } 
+              : c
+          ));
+          alert(apiError.message || 'Cannot send message to this conversation.');
+        } else {
+          console.error("Error sending message:", apiError.message);
+        }
+      });
   };
 
   // Initialize Pusher for real-time chat and subscribe to global conversations channel
@@ -350,16 +558,46 @@ export default function Chat() {
       });
       
       // Listen for new conversations (e.g., student starts new chat)
-      globalChannel.bind('new_conversation', (data: any) => {
+      globalChannel.bind('new_conversation', async (data: any) => {
         console.log('[Chat] New conversation received:', data);
-        // Refresh conversation list to get the new conversation
+        // Refresh conversation list to get the new conversation with enriched data
         if (data?.conversation_id) {
-          api.get("/counselor/conversations")
-            .then((res) => {
-              const list = Array.isArray(res.data) ? res.data : [];
-              setConversations(list);
-            })
-            .catch((err) => console.error("Error refreshing conversations:", err));
+          try {
+            const res = await api.get<Conversation[]>("/counselor/conversations");
+            const unique = Array.from(new Map(res.data.map(c => [c.conversation_id, c])).values());
+            
+            // Enrich with initiator nickname and email
+            const withNicknames = await Promise.all(
+              unique.map(async (c) => {
+                try {
+                  const { data: userData } = await api.get<{ nickname: string; email?: string }>(`/users/${c.initiator_user_id}`);
+                  return { 
+                    ...c, 
+                    initiator_nickname: userData.nickname || c.initiator_nickname,
+                    initiator_email: userData.email || undefined,
+                  };
+                } catch {
+                  return c;
+                }
+              })
+            );
+            
+            setConversations(withNicknames);
+          } catch (err) {
+            console.error("Error refreshing conversations:", err);
+          }
+        }
+      });
+      
+      // Listen for new messages on any conversation (for unread badge updates)
+      globalChannel.bind('new_message', (data: any) => {
+        console.log('[Chat] New message on global channel:', data);
+        if (data?.conversation_id && data?.sender_id !== userId) {
+          // Update unread count for this conversation
+          setUnreadCounts(prev => ({
+            ...prev,
+            [data.conversation_id]: (prev[data.conversation_id] || 0) + 1
+          }));
         }
       });
       
@@ -402,12 +640,15 @@ export default function Chat() {
     
     // Listen for typing indicators
     channel.bind('typing', (data: any) => {
-      if (data?.user_id !== userId) {
+      console.log('[Chat] Typing event received:', data);
+      if (data?.user_id !== userId && data?.is_typing !== false) {
         setIsTyping(true);
-        setTypingUser(data?.nickname || "Someone");
+        setTypingUser(data?.user_name || data?.nickname || "Someone");
         // Clear typing after 3 seconds
         if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
         typingTimeoutRef.current = setTimeout(() => setIsTyping(false), 3000);
+      } else if (data?.is_typing === false) {
+        setIsTyping(false);
       }
     });
     
@@ -823,7 +1064,7 @@ export default function Chat() {
                           if (now - lastTypingSentRef.current > 2000 && activeConversation) {
                             lastTypingSentRef.current = now;
                             // Fire-and-forget API call for typing indicator
-                            api.post(`/counselor/conversations/${activeConversation}/typing`)
+                            api.post(`/counselor/conversations/${activeConversation}/typing`, { is_typing: true })
                               .catch(() => { /* ignore errors */ });
                           }
                         }}

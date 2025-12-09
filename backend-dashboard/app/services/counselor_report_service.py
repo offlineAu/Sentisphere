@@ -363,13 +363,18 @@ class CounselorReportService:
         last_end = this_end - timedelta(days=7)
 
         def _counts(start_dt: datetime, end_dt: datetime) -> tuple[int, int]:
-            stmt = select(
-                func.count(func.distinct(EmotionalCheckin.user_id)),
-                func.count(EmotionalCheckin.checkin_id),
-            ).where(
-                and_(
-                    EmotionalCheckin.created_at >= start_dt,
-                    EmotionalCheckin.created_at <= end_dt,
+            stmt = (
+                select(
+                    func.count(func.distinct(EmotionalCheckin.user_id)),
+                    func.count(EmotionalCheckin.checkin_id),
+                )
+                .join(User, EmotionalCheckin.user_id == User.user_id)
+                .where(
+                    and_(
+                        EmotionalCheckin.created_at >= start_dt,
+                        EmotionalCheckin.created_at <= end_dt,
+                        User.role == UserRole.STUDENT,
+                    )
                 )
             )
             active, total = db.execute(stmt).one_or_none() or (0, 0)
@@ -443,9 +448,20 @@ class CounselorReportService:
             end_date = end.date() if isinstance(end, datetime) else end
             filters.append(AIInsight.timeframe_end <= end_date)
         
+        # DEBUG LOGGING
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"[weekly_insights] Query filters: start={start}, end={end}")
+        logger.info(f"[weekly_insights] Date range: {start_date if start else 'None'} to {end_date if end else 'None'}")
+        logger.info(f"[weekly_insights] Weeks limit: {weeks}")
+        
         stored_insights = db.query(AIInsight).filter(
             *filters
         ).order_by(AIInsight.timeframe_start.desc()).limit(weeks).all()
+        
+        logger.info(f"[weekly_insights] Found {len(stored_insights)} insights")
+        for idx, ins in enumerate(stored_insights):
+            logger.info(f"[weekly_insights] Insight {idx}: id={ins.insight_id}, timeframe={ins.timeframe_start} to {ins.timeframe_end}, user_id={ins.user_id}")
         
         records: List[Dict[str, Any]] = []
         
@@ -486,9 +502,18 @@ class CounselorReportService:
                 description += f" ({direction} {abs(change_percent):.1f}% from previous week)"
             
             # Build recommendation based on data
+            # Handle dominant_emotions as either list of strings or list of dicts
+            emotion_labels = []
+            if dominant_emotions:
+                for e in dominant_emotions[:3]:
+                    if isinstance(e, dict):
+                        emotion_labels.append(e.get('emotion', ''))
+                    elif isinstance(e, str):
+                        emotion_labels.append(e)
+            
             recommendation = cls._build_recommendation(
                 int(change_percent) if change_percent else 0,
-                [e.get('emotion', '') for e in dominant_emotions[:3]] if dominant_emotions else []
+                emotion_labels
             )
             
             records.append({
@@ -496,12 +521,21 @@ class CounselorReportService:
                 "week_end": end_date.isoformat() if end_date else None,
                 "event_name": matched_event.get("name") if matched_event else None,
                 "event_type": matched_event.get("type") if matched_event else None,
-                "title": title,
-                "description": description,
-                "recommendation": recommendation,
+                "title": data.get("title") or title,  # Use stored title if available
+                "description": data.get("summary") or description,  # Use stored summary
+                "recommendation": (data.get("recommendations") or [recommendation])[0] if data.get("recommendations") else recommendation,
+                "recommendations": data.get("recommendations", []),
                 "mood_trends": mood_trends,
                 "dominant_emotions": dominant_emotions,
                 "streaks": streaks,
+                "top_concerns": data.get("top_concerns", []),
+                "what_improved": data.get("what_improved", []),
+                "what_declined": data.get("what_declined", []),
+                "journal_themes": data.get("journal_themes", []),
+                "sentiment_breakdown": data.get("sentiment_breakdown", {}),
+                "stress_energy_patterns": data.get("stress_energy_patterns", {}),
+                "sudden_drops": data.get("sudden_drops", []),
+                "triggers_detected": data.get("triggers_detected", []),
                 "metadata": {
                     **metadata,
                     "risk_level": insight.risk_level,
@@ -890,25 +924,46 @@ class CounselorReportService:
         }
 
     @classmethod
-    def recent_alerts(cls, db: Session, *, limit: int = 5) -> List[Dict[str, Any]]:
+    def recent_alerts(cls, db: Session, *, limit: int = 10) -> List[Dict[str, Any]]:
+        """Get recent open/in-progress alerts of all severity levels.
+        
+        Shows HIGH, MEDIUM, and LOW alerts to give counselors full visibility.
+        Ordered by severity (high > medium > low) then by date (newest first).
+        """
+        from sqlalchemy import case as sql_case
+        
+        # Priority order for severity
+        severity_order = sql_case(
+            (Alert.severity == AlertSeverity.HIGH, 1),
+            (Alert.severity == AlertSeverity.MEDIUM, 2),
+            (Alert.severity == AlertSeverity.LOW, 3),
+            else_=4
+        )
+        
         stmt = (
             select(
                 Alert.alert_id,
+                Alert.user_id,
+                Alert.reason,
                 func.lower(Alert.severity).label("severity"),
                 func.lower(Alert.status).label("status"),
                 Alert.created_at,
                 User.name.label("student_name"),
             )
             .join(User, Alert.user_id == User.user_id)
-            .where(Alert.status.in_([AlertStatus.OPEN, AlertStatus.IN_PROGRESS, AlertStatus.RESOLVED]))
-            .order_by(Alert.created_at.desc())
+            .where(
+                Alert.status.in_([AlertStatus.OPEN, AlertStatus.IN_PROGRESS]),
+                Alert.severity.in_([AlertSeverity.HIGH, AlertSeverity.MEDIUM, AlertSeverity.LOW])
+            )
+            .order_by(severity_order, Alert.created_at.desc())
             .limit(limit)
         )
         return [
             {
                 "id": row.alert_id,
+                "user_id": row.user_id,
                 "name": row.student_name,
-                # Use plain string values to avoid enum mapping issues with legacy data
+                "reason": row.reason,
                 "severity": row.severity,
                 "status": row.status,
                 "created_at": row.created_at,

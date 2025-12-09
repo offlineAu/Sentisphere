@@ -45,6 +45,49 @@ MOOD_SCORES = {
     "Very Happy": 8, "Excellent": 9
 }
 
+# ============================================================================
+# CRISIS LANGUAGE DETECTION - Suicidal/Self-harm keywords
+# English, Tagalog (Filipino), and Bisaya (Cebuano) supported
+# ============================================================================
+CRISIS_KEYWORDS = [
+    # English - Direct mentions
+    "kill myself", "end my life", "suicide", "suicidal", "hang myself",
+    "want to die", "wanna die", "don't want to live", "dont want to live",
+    "better off dead", "no reason to live", "end it all", "take my life",
+    "cutting myself", "hurt myself", "self harm", "self-harm", "slit my wrist",
+    "overdose", "jump off", "shoot myself", "drown myself",
+    # English - Indirect/Passive
+    "wish i was dead", "wish i were dead", "can't go on", "cant go on",
+    "tired of living", "tired of life", "no point in living", "give up on life",
+    "disappear forever", "never wake up", "not worth living", "why am i alive",
+    "rather be dead", "hate my life", "hate being alive",
+    # Tagalog (Filipino) - Direct
+    "magpakamatay", "gusto ko nang mamatay", "ayaw ko nang mabuhay",
+    "papatayin ko sarili ko", "puputulin ko ugat ko", "pagod na ako sa lahat",
+    "wala na akong pakialam", "susuko na ako", "bebenta ko sarili ko",
+    "lalunurin ko sarili ko", "bibitayin ko sarili ko",
+    # Tagalog - Indirect
+    "pagod na ako", "ayoko na", "suko na ako", "wala na akong pake",
+    "bakit pa ako nabubuhay", "mas mabuti pang wala na ako",
+    "sana hindi na ako magising", "para akong patay", "namamatay na ako sa loob",
+    # Bisaya (Cebuano) - Direct
+    "hikog", "gusto ko na maghikog", "maghikog nako", "hikogun nako akong kaugalingon",
+    "matapos na ang lahat", "undangon nalang", "patyon nako akong kaugalingon",
+    "sampolan nako akong kaugalingon", "putlon nako akong ugat",
+    "gusto ko na mahuman ang tanan", "tuslok nako akong kaugalingon",
+    # Bisaya - Indirect
+    "kapoy nako", "pagod na ko sa tanan", "wala na koy paki", "gusto ko na mosuko",
+    "ngano pa man ko buhi", "mas maayo pang wala nako",
+    "ayaw ko na magpadayon", "murag patay nako sa sulod",
+    "sana dili na ko mamata", "kapoy na kaayo ko sa kinabuhi",
+    # Crisis phrases (mixed language)
+    "jump off a bridge", "tulak sa tulay", "tumalon sa tulay",
+    "not gonna make it", "di ko na kaya", "dili nako kaya",
+]
+
+# Strongly negative sentiment that may indicate crisis
+STRONGLY_NEGATIVE_SENTIMENTS = ["strongly_negative", "very_negative", "crisis"]
+
 
 class SmartAlertService:
     """Service for intelligent alert triggering and resolution."""
@@ -141,6 +184,192 @@ class SmartAlertService:
         return None
 
     @staticmethod
+    def check_crisis_language(
+        db: Session,
+        user_id: int,
+        *,
+        lookback_days: int = 7
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Check for suicidal/crisis language in check-in comments and journals.
+        Returns HIGH severity alert data if detected.
+        """
+        from app.models.journal import Journal
+        
+        cutoff = datetime.utcnow() - timedelta(days=lookback_days)
+        matched_keywords = []
+        matched_sources = []
+        
+        # Check recent check-in comments
+        checkins = list(db.scalars(
+            select(EmotionalCheckin)
+            .where(
+                EmotionalCheckin.user_id == user_id,
+                EmotionalCheckin.created_at >= cutoff,
+                EmotionalCheckin.comment.isnot(None)
+            )
+        ))
+        
+        for checkin in checkins:
+            comment = (checkin.comment or "").lower()
+            for keyword in CRISIS_KEYWORDS:
+                if keyword.lower() in comment:
+                    matched_keywords.append(keyword)
+                    matched_sources.append(f"check-in ({checkin.created_at.strftime('%Y-%m-%d')})")
+                    break  # One match per entry is enough
+        
+        # Check recent journals
+        journals = list(db.scalars(
+            select(Journal)
+            .where(
+                Journal.user_id == user_id,
+                Journal.created_at >= cutoff,
+                Journal.deleted_at.is_(None)
+            )
+        ))
+        
+        for journal in journals:
+            content = (journal.content or "").lower()
+            for keyword in CRISIS_KEYWORDS:
+                if keyword.lower() in content:
+                    matched_keywords.append(keyword)
+                    matched_sources.append(f"journal ({journal.created_at.strftime('%Y-%m-%d')})")
+                    break
+        
+        if matched_keywords:
+            # Check for existing alert
+            existing = db.scalars(
+                select(Alert)
+                .where(
+                    Alert.user_id == user_id,
+                    Alert.status != AlertStatus.RESOLVED,
+                    Alert.created_at >= cutoff
+                )
+            ).first()
+            
+            if existing:
+                logger.info(f"User {user_id} already has open alert for crisis language")
+                return None
+            
+            unique_keywords = list(set(matched_keywords))[:3]
+            reason = f"CRISIS LANGUAGE DETECTED: '{', '.join(unique_keywords)}' found in {', '.join(matched_sources[:2])}"
+            
+            logger.warning(f"[CRISIS] User {user_id}: {reason}")
+            
+            return {
+                "user_id": user_id,
+                "severity": AlertSeverity.HIGH,  # Always HIGH for crisis language
+                "reason": reason,
+                "matched_keywords": unique_keywords,
+                "trigger_type": "crisis_language"
+            }
+        
+        return None
+
+    @staticmethod
+    def check_escalation_risk(
+        db: Session,
+        user_id: int,
+        *,
+        lookback_days: int = 7
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Predictive flagging: check if student may become high-risk based on patterns.
+        Combines check-ins AND journals for comprehensive analysis.
+        
+        Triggers MEDIUM alert (warning) if:
+        - 3+ consecutive negative check-ins OR
+        - 2+ strongly negative journal sentiments OR
+        - High stress streak (3+ days) combined with negative journals
+        """
+        from app.models.journal import Journal
+        
+        cutoff = datetime.utcnow() - timedelta(days=lookback_days)
+        risk_factors = []
+        
+        # Factor 1: Check for negative check-in streak (not enough for full alert yet)
+        checkins = list(db.scalars(
+            select(EmotionalCheckin)
+            .where(
+                EmotionalCheckin.user_id == user_id,
+                EmotionalCheckin.created_at >= cutoff
+            )
+            .order_by(EmotionalCheckin.created_at.desc())
+            .limit(5)
+        ))
+        
+        negative_streak = 0
+        high_stress_days = 0
+        for checkin in checkins:
+            mood_str = checkin.mood_level.value if hasattr(checkin.mood_level, 'value') else str(checkin.mood_level)
+            stress_str = checkin.stress_level.value if hasattr(checkin.stress_level, 'value') else str(checkin.stress_level)
+            
+            if mood_str in NEGATIVE_MOOD_LEVELS:
+                negative_streak += 1
+            else:
+                break
+            
+            if stress_str in HIGH_STRESS_LEVELS or stress_str in ["Very High Stress", "Very High"]:
+                high_stress_days += 1
+        
+        if negative_streak >= 3:
+            risk_factors.append(f"{negative_streak} consecutive negative moods")
+        
+        if high_stress_days >= 3:
+            risk_factors.append(f"{high_stress_days} high-stress days")
+        
+        # Factor 2: Check journal sentiments
+        journal_sentiments = list(db.scalars(
+            select(JournalSentiment)
+            .join(Journal)
+            .where(
+                Journal.user_id == user_id,
+                JournalSentiment.analyzed_at >= cutoff
+            )
+        ))
+        
+        strongly_negative_count = 0
+        for js in journal_sentiments:
+            sentiment = (js.sentiment or "").lower()
+            if sentiment in ["negative", "strongly_negative", "very_negative"]:
+                strongly_negative_count += 1
+        
+        if strongly_negative_count >= 2:
+            risk_factors.append(f"{strongly_negative_count} negative journal entries")
+        
+        # Factor 3: Combined pattern (stress + negative journals)
+        if high_stress_days >= 2 and strongly_negative_count >= 1:
+            risk_factors.append("stress + negative journaling pattern")
+        
+        # Trigger if 2+ risk factors present
+        if len(risk_factors) >= 2:
+            existing = db.scalars(
+                select(Alert)
+                .where(
+                    Alert.user_id == user_id,
+                    Alert.status != AlertStatus.RESOLVED,
+                    Alert.created_at >= cutoff
+                )
+            ).first()
+            
+            if existing:
+                return None
+            
+            reason = f"ESCALATION WARNING: Possible high-risk trajectory - {'; '.join(risk_factors)}"
+            
+            logger.info(f"[ESCALATION RISK] User {user_id}: {reason}")
+            
+            return {
+                "user_id": user_id,
+                "severity": AlertSeverity.MEDIUM,  # Warning level
+                "reason": reason,
+                "risk_factors": risk_factors,
+                "trigger_type": "escalation_risk"
+            }
+        
+        return None
+
+    @staticmethod
     def check_sentiment_threshold(
         db: Session,
         user_id: int,
@@ -179,7 +408,8 @@ class SmartAlertService:
             sentiment = s.sentiment.lower() if s.sentiment else "neutral"
             confidence = float(s.confidence) if s.confidence else 0.5
             
-            if sentiment == "negative":
+            # Treat both negative and strongly_negative as negative
+            if sentiment in ["negative", "strongly_negative"]:
                 total_score -= confidence
             elif sentiment == "positive":
                 total_score += confidence
@@ -189,7 +419,8 @@ class SmartAlertService:
             sentiment = s.sentiment.lower() if s.sentiment else "neutral"
             confidence = float(s.confidence) if s.confidence else 0.5
             
-            if sentiment == "negative":
+            # Treat both negative and strongly_negative as negative (journals weighted higher)
+            if sentiment in ["negative", "strongly_negative"]:
                 total_score -= confidence * 1.5  # Journals weighted higher
             elif sentiment == "positive":
                 total_score += confidence * 1.5
@@ -365,15 +596,29 @@ class SmartAlertService:
         new_alerts = []
         
         for user_id in user_ids:
-            # Check consecutive negative
+            # Priority 1: Check for CRISIS LANGUAGE (highest priority - always HIGH severity)
+            alert_data = SmartAlertService.check_crisis_language(db, user_id)
+            if alert_data:
+                alert = SmartAlertService.create_smart_alert(db, alert_data, commit=commit)
+                new_alerts.append(alert)
+                continue
+            
+            # Priority 2: Check consecutive negative check-ins
             alert_data = SmartAlertService.check_user_for_alert(db, user_id)
             if alert_data:
                 alert = SmartAlertService.create_smart_alert(db, alert_data, commit=commit)
                 new_alerts.append(alert)
                 continue
             
-            # Check sentiment threshold
+            # Priority 3: Check sentiment threshold
             alert_data = SmartAlertService.check_sentiment_threshold(db, user_id)
+            if alert_data:
+                alert = SmartAlertService.create_smart_alert(db, alert_data, commit=commit)
+                new_alerts.append(alert)
+                continue
+            
+            # Priority 4: Check escalation risk (predictive flagging)
+            alert_data = SmartAlertService.check_escalation_risk(db, user_id)
             if alert_data:
                 alert = SmartAlertService.create_smart_alert(db, alert_data, commit=commit)
                 new_alerts.append(alert)

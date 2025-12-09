@@ -1,0 +1,109 @@
+{
+  "info": {
+    "name": "Sentisphere - Send Message to Counselor",
+    "description": "Simple collection to test sending a message from student to counselor",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8010",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "conversation_id",
+      "value": "1",
+      "type": "string"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "1. Login as Student",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "var jsonData = pm.response.json();",
+              "if (jsonData.access_token) {",
+              "    pm.collectionVariables.set('token', jsonData.access_token);",
+              "    console.log('Token saved!');",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/x-www-form-urlencoded"
+          }
+        ],
+        "body": {
+          "mode": "urlencoded",
+          "urlencoded": [
+            {
+              "key": "username",
+              "value": "student@ustp.edu.ph",
+              "type": "text"
+            },
+            {
+              "key": "password",
+              "value": "your_password",
+              "type": "text"
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{base_url}}/api/auth/token",
+          "host": ["{{base_url}}"],
+          "path": ["api", "auth", "token"]
+        },
+        "description": "Login as student to get JWT token. Token auto-saves."
+      }
+    },
+    {
+      "name": "2. Send Message to Counselor",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n    \"content\": \"Hello counselor! This is a test message.\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/mobile/conversations/{{conversation_id}}/messages",
+          "host": ["{{base_url}}"],
+          "path": ["api", "mobile", "conversations", "{{conversation_id}}", "messages"]
+        },
+        "description": "Send a message to counselor. Triggers Pusher events:\n- `message` on conversation-{id} channel\n- `new_message` on global conversations channel\n\nThis will update the counselor's chat in real-time and increment their unread badge."
+      }
+    }
+  ]
+}

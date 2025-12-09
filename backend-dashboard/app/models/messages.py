@@ -20,6 +20,8 @@ class Message(Base):
     sender_id: Mapped[int] = mapped_column(ForeignKey("user.user_id", ondelete="CASCADE"), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     is_read: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="0")
+    # Note: timestamp should be set explicitly in Python using Philippine timezone
+    # server_default is fallback only
     timestamp: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
 
     conversation: Mapped["Conversation"] = relationship("Conversation", back_populates="messages")

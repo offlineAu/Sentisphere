@@ -6,9 +6,10 @@ import { createRoot } from 'react-dom/client';
 import { initializeTheme } from './hooks/use-appearance';
 import React, { useEffect, useState } from "react";
 import { SidebarProvider } from "./components/SidebarContext";
+import { PusherProvider } from "./contexts/PusherContext";
 import BackgroundOrnaments from "./components/background-ornaments";
 import { LoadingSpinner } from './components/loading-spinner';
-import { ErrorBoundary } from './components/error-boundary';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 const appName = import.meta.env.VITE_APP_NAME || 'Laravel';
 
@@ -40,17 +41,19 @@ createInertiaApp({
 
             return (
                 <ErrorBoundary>
-                    <SidebarProvider>
-                        <div className="relative min-h-screen">
-                            <BackgroundOrnaments />
-                            {loading && (
-                                <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
-                                    <LoadingSpinner size="lg" className="text-primary" />
-                                </div>
-                            )}
-                            <App {...props} />
-                        </div>
-                    </SidebarProvider>
+                    <PusherProvider>
+                        <SidebarProvider>
+                            <div className="relative min-h-screen">
+                                <BackgroundOrnaments />
+                                {loading && (
+                                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
+                                        <LoadingSpinner size="lg" className="text-primary" />
+                                    </div>
+                                )}
+                                <App {...props} />
+                            </div>
+                        </SidebarProvider>
+                    </PusherProvider>
                 </ErrorBoundary>
             );
         };

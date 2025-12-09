@@ -8,6 +8,7 @@ import { LoadingSpinner } from "../components/loading-spinner";
 import { RiskBadge } from "@/components/ui/RiskBadge";
 import { MoodTimeline, StressBar } from "@/components/insights";
 import api from "../lib/api";
+import { parseApiError } from "@/lib/error-handler";
 import styles from "./Reports.module.css";
 import Slider from "react-slick";
 import "slick-carousel/slick/slick.css";
@@ -123,6 +124,17 @@ type WeeklyInsight = {
 
 type CalendarEvent = { name: string; start: string; end: string; type?: string };
 
+type BehavioralMetric = {
+  label: string;
+  value: string | number;
+};
+
+type BehavioralInsight = {
+  title: string;
+  description: string;
+  metrics: BehavioralMetric[];
+};
+
 type TrendsResponseNew = {
   dates: string[];
   mood: number[];
@@ -191,6 +203,9 @@ function Reports() {
   const [participation, setParticipation] = useState(0);
   const [summary, setSummary] = useState<ReportSummary | null>(null);
   const [insights, setInsights] = useState<WeeklyInsight[]>([]);
+  const [behavioralInsights, setBehavioralInsights] = useState<BehavioralInsight[]>([]);
+  const [behavioralLoading, setBehavioralLoading] = useState(false);
+  const [generatingInsights, setGeneratingInsights] = useState(false);
   const [engagement, setEngagement] = useState<EngagementMetrics | null>(null);
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const d = new Date();
@@ -214,6 +229,7 @@ function Reports() {
 
   // Carousels refs
   const weeklySliderRef = useRef<any>(null);
+  const behavioralSliderRef = useRef<any>(null);
 
   // Calendar events
   const [events, setEvents] = useState<CalendarEvent[]>([]);
@@ -301,6 +317,25 @@ function Reports() {
     customPaging: () => <span className="block h-2 w-2 rounded-full bg-gray-300" />,
   }), [insights.length]);
 
+  // Behavioral insights carousel settings
+  const behavioralSliderSettings = useMemo(() => ({
+    dots: true,
+    infinite: behavioralInsights.length > 1,
+    arrows: false,
+    autoplay: behavioralInsights.length > 1,
+    autoplaySpeed: 5000,
+    speed: 500,
+    slidesToShow: 1,
+    slidesToScroll: 1,
+    adaptiveHeight: false,
+    appendDots: (dots: React.ReactNode) => (
+      <div className="absolute bottom-3 left-0 right-0">
+        <ul className="flex justify-center gap-2">{dots}</ul>
+      </div>
+    ),
+    customPaging: () => <span className="block h-2 w-2 rounded-full bg-gray-300" />,
+  }), [behavioralInsights.length]);
+
   // WebSocket for instant notifications when new data arrives
   const handleDataUpdate = useCallback(() => {
     console.log('[Reports] New data notification - refreshing...');
@@ -311,6 +346,28 @@ function Reports() {
     autoConnect: true,
     onStatsUpdate: handleDataUpdate,
   });
+
+  // Refresh data when tab becomes visible
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        console.log('[Reports] Tab visible - refreshing data');
+        setRefreshKey(prev => prev + 1);
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
+
+  // Fallback polling every 30 seconds
+  useEffect(() => {
+    const pollInterval = setInterval(() => {
+      setRefreshKey(prev => prev + 1);
+    }, 30000); // 30 seconds (was incorrectly 5s)
+
+    return () => clearInterval(pollInterval);
+  }, []);
 
   // --- Fetch participation ---
   useEffect(() => {
@@ -368,16 +425,16 @@ function Reports() {
           if (previous === undefined || previous === null) {
             return { delta: "", deltaColor: "" };
           }
-          
+
           // Convert to numbers and validate
           const c = Number(current);
           const p = Number(previous);
-          
+
           // Check for invalid numbers
           if (!Number.isFinite(c) || !Number.isFinite(p)) {
             return { delta: "", deltaColor: "" };
           }
-          
+
           // If previous is 0, show "new" or absolute change
           if (p === 0) {
             if (c === 0) {
@@ -385,15 +442,15 @@ function Reports() {
             }
             return { delta: "New", deltaColor: "text-blue-600" };
           }
-          
+
           // Calculate percentage change
           const change = ((c - p) / Math.abs(p)) * 100;
-          
+
           // Handle very small changes (less than 0.1%)
           if (Math.abs(change) < 0.1) {
             return { delta: "~0%", deltaColor: "text-gray-600" };
           }
-          
+
           const sign = change >= 0 ? "+" : "";
           const color = change >= 0 ? "text-green-600" : "text-red-600";
           return { delta: `${sign}${change.toFixed(1)}%`, deltaColor: color };
@@ -447,9 +504,9 @@ function Reports() {
         // Use AI-powered top concerns endpoint that analyzes journal content and check-in comments
         const concernsRes = await api.get<any[]>(`/reports/top-concerns`, { params: { ...filterParams } });
         const concernsData = Array.isArray(concernsRes.data) ? concernsRes.data : [];
-        setConcerns(concernsData.map((c: any) => ({ 
-          ...c, 
-          barColor: c.barColor || "#2563eb" 
+        setConcerns(concernsData.map((c: any) => ({
+          ...c,
+          barColor: c.barColor || "#2563eb"
         })));
 
         const interventionsRes = await api.get<any>(`/reports/interventions`, { params: { ...filterParams } });
@@ -471,6 +528,23 @@ function Reports() {
             riskClass: s.risk === "High" ? styles.riskHigh : s.risk === "Medium" ? styles.riskMedium : styles.riskLow,
           }))
         );
+
+        // Fetch behavioral insights (only show loading on initial load)
+        if (behavioralInsights.length === 0) {
+          setBehavioralLoading(true);
+        }
+        try {
+          const behavioralRes = await api.get<any>(`/reports/behavior`, { params: filterParams });
+          const behavioralData = behavioralRes.data || [];
+          setBehavioralInsights(Array.isArray(behavioralData) ? behavioralData : []);
+        } catch {
+          // Don't clear existing data on error during refresh
+          if (behavioralInsights.length === 0) {
+            setBehavioralInsights([]);
+          }
+        } finally {
+          setBehavioralLoading(false);
+        }
 
         setLoading(false);
       } catch (err) {
@@ -507,778 +581,942 @@ function Reports() {
 
   const latestIndex = sortedTrendWeeks[0]?.index ?? 0;
   const prevIndex = sortedTrendWeeks[1]?.index ?? 0;
-  
+
   // Robust percentage calculation
   const calculateChangePct = (current: number, previous: number): number => {
     if (!Number.isFinite(current) || !Number.isFinite(previous)) return 0;
     if (previous === 0) return current === 0 ? 0 : 100;
     return Math.round(((current - previous) / Math.abs(previous)) * 100);
   };
-  
+
   const changePct = calculateChangePct(latestIndex, prevIndex);
 
   return (
     <TooltipProvider delayDuration={200}>
-    <main
-      className={`transition-all duration-200 min-h-screen pt-1 pr-6 pb-6 w-full p-4 sm:p-5 space-y-5 max-w-full`}
-      style={{ minHeight: "100vh", backgroundColor: "transparent" }}
-    >
-      {/* Header */}
-      <div className="ml-2">
-        <h1 className={styles.headerTitle}>Reports & Analytics</h1>
-        <p className={styles.headerSubtitle}>
-          Comprehensive insights into student wellness and platform usage
-        </p>
-        <div />
-      </div>
-
-      {/* Global Date Filter */}
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <Filter className="h-4 w-4 text-primary" />
-          <select
-            className="border rounded-lg px-2 py-1 text-sm"
-            value={globalRange}
-            onChange={(e) => setGlobalRange(e.target.value as any)}
-          >
-            <option value="this_week">This Week</option>
-            <option value="last_week">Last Week</option>
-            <option value="this_month">This Month</option>
-            <option value="custom">Custom Range</option>
-          </select>
-          {globalRange === 'custom' && (
-            <>
-              <input
-                type="date"
-                className="border rounded-lg px-2 py-1 text-sm"
-                value={rangeStart}
-                onChange={(e) => setRangeStart(e.target.value)}
-              />
-              <span className="text-gray-400">—</span>
-              <input
-                type="date"
-                className="border rounded-lg px-2 py-1 text-sm"
-                value={rangeEnd}
-                onChange={(e) => setRangeEnd(e.target.value)}
-              />
-            </>
-          )}
+      <main
+        className={`transition-all duration-200 min-h-screen pt-1 pr-6 pb-6 w-full p-4 sm:p-5 space-y-5 max-w-full`}
+        style={{ minHeight: "100vh", backgroundColor: "transparent" }}
+      >
+        {/* Header */}
+        <div className="ml-2">
+          <h1 className={styles.headerTitle}>Reports & Analytics</h1>
+          <p className={styles.headerSubtitle}>
+            Comprehensive insights into student wellness and platform usage
+          </p>
+          <div />
         </div>
-      </div>
 
-      {/* Top Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {topStats.length === 0 ? (
-          <div className="col-span-1 sm:col-span-2 lg:col-span-4">
-            <div className="bg-white rounded-2xl shadow p-6 text-center text-sm text-gray-500">No statistics available for this period.</div>
-          </div>
-        ) : topStats.map((stat, i) => {
-          const isTotal = stat.label === "Total Students";
-          const isRisk = stat.label === "At-Risk Students";
-          const isActive = stat.label === "Active Users";
-          const isWellness = stat.label === "Avg. Wellness Score";
-          const baseCard = "rounded-2xl shadow p-4 cursor-help";
-          const gradientGreen = "bg-gradient-to-br from-primary/85 to-primary text-white";
-          const gradientRed = "bg-gradient-to-br from-[#f87171] to-[#dc2626] text-white";
-          const gradientBlue = "bg-gradient-to-br from-[#38bdf8] to-[#0ea5e9] text-white";
-          const gradientYellow = "bg-gradient-to-br from-[#facc15] to-[#eab308] text-white";
-          const whiteCard = "bg-white hover:shadow-md transition";
-          const cardClass = `${baseCard} ${
-            isTotal
-              ? gradientGreen
-              : isRisk
-              ? gradientRed
-              : isActive
-              ? gradientBlue
-              : isWellness
-              ? gradientYellow
-              : whiteCard
-          }`;
-          const isGradient = isTotal || isRisk || isActive || isWellness;
-          const titleClass = isGradient ? "text-sm font-medium opacity-90" : "text-sm font-medium text-gray-600";
-          const valueClass = isGradient ? "text-3xl font-extrabold mt-1" : "text-xl font-bold text-gray-900";
-          const deltaClass = isGradient ? "text-xs opacity-90 mt-1 flex items-center gap-1" : `text-xs ${stat.deltaColor}`;
-
-          // Tooltips for each stat
-          const tooltips: Record<string, string> = {
-            "Total Students": "Total number of registered students in the system.",
-            "Active Users": "Students who submitted at least one check-in this week. Excludes counselors.",
-            "At-Risk Students": "Students with open high-severity alerts requiring attention.",
-            "Avg. Wellness Score": "Average wellness index (0-100) based on mood, energy, and stress levels this week.",
-          };
-
-          return (
-            <div key={i} className={cardClass} title={tooltips[stat.label] || stat.label}>
-              <div className="flex items-center justify-between">
-                <h3 className={titleClass}>{stat.label}</h3>
-                {stat.delta && (isTotal || isRisk) ? (
-                  <ChevronRight className="h-3 w-3" />
-                ) : stat.delta ? (
-                  <TrendingUp className={`h-3 w-3 ${stat.deltaColor}`} />
-                ) : null}
-              </div>
-              <div className={valueClass}>{stat.value}</div>
-              {stat.delta && (
-                <div className={deltaClass}>
-                  {(isTotal || isRisk) && <ChevronRight className="h-3 w-3" />} {stat.delta}
-                  <span className="ml-1 opacity-70 text-[10px]">vs last week</span>
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Trends + Academic Calendar (Trends emphasized) */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-        <div className="bg-white rounded-2xl shadow p-4 w-full max-w-full xl:col-span-2">
-          <div className="flex justify-between items-center mb-2">
-            <div className="flex items-center gap-2">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <h2 className={`${styles.sectionTitle} cursor-help`}>Wellness Trends</h2>
-                </TooltipTrigger>
-                <TooltipContent side="top" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
-                  Weekly wellness metrics: Wellness Index (overall score 0-100), Mood (happiness level), Energy (activity level), and Stress (pressure level). Higher is better for all except Stress.
-                </TooltipContent>
-              </Tooltip>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                className={`p-2 rounded-full border ${page === 0 ? "opacity-40 cursor-not-allowed" : "hover:bg-gray-100"}`}
-                onClick={() => setPage(p => Math.max(p - 1, 0))}
-                disabled={page === 0}
-                title="View earlier weeks"
-              >
-                <ChevronLeft className="h-5 w-5 text-primary" />
-              </button>
-              <button
-                className={`p-2 rounded-full border ${page === maxPage ? "opacity-40 cursor-not-allowed" : "hover:bg-gray-100"}`}
-                onClick={() => setPage(p => Math.min(p + 1, maxPage))}
-                disabled={page === maxPage}
-                title="View later weeks"
-              >
-                <ChevronRight className="h-5 w-5 text-primary" />
-              </button>
-            </div>
-          </div>
-
-          <div className="h-[350px] flex items-center justify-center -ml-1">
-            {paginatedTrendData.length === 0 ? (
-              <span className="text-gray-500 text-sm">No wellness data available.</span>
-            ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={paginatedTrendData} margin={{ top: 20, right: 60, bottom: 64, left: 0 }}>
-                  <defs>
-                    <linearGradient id="lineWellness" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="var(--primary)" stopOpacity={0.85} />
-                      <stop offset="100%" stopColor="#86efac" stopOpacity={0.25} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  <XAxis dataKey="week_label" interval={0} stroke="var(--primary)" angle={0} height={64} tick={{ fill: "var(--foreground)", fontSize: 12 }} />
-                  <YAxis domain={[0, 100]} tick={{ fill: "var(--foreground)", fontSize: 12 }} stroke="var(--primary)" />
-                  <RTooltip 
-                    content={({ active, payload, label }) => {
-                      if (active && payload && payload.length) {
-                        return (
-                          <div style={{
-                            background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
-                            color: '#fff',
-                            padding: '14px 18px',
-                            borderRadius: 12,
-                            fontSize: 13,
-                            boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
-                            border: '1px solid rgba(255,255,255,0.1)',
-                            minWidth: 160
-                          }}>
-                            <div style={{ fontWeight: 600, marginBottom: 10, color: '#e2e8f0', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: 8 }}>
-                              Week of {label}
-                            </div>
-                            {payload.map((entry: any, index: number) => (
-                              <div key={index} style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
-                                <span style={{ 
-                                  width: 10, 
-                                  height: 10, 
-                                  borderRadius: '50%', 
-                                  background: entry.color,
-                                  display: 'inline-block'
-                                }}></span>
-                                <span style={{ color: '#cbd5e1', flex: 1 }}>{entry.name}:</span>
-                                <span style={{ fontWeight: 600 }}>{entry.value}%</span>
-                              </div>
-                            ))}
-                          </div>
-                        );
-                      }
-                      return null;
-                    }}
-                  />
-                  <Legend verticalAlign="top" height={32} wrapperStyle={{ fontSize: "0.75rem" }} />
-                  <Line type="monotone" dataKey="wellness" name="Wellness Index" stroke="var(--primary)" strokeWidth={3} dot={{ r: 5, strokeWidth: 2, fill: 'white' }} activeDot={{ r: 8, fill: 'var(--primary)', stroke: 'white', strokeWidth: 2 }} />
-                  <Line type="monotone" dataKey="mood" name="Mood" stroke="#22c55e" strokeWidth={2} dot={{ r: 4, fill: 'white' }} activeDot={{ r: 7, fill: '#22c55e', stroke: 'white', strokeWidth: 2 }} />
-                  <Line type="monotone" dataKey="energy" name="Energy" stroke="#3b82f6" strokeWidth={2} dot={{ r: 4, fill: 'white' }} activeDot={{ r: 7, fill: '#3b82f6', stroke: 'white', strokeWidth: 2 }} />
-                  <Line type="monotone" dataKey="stress" name="Stress" stroke="#ef4444" strokeWidth={2} dot={{ r: 4, fill: 'white' }} activeDot={{ r: 7, fill: '#ef4444', stroke: 'white', strokeWidth: 2 }} />
-                </LineChart>
-              </ResponsiveContainer>
+        {/* Global Date Filter */}
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <Filter className="h-4 w-4 text-primary" />
+            <select
+              className="border rounded-lg px-2 py-1 text-sm"
+              value={globalRange}
+              onChange={(e) => setGlobalRange(e.target.value as any)}
+            >
+              <option value="this_week">This Week</option>
+              <option value="last_week">Last Week</option>
+              <option value="this_month">This Month</option>
+              <option value="custom">Custom Range</option>
+            </select>
+            {globalRange === 'custom' && (
+              <>
+                <input
+                  type="date"
+                  className="border rounded-lg px-2 py-1 text-sm"
+                  value={rangeStart}
+                  onChange={(e) => setRangeStart(e.target.value)}
+                />
+                <span className="text-gray-400">—</span>
+                <input
+                  type="date"
+                  className="border rounded-lg px-2 py-1 text-sm"
+                  value={rangeEnd}
+                  onChange={(e) => setRangeEnd(e.target.value)}
+                />
+              </>
             )}
           </div>
-
-          {/* Stats Row */}
-          <div className="flex flex-col sm:flex-row justify-between mt-4 gap-2">
-            {(() => {
-              const chText = `${changePct >= 0 ? "+" : ""}${changePct}%`;
-              const items = [
-                { label: "Current Index", value: `${Math.round(latestIndex)}%`, tooltip: "This week's overall wellness score (0-100%). Combines mood, energy, and stress metrics." },
-                { label: "Change vs Last Week", value: chText, className: changePct >= 0 ? "text-green-600" : "text-red-600", tooltip: "Percentage change in wellness index compared to the previous week." },
-                { label: "Active Event", value: summary?.event_name ? `${summary.event_name}` : "None", tooltip: "Current academic event that may affect student wellness (exams, holidays, etc.)." },
-              ];
-              return items.map((s, i) => (
-                <div key={i} className="flex-1 bg-gray-50 rounded-xl p-3 text-center cursor-help" title={s.tooltip}>
-                  <div className="text-[#6b7280] text-xs font-medium">{s.label}</div>
-                  <div className={`text-lg font-bold ${s.className || "text-[#333]"}`}>{s.value}</div>
-                </div>
-              ));
-            })()}
-          </div>
         </div>
 
-        <div className="bg-white rounded-2xl shadow-sm border p-4 xl:col-span-1 flex flex-col">
-          <div className="flex items-center justify-between mb-4">
-            <div>
+        {/* Top Stats */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {topStats.length === 0 ? (
+            <div className="col-span-1 sm:col-span-2 lg:col-span-4">
+              <div className="bg-white rounded-2xl shadow p-6 text-center text-sm text-gray-500">No statistics available for this period.</div>
+            </div>
+          ) : topStats.map((stat, i) => {
+            const isTotal = stat.label === "Total Students";
+            const isRisk = stat.label === "At-Risk Students";
+            const isActive = stat.label === "Active Users";
+            const isWellness = stat.label === "Avg. Wellness Score";
+            const baseCard = "rounded-2xl shadow p-4 cursor-help";
+            const gradientGreen = "bg-gradient-to-br from-primary/85 to-primary text-white";
+            const gradientRed = "bg-gradient-to-br from-[#f87171] to-[#dc2626] text-white";
+            const gradientBlue = "bg-gradient-to-br from-[#38bdf8] to-[#0ea5e9] text-white";
+            const gradientYellow = "bg-gradient-to-br from-[#facc15] to-[#eab308] text-white";
+            const whiteCard = "bg-white hover:shadow-md transition";
+            const cardClass = `${baseCard} ${isTotal
+              ? gradientGreen
+              : isRisk
+                ? gradientRed
+                : isActive
+                  ? gradientBlue
+                  : isWellness
+                    ? gradientYellow
+                    : whiteCard
+              }`;
+            const isGradient = isTotal || isRisk || isActive || isWellness;
+            const titleClass = isGradient ? "text-sm font-medium opacity-90" : "text-sm font-medium text-gray-600";
+            const valueClass = isGradient ? "text-3xl font-extrabold mt-1" : "text-xl font-bold text-gray-900";
+            const deltaClass = isGradient ? "text-xs opacity-90 mt-1 flex items-center gap-1" : `text-xs ${stat.deltaColor}`;
+
+            // Tooltips for each stat
+            const tooltips: Record<string, string> = {
+              "Total Students": "Total number of registered students in the system.",
+              "Active Users": "Students who submitted at least one check-in this week. Excludes counselors.",
+              "At-Risk Students": "Students with open high-severity alerts requiring attention.",
+              "Avg. Wellness Score": "Average wellness index (0-100) based on mood, energy, and stress levels this week.",
+            };
+
+            return (
+              <Tooltip key={i}>
+                <TooltipTrigger asChild>
+                  <div className={cardClass}>
+                    <div className="flex items-center justify-between">
+                      <h3 className={titleClass}>{stat.label}</h3>
+                      {stat.delta && (isTotal || isRisk) ? (
+                        <ChevronRight className="h-3 w-3" />
+                      ) : stat.delta ? (
+                        <TrendingUp className={`h-3 w-3 ${stat.deltaColor}`} />
+                      ) : null}
+                    </div>
+                    <div className={valueClass}>{stat.value}</div>
+                    {stat.delta && (
+                      <div className={deltaClass}>
+                        {(isTotal || isRisk) && <ChevronRight className="h-3 w-3" />} {stat.delta}
+                        <span className="ml-1 opacity-70 text-[10px]">vs last week</span>
+                      </div>
+                    )}
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
+                  {tooltips[stat.label] || stat.label}
+                </TooltipContent>
+              </Tooltip>
+            );
+          })}
+        </div>
+
+        {/* Trends + Academic Calendar (Trends emphasized) */}
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+          <div className="bg-white rounded-2xl shadow p-4 w-full max-w-full xl:col-span-2">
+            <div className="flex justify-between items-center mb-2">
               <div className="flex items-center gap-2">
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <h2 className={`${styles.sectionTitle} cursor-help`}>Academic Calendar</h2>
+                    <h2 className={`${styles.sectionTitle} cursor-help`}>Wellness Trends</h2>
                   </TooltipTrigger>
                   <TooltipContent side="top" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
-                    Upload .ics or .csv calendar files to track academic events. Events are correlated with wellness trends to identify stress patterns during exams or holidays.
+                    Weekly wellness metrics: Wellness Index (overall score 0-100), Mood (happiness level), Energy (activity level), and Stress (pressure level). Higher is better for all except Stress.
                   </TooltipContent>
                 </Tooltip>
               </div>
-              <p className="text-xs text-[#6b7280] mt-1">Track events that may impact student wellness.</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                className="p-2 rounded-full border hover:bg-gray-100"
-                onClick={() => setCalendarMonth(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}
-                aria-label="Previous month"
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </button>
-              <span className="text-sm font-semibold text-[#111827] w-28 text-center">
-                {calendarMonth.toLocaleDateString(undefined, { month: "long", year: "numeric" })}
-              </span>
-              <button
-                className="p-2 rounded-full border hover:bg-gray-100"
-                onClick={() => setCalendarMonth(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}
-                aria-label="Next month"
-              >
-                <ChevronRight className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-7 gap-1 text-[11px] font-semibold text-[#6b7280]">
-            {"Sun Mon Tue Wed Thu Fri Sat".split(" ").map((day) => (
-              <div key={day} className="text-center py-1 uppercase tracking-wide">{day}</div>
-            ))}
-          </div>
-          <div className="grid grid-cols-7 gap-1 mt-1 flex-1">
-            {calendarDays.map(({ date, inMonth, events: dayEvents }, idx) => {
-              const isToday = (() => {
-                const now = new Date();
-                return date.getDate() === now.getDate() && date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
-              })();
-              return (
-                <div
-                  key={`${date.toISOString()}-${idx}`}
-                  className={`rounded-xl border p-2 min-h-[56px] flex flex-col gap-1 text-[10px] ${inMonth ? "bg-gray-50" : "bg-gray-100/60 text-gray-400"} ${isToday ? "border-primary" : "border-gray-200"}`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className={`font-semibold text-base ${inMonth ? "text-[#111827]" : "text-gray-400"}`}>{date.getDate()}</span>
-                    {dayEvents.length > 0 && <span className="text-[10px] text-primary font-semibold">{dayEvents.length}</span>}
-                  </div>
-                  {dayEvents.slice(0, 2).map((ev, i) => (
-                    <div key={i} className="rounded-md bg-primary/10 px-1 py-0.5 text-[10px] text-primary truncate">
-                      {ev.name}
-                    </div>
-                  ))}
-                  {dayEvents.length > 2 && (
-                    <div className="text-[9px] text-[#6b7280]">+{dayEvents.length - 2} more</div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-
-      {/* Weekly Insights (full width) */}
-      <div className="grid grid-cols-1 gap-4">
-        <div className="bg-white rounded-2xl shadow p-4 relative">
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <h2 className={`${styles.sectionTitle} cursor-help`}>Weekly Insights</h2>
-                </TooltipTrigger>
-                <TooltipContent side="top" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
-                  NLP-generated wellness analysis from student check-ins and journals. Auto-generated every Monday based on the previous week's data.
-                </TooltipContent>
-              </Tooltip>
-              <p className="text-xs text-[#6b7280] mt-1">
-                NLP-generated wellness analysis from student check-ins and journals.
-              </p>
-            </div>
-            {insights.length > 0 && (
               <div className="flex items-center gap-2">
-                <button className="p-1 rounded-full border hover:bg-gray-100" onClick={() => weeklySliderRef.current?.slickPrev()} aria-label="Previous insight">
-                  <ChevronLeft className="h-4 w-4" />
-                </button>
-                <button className="p-1 rounded-full border hover:bg-gray-100" onClick={() => weeklySliderRef.current?.slickNext()} aria-label="Next insight">
-                  <ChevronRight className="h-4 w-4" />
-                </button>
-              </div>
-            )}
-          </div>
-          {insights.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-8 text-center">
-              <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-3">
-                <Lightbulb className="h-6 w-6 text-gray-400" />
-              </div>
-              <p className="text-sm text-gray-500 font-medium">No weekly insights yet</p>
-              <p className="text-xs text-gray-400 mt-1 max-w-[280px]">
-                Insights are automatically generated every Monday when there's enough student data from the previous week.
-              </p>
-            </div>
-          ) : (
-            <div className="relative pb-10">
-              <Slider ref={weeklySliderRef} {...insightSliderSettings} className="weekly-insights-slider">
-                {insights.map((insight, idx) => (
-                  <div key={`${insight.week_start}-${idx}`} className="px-1 h-full">
-                    <div className="rounded-2xl shadow-sm border bg-gray-50 p-4 text-sm flex h-full flex-col space-y-3 transition hover:shadow-md">
-                      {/* Header with date range and risk badge */}
-                      <div className="flex items-center justify-between">
-                        <div className="text-xs text-[#6b7280]">
-                          <span>{new Date(insight.week_start).toLocaleDateString()} - {new Date(insight.week_end).toLocaleDateString()}</span>
-                          {insight.event_name && (
-                            <span className="ml-2 px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-full text-[10px] font-medium">
-                              {insight.event_name}
-                            </span>
-                          )}
-                        </div>
-                        {insight.metadata?.risk_level && (
-                          <RiskBadge
-                            level={insight.metadata.risk_level}
-                            score={insight.metadata.risk_score}
-                            reasoning={insight.metadata.risk_reasoning}
-                            size="sm"
-                          />
-                        )}
-                      </div>
-
-                      {/* Title and summary */}
-                      <div>
-                        <h3 className="text-base font-semibold text-[#111827]">{insight.title}</h3>
-                        <p className="text-[#374151] mt-1 leading-relaxed">{insight.summary || insight.description}</p>
-                      </div>
-
-                      {/* Mood Timeline */}
-                      {insight.mood_trends && insight.mood_trends.daily && insight.mood_trends.daily.length > 0 && (
-                        <div className="bg-white rounded-lg p-3 border">
-                          <MoodTimeline moodTrends={insight.mood_trends} height={80} showTrendBadge={true} />
-                        </div>
-                      )}
-
-                      {/* What Changed section */}
-                      {(insight.what_improved?.length || insight.what_declined?.length) && (
-                        <div className="grid grid-cols-2 gap-2">
-                          {insight.what_improved && insight.what_improved.length > 0 && (
-                            <div className="bg-green-50 rounded-lg p-2">
-                              <div className="flex items-center gap-1 text-green-700 text-[10px] font-semibold">
-                                <TrendingUp className="h-3 w-3" /> Improved
-                              </div>
-                              <div className="text-xs text-green-800 mt-1">
-                                {insight.what_improved.map(item => item.replace(/_/g, ' ')).join(', ')}
-                              </div>
-                            </div>
-                          )}
-                          {insight.what_declined && insight.what_declined.length > 0 && (
-                            <div className="bg-red-50 rounded-lg p-2">
-                              <div className="flex items-center gap-1 text-red-700 text-[10px] font-semibold">
-                                <TrendingDown className="h-3 w-3" /> Declined
-                              </div>
-                              <div className="text-xs text-red-800 mt-1">
-                                {insight.what_declined.map(item => item.replace(/_/g, ' ')).join(', ')}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Recommendation */}
-                      <div className="bg-white rounded-lg p-3 border border-dashed border-primary/40">
-                        <div className="flex items-center gap-1 text-xs uppercase tracking-wide text-primary font-semibold mb-1">
-                          <Lightbulb className="h-3 w-3" /> Recommendation
-                        </div>
-                        <p className="text-sm text-[#0f172a] leading-relaxed">
-                          {insight.recommendations?.[0] || insight.recommendation}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </Slider>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Engagement Metrics (full width under paired sections) */}
-      <div className="bg-white rounded-2xl shadow p-4 min-h-[200px] flex flex-col">
-        <div className="flex items-center gap-2 mb-3">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <h3 className="text-[#333] font-semibold text-sm cursor-help">Engagement Metrics</h3>
-            </TooltipTrigger>
-            <TooltipContent side="top" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
-              Tracks student participation and activity levels. Higher engagement often correlates with better wellness outcomes.
-            </TooltipContent>
-          </Tooltip>
-        </div>
-        {!engagement ? (
-          <div className="flex flex-col items-center justify-center py-6 text-center flex-1">
-            <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center mb-2">
-              <Activity className="h-5 w-5 text-gray-400" />
-            </div>
-            <p className="text-sm text-gray-500">No engagement data yet</p>
-            <p className="text-xs text-gray-400 mt-1">Data will appear once students start using the app.</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-center flex-1">
-            <div className="bg-gray-50 rounded-xl p-3 flex flex-col justify-center cursor-help" title="Number of unique students who submitted at least one check-in this week.">
-              <div className="text-[#6b7280] text-xs">Active Students (This Week)</div>
-              <div className="text-xl font-bold text-[#111827]">{engagement.active_students_this_week}</div>
-              <div className="text-xs text-[#6b7280]">Last Week: {engagement.active_students_last_week}</div>
-            </div>
-            <div className="bg-gray-50 rounded-xl p-3 flex flex-col justify-center cursor-help" title="Average number of emotional check-ins submitted per active student this week.">
-              <div className="text-[#6b7280] text-xs">Avg Check-ins / Student</div>
-              <div className="text-xl font-bold text-[#111827]">{engagement.avg_checkins_per_student}</div>
-            </div>
-            <div className="bg-gray-50 rounded-xl p-3 flex flex-col justify-center cursor-help" title="Percentage change in student participation compared to last week. Positive = more students engaging.">
-              <div className="text-[#6b7280] text-xs">Participation Change</div>
-              <div className={`text-xl font-bold ${String(engagement.participation_change).startsWith('-') ? 'text-red-600' : 'text-green-600'}`}>{engagement.participation_change}</div>
-            </div>
-          </div>
-        )}
-      </div>
-      {/* Concerns & Interventions */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="bg-white rounded-2xl shadow p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <h3 className="text-[#333] font-semibold text-sm cursor-help">Top Student Concerns</h3>
-              </TooltipTrigger>
-              <TooltipContent side="top" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
-                AI-analyzed themes from student journals and check-in comments. Each concern shows unique student count (same student counted once per concern).
-              </TooltipContent>
-            </Tooltip>
-          </div>
-          <div className="space-y-2">
-            {concerns.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-8 text-center">
-                <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-3">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
-                </div>
-                <p className="text-sm text-gray-500 font-medium">No top student concerns yet</p>
-              </div>
-            ) : (
-              concerns.map((c, i) => (
-                <div key={i} className="cursor-help" title={`${c.students} unique students expressed concerns related to "${c.label}"`}>
-                  <div className="flex justify-between text-xs flex-wrap gap-1">
-                    <span className="font-medium">{c.label}</span>
-                    <span className="text-gray-500">{c.students} students ({c.percent}%)</span>
-                  </div>
-                  <div className="h-2 bg-[#e5e5e5] rounded mt-1">
-                    <div className="h-2 rounded transition-all" style={{ width: `${c.percent}%`, background: c.barColor }}></div>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        <div className="bg-white rounded-2xl shadow p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <h3 className="text-[#333] font-semibold text-sm cursor-help">Intervention Success</h3>
-              </TooltipTrigger>
-              <TooltipContent side="top" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
-                Measures counselor intervention effectiveness. Success rate combines alert resolution (60%) and conversation completion (40%).
-              </TooltipContent>
-            </Tooltip>
-          </div>
-          {chatKpi ? (
-            <div className="mb-3 grid grid-cols-2 gap-2 text-xs">
-              <div className="bg-gray-50 rounded-xl p-3 text-center cursor-help" title="Overall success rate: weighted average of alert resolution (60%) and conversation completion (40%).">
-                <div className="text-[#6b7280]">Overall Success</div>
-                <div className="text-lg font-bold text-green-600">{chatKpi.overall_success_rate}%</div>
-              </div>
-              <div className="bg-gray-50 rounded-xl p-3 text-center cursor-help" title="Total chat conversations between students and counselors.">
-                <div className="text-[#6b7280]">Total Sessions</div>
-                <div className="text-lg font-bold text-[#111827]">{chatKpi.total_sessions}</div>
-              </div>
-              <div className="bg-gray-50 rounded-xl p-3 text-center cursor-help" title="Percentage of alerts that have been resolved by counselors.">
-                <div className="text-[#6b7280]">Alerts Resolved</div>
-                <div className="text-lg font-bold text-[#111827]">{(chatKpi as any).resolved_alerts || 0}/{(chatKpi as any).total_alerts || 0}</div>
-              </div>
-              <div className="bg-gray-50 rounded-xl p-3 text-center cursor-help" title="Average number of messages exchanged per conversation.">
-                <div className="text-[#6b7280]">Avg. Messages</div>
-                <div className="text-lg font-bold text-[#111827]">{chatKpi.average_messages_per_conversation}</div>
-              </div>
-            </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center py-4 text-center mb-3">
-              <p className="text-sm text-gray-500">No intervention data yet</p>
-              <p className="text-xs text-gray-400 mt-1">Metrics will appear after counselor-student interactions.</p>
-            </div>
-          )}
-          {interventions.length > 0 && (
-            <div className="space-y-2 border-t pt-3">
-              <div className="text-xs text-gray-500 font-medium mb-2">By Intervention Type</div>
-              {interventions.map((i, idx) => (
-                <div key={idx}>
-                  <div className="flex justify-between text-xs flex-wrap gap-1">
-                    <span className="font-medium">{i.label}</span>
-                    <span className="text-gray-500">{i.participants} ({i.percent}%)</span>
-                  </div>
-                  <div className="h-2 bg-[#e5e5e5] rounded mt-1">
-                    <div className="h-2 rounded transition-all" style={{ width: `${i.percent}%`, background: i.barColor }}></div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Students Requiring Attention Table */}
-      <div className="bg-white rounded-2xl shadow p-4 overflow-x-auto">
-        <div className="flex items-center gap-2 mb-3">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <h3 className={`${styles.tableTitle} cursor-help`}>
-                <span className="mr-2">Students Requiring Attention</span>
-                <span className="bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-medium">{attentionStudents.length}</span>
-              </h3>
-            </TooltipTrigger>
-            <TooltipContent side="top" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
-              Students with open high-severity alerts. Click "Notify" to send a wellness check notification to their mobile app.
-            </TooltipContent>
-          </Tooltip>
-        </div>
-        {attentionStudents.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-8 text-center">
-            <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center mb-3">
-              <UserRound className="h-6 w-6 text-green-600" />
-            </div>
-            <p className="text-sm text-gray-600 font-medium">All students are doing well!</p>
-            <p className="text-xs text-gray-400 mt-1">No high-risk alerts requiring immediate attention.</p>
-          </div>
-        ) : (
-          <table className="w-full text-xs min-w-[600px]">
-            <thead>
-              <tr className="text-[#6b7280] border-b">
-                <th className="py-2 text-left" title="Student's display name">Student</th>
-                <th className="py-2 text-left" title="Current risk assessment level">Risk Level</th>
-                <th className="py-2 text-left" title="Calculated risk score (0-100)">Score</th>
-                <th className="py-2 text-left" title="Main issues identified from check-ins and journals">Primary Concerns</th>
-                <th className="py-2 text-left" title="Available actions for this student">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {attentionStudents.map((student, i) => (
-                <tr key={i} className="border-b hover:bg-gray-50 transition-colors">
-                  <td className="py-2 font-medium text-[#333]">{student.name}</td>
-                  <td>
-                    <span className={`px-2 py-1 rounded text-xs font-medium ${student.riskClass}`}>{student.risk}</span>
-                  </td>
-                  <td className="font-bold text-[#333]">{student.score}</td>
-                  <td>
-                    {student.concerns.map((c, idx) => (
-                      <span key={idx} className={styles.concernTag}>{c}</span>
-                    ))}
-                  </td>
-                  <td className="flex gap-2">
-                    <button
-                      title="Send wellness check notification"
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors shadow-sm"
-                      onClick={() => {
-                        setNotifyStudent(student);
-                        setNotifyType('automated');
-                        setManualMessage('');
-                        setShowNotifyModal(true);
-                      }}
-                    >
-                      <Bell className="h-3.5 w-3.5" />
-                      Notify
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      {/* Notification Modal */}
-      {showNotifyModal && notifyStudent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-md relative">
-            <button
-              onClick={() => {
-                setShowNotifyModal(false);
-                setNotifyStudent(null);
-              }}
-              className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600 hover:text-gray-800 transition-colors"
-            >
-              <X className="h-4 w-4" />
-            </button>
-            
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                <Bell className="h-5 w-5 text-primary" />
-              </div>
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900">Send Notification</h3>
-                <p className="text-sm text-gray-500">to {notifyStudent.name}</p>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              {/* Notification Type Selection */}
-              <div className="grid grid-cols-2 gap-3">
                 <button
-                  onClick={() => setNotifyType('automated')}
-                  className={`p-3 rounded-xl border-2 transition-all ${
-                    notifyType === 'automated'
-                      ? 'border-primary bg-primary/5'
-                      : 'border-gray-200 hover:border-gray-300'
-                  }`}
+                  className={`p-2 rounded-full border ${page === 0 ? "opacity-40 cursor-not-allowed" : "hover:bg-gray-100"}`}
+                  onClick={() => setPage(p => Math.max(p - 1, 0))}
+                  disabled={page === 0}
+                  title="View earlier weeks"
                 >
-                  <div className="flex flex-col items-center gap-2">
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                      notifyType === 'automated' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-500'
-                    }`}>
-                      <Send className="h-4 w-4" />
-                    </div>
-                    <span className={`text-sm font-medium ${notifyType === 'automated' ? 'text-primary' : 'text-gray-600'}`}>
-                      Automated
-                    </span>
-                    <span className="text-xs text-gray-400 text-center">Pre-written wellness message</span>
-                  </div>
+                  <ChevronLeft className="h-5 w-5 text-primary" />
                 </button>
                 <button
-                  onClick={() => setNotifyType('manual')}
-                  className={`p-3 rounded-xl border-2 transition-all ${
-                    notifyType === 'manual'
-                      ? 'border-primary bg-primary/5'
-                      : 'border-gray-200 hover:border-gray-300'
-                  }`}
+                  className={`p-2 rounded-full border ${page === maxPage ? "opacity-40 cursor-not-allowed" : "hover:bg-gray-100"}`}
+                  onClick={() => setPage(p => Math.min(p + 1, maxPage))}
+                  disabled={page === maxPage}
+                  title="View later weeks"
                 >
-                  <div className="flex flex-col items-center gap-2">
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                      notifyType === 'manual' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-500'
-                    }`}>
-                      <MessageSquare className="h-4 w-4" />
-                    </div>
-                    <span className={`text-sm font-medium ${notifyType === 'manual' ? 'text-primary' : 'text-gray-600'}`}>
-                      Manual
-                    </span>
-                    <span className="text-xs text-gray-400 text-center">Write custom message</span>
-                  </div>
+                  <ChevronRight className="h-5 w-5 text-primary" />
                 </button>
               </div>
+            </div>
 
-              {/* Message Preview/Input */}
-              {notifyType === 'automated' ? (
-                <div className="p-4 bg-gray-50 rounded-xl">
-                  <p className="text-xs text-gray-500 mb-2">Message Preview:</p>
-                  <p className="text-sm text-gray-700">
-                    Hi {notifyStudent.name}, we noticed a few signs that you might benefit from a quick chat. When you're ready, please consider speaking with a counselor — we're here to help.
-                  </p>
-                </div>
+            <div className="h-[350px] flex items-center justify-center -ml-1">
+              {paginatedTrendData.length === 0 ? (
+                <span className="text-gray-500 text-sm">No wellness data available.</span>
               ) : (
-                <div>
-                  <label className="text-xs text-gray-500 mb-2 block">Custom Message:</label>
-                  <textarea
-                    value={manualMessage}
-                    onChange={(e) => setManualMessage(e.target.value)}
-                    placeholder="Write your message here..."
-                    className="w-full p-3 border border-gray-200 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-                    rows={4}
-                  />
-                </div>
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={paginatedTrendData} margin={{ top: 20, right: 60, bottom: 64, left: 0 }}>
+                    <defs>
+                      <linearGradient id="lineWellness" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="var(--primary)" stopOpacity={0.85} />
+                        <stop offset="100%" stopColor="#86efac" stopOpacity={0.25} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis dataKey="week_label" interval={0} stroke="var(--primary)" angle={0} height={64} tick={{ fill: "var(--foreground)", fontSize: 12 }} />
+                    <YAxis domain={[0, 100]} tick={{ fill: "var(--foreground)", fontSize: 12 }} stroke="var(--primary)" />
+                    <RTooltip
+                      content={({ active, payload, label }) => {
+                        if (active && payload && payload.length) {
+                          return (
+                            <div style={{
+                              background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
+                              color: '#fff',
+                              padding: '14px 18px',
+                              borderRadius: 12,
+                              fontSize: 13,
+                              boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+                              border: '1px solid rgba(255,255,255,0.1)',
+                              minWidth: 160
+                            }}>
+                              <div style={{ fontWeight: 600, marginBottom: 10, color: '#e2e8f0', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: 8 }}>
+                                Week of {label}
+                              </div>
+                              {payload.map((entry: any, index: number) => (
+                                <div key={index} style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
+                                  <span style={{
+                                    width: 10,
+                                    height: 10,
+                                    borderRadius: '50%',
+                                    background: entry.color,
+                                    display: 'inline-block'
+                                  }}></span>
+                                  <span style={{ color: '#cbd5e1', flex: 1 }}>{entry.name}:</span>
+                                  <span style={{ fontWeight: 600 }}>{entry.value}%</span>
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        }
+                        return null;
+                      }}
+                    />
+                    <Legend verticalAlign="top" height={32} wrapperStyle={{ fontSize: "0.75rem" }} />
+                    <Line type="monotone" dataKey="wellness" name="Wellness Index" stroke="var(--primary)" strokeWidth={3} dot={{ r: 5, strokeWidth: 2, fill: 'white' }} activeDot={{ r: 8, fill: 'var(--primary)', stroke: 'white', strokeWidth: 2 }} />
+                    <Line type="monotone" dataKey="mood" name="Mood" stroke="#22c55e" strokeWidth={2} dot={{ r: 4, fill: 'white' }} activeDot={{ r: 7, fill: '#22c55e', stroke: 'white', strokeWidth: 2 }} />
+                    <Line type="monotone" dataKey="energy" name="Energy" stroke="#3b82f6" strokeWidth={2} dot={{ r: 4, fill: 'white' }} activeDot={{ r: 7, fill: '#3b82f6', stroke: 'white', strokeWidth: 2 }} />
+                    <Line type="monotone" dataKey="stress" name="Stress" stroke="#ef4444" strokeWidth={2} dot={{ r: 4, fill: 'white' }} activeDot={{ r: 7, fill: '#ef4444', stroke: 'white', strokeWidth: 2 }} />
+                  </LineChart>
+                </ResponsiveContainer>
               )}
             </div>
 
-            <div className="flex justify-end gap-3 mt-6 pt-4 border-t">
+            {/* Stats Row */}
+            <div className="flex flex-col sm:flex-row justify-between mt-4 gap-2">
+              {(() => {
+                const chText = `${changePct >= 0 ? "+" : ""}${changePct}%`;
+                const items = [
+                  { label: "Current Index", value: `${Math.round(latestIndex)}%`, tooltip: "This week's overall wellness score (0-100%). Combines mood, energy, and stress metrics." },
+                  { label: "Change vs Last Week", value: chText, className: changePct >= 0 ? "text-green-600" : "text-red-600", tooltip: "Percentage change in wellness index compared to the previous week." },
+                  { label: "Active Event", value: summary?.event_name ? `${summary.event_name}` : "None", tooltip: "Current academic event that may affect student wellness (exams, holidays, etc.)." },
+                ];
+                return items.map((s, i) => (
+                  <Tooltip key={i}>
+                    <TooltipTrigger asChild>
+                      <div className="flex-1 bg-gray-50 rounded-xl p-3 text-center cursor-help">
+                        <div className="text-[#6b7280] text-xs font-medium">{s.label}</div>
+                        <div className={`text-lg font-bold ${s.className || "text-[#333]"}`}>{s.value}</div>
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
+                      {s.tooltip}
+                    </TooltipContent>
+                  </Tooltip>
+                ));
+              })()}
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl shadow-sm border p-4 xl:col-span-1 flex flex-col">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <h2 className={`${styles.sectionTitle} cursor-help`}>Academic Calendar</h2>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
+                      Upload .ics or .csv calendar files to track academic events. Events are correlated with wellness trends to identify stress patterns during exams or holidays.
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+                <p className="text-xs text-[#6b7280] mt-1">Track events that may impact student wellness.</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  className="p-2 rounded-full border hover:bg-gray-100"
+                  onClick={() => setCalendarMonth(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}
+                  aria-label="Previous month"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                <span className="text-sm font-semibold text-[#111827] w-28 text-center">
+                  {calendarMonth.toLocaleDateString(undefined, { month: "long", year: "numeric" })}
+                </span>
+                <button
+                  className="p-2 rounded-full border hover:bg-gray-100"
+                  onClick={() => setCalendarMonth(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}
+                  aria-label="Next month"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-7 gap-1 text-[11px] font-semibold text-[#6b7280]">
+              {"Sun Mon Tue Wed Thu Fri Sat".split(" ").map((day) => (
+                <div key={day} className="text-center py-1 uppercase tracking-wide">{day}</div>
+              ))}
+            </div>
+            <div className="grid grid-cols-7 gap-1 mt-1 flex-1">
+              {calendarDays.map(({ date, inMonth, events: dayEvents }, idx) => {
+                const isToday = (() => {
+                  const now = new Date();
+                  return date.getDate() === now.getDate() && date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
+                })();
+                return (
+                  <div
+                    key={`${date.toISOString()}-${idx}`}
+                    className={`rounded-xl border p-2 min-h-[56px] flex flex-col gap-1 text-[10px] ${inMonth ? "bg-gray-50" : "bg-gray-100/60 text-gray-400"} ${isToday ? "border-primary" : "border-gray-200"}`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className={`font-semibold text-base ${inMonth ? "text-[#111827]" : "text-gray-400"}`}>{date.getDate()}</span>
+                      {dayEvents.length > 0 && <span className="text-[10px] text-primary font-semibold">{dayEvents.length}</span>}
+                    </div>
+                    {dayEvents.slice(0, 2).map((ev, i) => (
+                      <div key={i} className="rounded-md bg-primary/10 px-1 py-0.5 text-[10px] text-primary truncate">
+                        {ev.name}
+                      </div>
+                    ))}
+                    {dayEvents.length > 2 && (
+                      <div className="text-[9px] text-[#6b7280]">+{dayEvents.length - 2} more</div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* Weekly Insights & Behavioral Insights (side by side) */}
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          {/* Weekly Insights */}
+          <div className="bg-white rounded-2xl shadow p-4 relative">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <h2 className={`${styles.sectionTitle} cursor-help`}>Weekly Insights</h2>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
+                    NLP-generated wellness analysis from student check-ins and journals. Auto-generated every Monday based on the previous week's data.
+                  </TooltipContent>
+                </Tooltip>
+                <p className="text-xs text-[#6b7280] mt-1">
+                  NLP-generated wellness analysis from student check-ins and journals.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  className="px-3 py-1.5 text-xs font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 transition-colors"
+                  onClick={async () => {
+                    setGeneratingInsights(true);
+                    try {
+                      const res = await api.post<{ status: string; message: string }>('/reports/trigger-insights');
+                      const { status, message } = res.data;
+                      if (status === 'already_current') {
+                        alert(`✓ ${message}`);
+                      } else if (status === 'generated') {
+                        alert(`✓ ${message}`);
+                        setRefreshKey(prev => prev + 1); // Refresh to show new insights
+                      } else if (status === 'insufficient_data') {
+                        alert(`ℹ ${message}`);
+                      } else {
+                        alert(`Error: ${message}`);
+                      }
+                    } catch (err: any) {
+                      alert(`Error generating insights: ${err?.response?.data?.detail || err.message}`);
+                    } finally {
+                      setGeneratingInsights(false);
+                    }
+                  }}
+                  disabled={generatingInsights}
+                  aria-label="Generate weekly insights"
+                >
+                  {generatingInsights ? (
+                    <><svg className="animate-spin h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg> Generating...</>
+                  ) : (
+                    <><Lightbulb className="h-3.5 w-3.5" /> Generate</>)}
+                </button>
+                {insights.length > 0 && (
+                  <>
+                    <button className="p-1 rounded-full border hover:bg-gray-100" onClick={() => weeklySliderRef.current?.slickPrev()} aria-label="Previous insight">
+                      <ChevronLeft className="h-4 w-4" />
+                    </button>
+                    <button className="p-1 rounded-full border hover:bg-gray-100" onClick={() => weeklySliderRef.current?.slickNext()} aria-label="Next insight">
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+            {insights.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-8 text-center">
+                <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-3">
+                  <Lightbulb className="h-6 w-6 text-gray-400" />
+                </div>
+                <p className="text-sm text-gray-500 font-medium">No weekly insights yet</p>
+                <p className="text-xs text-gray-400 mt-1 max-w-[280px]">
+                  Insights are automatically generated every Monday when there's enough student data from the previous week.
+                </p>
+              </div>
+            ) : (
+              <div className="relative pb-10">
+                <Slider ref={weeklySliderRef} {...insightSliderSettings} className="weekly-insights-slider">
+                  {insights.map((insight, idx) => (
+                    <div key={`${insight.week_start}-${idx}`} className="px-1 h-full">
+                      <div className="rounded-2xl shadow-sm border bg-gray-50 p-4 text-sm flex h-full flex-col space-y-3 transition hover:shadow-md">
+                        {/* Header with date range and risk badge */}
+                        <div className="flex items-center justify-between">
+                          <div className="text-xs text-[#6b7280]">
+                            <span>{new Date(insight.week_start).toLocaleDateString()} - {new Date(insight.week_end).toLocaleDateString()}</span>
+                            {insight.event_name && (
+                              <span className="ml-2 px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-full text-[10px] font-medium">
+                                {insight.event_name}
+                              </span>
+                            )}
+                          </div>
+                          {insight.metadata?.risk_level && (
+                            <RiskBadge
+                              level={insight.metadata.risk_level}
+                              score={insight.metadata.risk_score}
+                              reasoning={insight.metadata.risk_reasoning}
+                              size="sm"
+                            />
+                          )}
+                        </div>
+
+                        {/* Title and summary */}
+                        <div>
+                          <h3 className="text-base font-semibold text-[#111827]">{insight.title}</h3>
+                          <p className="text-[#374151] mt-1 leading-relaxed">{insight.summary || insight.description}</p>
+                        </div>
+
+                        {/* Mood Timeline */}
+                        {insight.mood_trends && insight.mood_trends.daily && insight.mood_trends.daily.length > 0 && (
+                          <div className="bg-white rounded-lg p-3 border">
+                            <MoodTimeline moodTrends={insight.mood_trends} height={80} showTrendBadge={true} />
+                          </div>
+                        )}
+
+                        {/* What Changed section */}
+                        {(insight.what_improved?.length || insight.what_declined?.length) && (
+                          <div className="grid grid-cols-2 gap-2">
+                            {insight.what_improved && insight.what_improved.length > 0 && (
+                              <div className="bg-green-50 rounded-lg p-2">
+                                <div className="flex items-center gap-1 text-green-700 text-[10px] font-semibold">
+                                  <TrendingUp className="h-3 w-3" /> Improved
+                                </div>
+                                <div className="text-xs text-green-800 mt-1">
+                                  {insight.what_improved.map(item => item.replace(/_/g, ' ')).join(', ')}
+                                </div>
+                              </div>
+                            )}
+                            {insight.what_declined && insight.what_declined.length > 0 && (
+                              <div className="bg-red-50 rounded-lg p-2">
+                                <div className="flex items-center gap-1 text-red-700 text-[10px] font-semibold">
+                                  <TrendingDown className="h-3 w-3" /> Declined
+                                </div>
+                                <div className="text-xs text-red-800 mt-1">
+                                  {insight.what_declined.map(item => item.replace(/_/g, ' ')).join(', ')}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Recommendation */}
+                        <div className="bg-white rounded-lg p-3 border border-dashed border-primary/40">
+                          <div className="flex items-center gap-1 text-xs uppercase tracking-wide text-primary font-semibold mb-1">
+                            <Lightbulb className="h-3 w-3" /> Recommendation
+                          </div>
+                          <p className="text-sm text-[#0f172a] leading-relaxed">
+                            {insight.recommendations?.[0] || insight.recommendation}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </Slider>
+              </div>
+            )}
+          </div>
+
+          {/* Behavioral & Pattern Insights */}
+          <div className="bg-white rounded-2xl shadow p-4 relative">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <h2 className={`${styles.sectionTitle} cursor-help`}>Behavioral & Pattern Insights</h2>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
+                    NLP-detected behavioral patterns including activity timing, stress correlations, and usage trends. Helps identify when students are most active and potential intervention opportunities.
+                  </TooltipContent>
+                </Tooltip>
+                <p className="text-xs text-[#6b7280] mt-1">
+                  Activity patterns and behavioral trends from student data.
+                </p>
+              </div>
+              {behavioralInsights.length > 1 && (
+                <div className="flex items-center gap-2">
+                  <button className="p-1 rounded-full border hover:bg-gray-100" onClick={() => behavioralSliderRef.current?.slickPrev()} aria-label="Previous insight">
+                    <ChevronLeft className="h-4 w-4" />
+                  </button>
+                  <button className="p-1 rounded-full border hover:bg-gray-100" onClick={() => behavioralSliderRef.current?.slickNext()} aria-label="Next insight">
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
+            </div>
+            {behavioralLoading && behavioralInsights.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-8 text-center">
+                <LoadingSpinner className="h-8 w-8 text-primary" />
+                <p className="text-sm text-gray-500 mt-2">Loading behavioral insights...</p>
+              </div>
+            ) : behavioralInsights.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-8 text-center">
+                <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-3">
+                  <Activity className="h-6 w-6 text-gray-400" />
+                </div>
+                <p className="text-sm text-gray-500 font-medium">No behavioral insights yet</p>
+                <p className="text-xs text-gray-400 mt-1 max-w-[280px]">
+                  Behavioral patterns are analyzed daily when there's enough student activity data.
+                </p>
+              </div>
+            ) : (
+              <div className="relative pb-8">
+                <Slider ref={behavioralSliderRef} {...behavioralSliderSettings} className="behavioral-insights-slider">
+                  {behavioralInsights.map((insight, idx) => (
+                    <div key={idx} className="px-1">
+                      <div className="rounded-xl border bg-gradient-to-br from-gray-50 to-white p-4 transition hover:shadow-md min-h-[200px]">
+                        <h3 className="text-sm font-semibold text-[#111827] mb-2 flex items-center gap-2">
+                          <Activity className="h-4 w-4 text-primary" />
+                          {insight.title}
+                        </h3>
+                        <p className="text-xs text-[#6b7280] mb-3 leading-relaxed">{insight.description}</p>
+                        {insight.metrics && insight.metrics.length > 0 && (
+                          <div className="grid grid-cols-2 gap-2">
+                            {insight.metrics.map((metric, mIdx) => (
+                              <div key={mIdx} className="bg-white rounded-lg p-2 border text-center">
+                                <div className="text-[10px] text-[#6b7280] uppercase tracking-wide">{metric.label}</div>
+                                <div className="text-sm font-bold text-[#111827] mt-0.5">{metric.value}</div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </Slider>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Engagement Metrics (full width under paired sections) */}
+        <div className="bg-white rounded-2xl shadow p-4 min-h-[200px] flex flex-col">
+          <div className="flex items-center gap-2 mb-3">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <h3 className="text-[#333] font-semibold text-sm cursor-help">Engagement Metrics</h3>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
+                Tracks student participation and activity levels. Higher engagement often correlates with better wellness outcomes.
+              </TooltipContent>
+            </Tooltip>
+          </div>
+          {!engagement ? (
+            <div className="flex flex-col items-center justify-center py-6 text-center flex-1">
+              <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center mb-2">
+                <Activity className="h-5 w-5 text-gray-400" />
+              </div>
+              <p className="text-sm text-gray-500">No engagement data yet</p>
+              <p className="text-xs text-gray-400 mt-1">Data will appear once students start using the app.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-center flex-1">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="bg-gray-50 rounded-xl p-3 flex flex-col justify-center cursor-help">
+                    <div className="text-[#6b7280] text-xs">Active Students (This Week)</div>
+                    <div className="text-xl font-bold text-[#111827]">{engagement.active_students_this_week}</div>
+                    <div className="text-xs text-[#6b7280]">Last Week: {engagement.active_students_last_week}</div>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
+                  Number of unique students who submitted at least one check-in this week.
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="bg-gray-50 rounded-xl p-3 flex flex-col justify-center cursor-help">
+                    <div className="text-[#6b7280] text-xs">Avg Check-ins / Student</div>
+                    <div className="text-xl font-bold text-[#111827]">{engagement.avg_checkins_per_student}</div>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
+                  Average number of emotional check-ins submitted per active student this week.
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="bg-gray-50 rounded-xl p-3 flex flex-col justify-center cursor-help">
+                    <div className="text-[#6b7280] text-xs">Participation Change</div>
+                    <div className={`text-xl font-bold ${String(engagement.participation_change).startsWith('-') ? 'text-red-600' : 'text-green-600'}`}>{engagement.participation_change}</div>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
+                  Percentage change in student participation compared to last week. Positive means more students are engaging.
+                </TooltipContent>
+              </Tooltip>
+            </div>
+          )}
+        </div>
+        {/* Concerns & Interventions */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="bg-white rounded-2xl shadow p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <h3 className="text-[#333] font-semibold text-sm cursor-help">Top Student Concerns</h3>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
+                  NLP-analyzed themes from student journals and check-in comments. Each concern shows unique student count (same student counted once per concern).
+                </TooltipContent>
+              </Tooltip>
+            </div>
+            <div className="space-y-2">
+              {concerns.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-8 text-center">
+                  <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-3">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                  </div>
+                  <p className="text-sm text-gray-500 font-medium">No top student concerns yet</p>
+                </div>
+              ) : (
+                concerns.map((c, i) => (
+                  <div key={i} className="cursor-help" title={`${c.students} unique students expressed concerns related to "${c.label}"`}>
+                    <div className="flex justify-between text-xs flex-wrap gap-1">
+                      <span className="font-medium">{c.label}</span>
+                      <span className="text-gray-500">{c.students} students ({c.percent}%)</span>
+                    </div>
+                    <div className="h-2 bg-[#e5e5e5] rounded mt-1">
+                      <div className="h-2 rounded transition-all" style={{ width: `${c.percent}%`, background: c.barColor }}></div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl shadow p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <h3 className="text-[#333] font-semibold text-sm cursor-help">Intervention Success</h3>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
+                  Measures counselor intervention effectiveness. Success rate combines alert resolution (60%) and conversation completion (40%).
+                </TooltipContent>
+              </Tooltip>
+            </div>
+            {chatKpi ? (
+              <div className="mb-3 grid grid-cols-2 gap-2 text-xs">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div className="bg-gray-50 rounded-xl p-3 text-center cursor-help">
+                      <div className="text-[#6b7280]">Overall Success</div>
+                      <div className="text-lg font-bold text-green-600">{chatKpi.overall_success_rate}%</div>
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
+                    Overall success rate: weighted average of alert resolution (60%) and conversation completion (40%).
+                  </TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div className="bg-gray-50 rounded-xl p-3 text-center cursor-help">
+                      <div className="text-[#6b7280]">Total Sessions</div>
+                      <div className="text-lg font-bold text-[#111827]">{chatKpi.total_sessions}</div>
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
+                    Total chat conversations between students and counselors.
+                  </TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div className="bg-gray-50 rounded-xl p-3 text-center cursor-help">
+                      <div className="text-[#6b7280]">Alerts Resolved</div>
+                      <div className="text-lg font-bold text-[#111827]">{(chatKpi as any).resolved_alerts || 0}/{(chatKpi as any).total_alerts || 0}</div>
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
+                    Number of alerts that have been resolved by counselors out of total alerts.
+                  </TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div className="bg-gray-50 rounded-xl p-3 text-center cursor-help">
+                      <div className="text-[#6b7280]">Avg. Messages</div>
+                      <div className="text-lg font-bold text-[#111827]">{chatKpi.average_messages_per_conversation}</div>
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
+                    Average number of messages exchanged per conversation.
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-4 text-center mb-3">
+                <p className="text-sm text-gray-500">No intervention data yet</p>
+                <p className="text-xs text-gray-400 mt-1">Metrics will appear after counselor-student interactions.</p>
+              </div>
+            )}
+            {/* Intervention Type section - hidden for now */}
+            {false && interventions.length > 0 && (
+              <div className="space-y-2 border-t pt-3">
+                <div className="text-xs text-gray-500 font-medium mb-2">By Intervention Type</div>
+                {interventions.map((i, idx) => (
+                  <div key={idx}>
+                    <div className="flex justify-between text-xs flex-wrap gap-1">
+                      <span className="font-medium">{i.label}</span>
+                      <span className="text-gray-500">{i.participants} ({i.percent}%)</span>
+                    </div>
+                    <div className="h-2 bg-[#e5e5e5] rounded mt-1">
+                      <div className="h-2 rounded transition-all" style={{ width: `${i.percent}%`, background: i.barColor }}></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Students Requiring Attention Table */}
+        <div className="bg-white rounded-2xl shadow p-4 overflow-x-auto">
+          <div className="flex items-center gap-2 mb-3">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <h3 className={`${styles.tableTitle} cursor-help`}>
+                  <span className="mr-2">Students Requiring Attention</span>
+                  <span className="bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-medium">{attentionStudents.length}</span>
+                </h3>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="bg-gradient-to-br from-slate-800 to-slate-900 text-white border border-slate-700 shadow-xl max-w-xs text-xs leading-relaxed px-3 py-2.5 rounded-lg">
+                Students with open high-severity alerts. Click "Notify" to send a wellness check notification to their mobile app.
+              </TooltipContent>
+            </Tooltip>
+          </div>
+          {attentionStudents.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-8 text-center">
+              <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center mb-3">
+                <UserRound className="h-6 w-6 text-green-600" />
+              </div>
+              <p className="text-sm text-gray-600 font-medium">All students are doing well!</p>
+              <p className="text-xs text-gray-400 mt-1">No high-risk alerts requiring immediate attention.</p>
+            </div>
+          ) : (
+            <table className="w-full text-xs min-w-[600px]">
+              <thead>
+                <tr className="text-[#6b7280] border-b">
+                  <th className="py-2 text-left" title="Student's display name">Student</th>
+                  <th className="py-2 text-left" title="Current risk assessment level">Risk Level</th>
+                  <th className="py-2 text-left" title="Calculated risk score (0-100)">Score</th>
+                  <th className="py-2 text-left" title="Main issues identified from check-ins and journals">Primary Concerns</th>
+                  <th className="py-2 text-left" title="Available actions for this student">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {attentionStudents.map((student, i) => (
+                  <tr key={i} className="border-b hover:bg-gray-50 transition-colors">
+                    <td className="py-2 font-medium text-[#333]">{student.name}</td>
+                    <td>
+                      <span className={`px-2 py-1 rounded text-xs font-medium ${student.riskClass}`}>{student.risk}</span>
+                    </td>
+                    <td className="font-bold text-[#333]">{student.score}</td>
+                    <td>
+                      {student.concerns.map((c, idx) => (
+                        <span key={idx} className={styles.concernTag}>{c}</span>
+                      ))}
+                    </td>
+                    <td className="flex gap-2">
+                      <button
+                        title="Send wellness check notification"
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors shadow-sm"
+                        onClick={() => {
+                          setNotifyStudent(student);
+                          setNotifyType('automated');
+                          setManualMessage('');
+                          setShowNotifyModal(true);
+                        }}
+                      >
+                        <Bell className="h-3.5 w-3.5" />
+                        Notify
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {/* Notification Modal */}
+        {showNotifyModal && notifyStudent && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+            <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-md relative">
               <button
                 onClick={() => {
                   setShowNotifyModal(false);
                   setNotifyStudent(null);
                 }}
-                className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+                className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600 hover:text-gray-800 transition-colors"
               >
-                Cancel
+                <X className="h-4 w-4" />
               </button>
-              <button
-                disabled={sendingNotification || (notifyType === 'manual' && !manualMessage.trim())}
-                onClick={async () => {
-                  if (!notifyStudent) return;
-                  setSendingNotification(true);
-                  try {
-                    const message = notifyType === 'automated'
-                      ? `Hi ${notifyStudent.name}, we noticed a few signs that you might benefit from a quick chat. When you're ready, please consider speaking with a counselor — we're here to help.`
-                      : manualMessage.trim();
-                    
-                    await api.post(`/notify-student`, {
-                      user_id: notifyStudent.userId,
-                      message,
-                      type: notifyType,
-                    });
-                    
+
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                  <Bell className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">Send Notification</h3>
+                  <p className="text-sm text-gray-500">to {notifyStudent.name}</p>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                {/* Notification Type Selection */}
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => setNotifyType('automated')}
+                    className={`p-3 rounded-xl border-2 transition-all ${notifyType === 'automated'
+                      ? 'border-primary bg-primary/5'
+                      : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                  >
+                    <div className="flex flex-col items-center gap-2">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${notifyType === 'automated' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-500'
+                        }`}>
+                        <Send className="h-4 w-4" />
+                      </div>
+                      <span className={`text-sm font-medium ${notifyType === 'automated' ? 'text-primary' : 'text-gray-600'}`}>
+                        Automated
+                      </span>
+                      <span className="text-xs text-gray-400 text-center">Pre-written wellness message</span>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => setNotifyType('manual')}
+                    className={`p-3 rounded-xl border-2 transition-all ${notifyType === 'manual'
+                      ? 'border-primary bg-primary/5'
+                      : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                  >
+                    <div className="flex flex-col items-center gap-2">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${notifyType === 'manual' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-500'
+                        }`}>
+                        <MessageSquare className="h-4 w-4" />
+                      </div>
+                      <span className={`text-sm font-medium ${notifyType === 'manual' ? 'text-primary' : 'text-gray-600'}`}>
+                        Manual
+                      </span>
+                      <span className="text-xs text-gray-400 text-center">Write custom message</span>
+                    </div>
+                  </button>
+                </div>
+
+                {/* Message Preview/Input */}
+                {notifyType === 'automated' ? (
+                  <div className="p-4 bg-gray-50 rounded-xl">
+                    <p className="text-xs text-gray-500 mb-2">Message Preview:</p>
+                    <p className="text-sm text-gray-700">
+                      Hi {notifyStudent.name}, we noticed a few signs that you might benefit from a quick chat. When you're ready, please consider speaking with a counselor — we're here to help.
+                    </p>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="text-xs text-gray-500 mb-2 block">Custom Message:</label>
+                    <textarea
+                      value={manualMessage}
+                      onChange={(e) => setManualMessage(e.target.value)}
+                      placeholder="Write your message here..."
+                      className="w-full p-3 border border-gray-200 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                      rows={4}
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end gap-3 mt-6 pt-4 border-t">
+                <button
+                  onClick={() => {
                     setShowNotifyModal(false);
                     setNotifyStudent(null);
-                    window.alert("Notification sent successfully!");
-                  } catch (e) {
-                    window.alert("Failed to send notification. Please try again.");
-                  } finally {
-                    setSendingNotification(false);
-                  }
-                }}
-                className="px-5 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-              >
-                {sendingNotification ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                    Sending...
-                  </>
-                ) : (
-                  <>
-                    <Send className="h-4 w-4" />
-                    Send Notification
-                  </>
-                )}
-              </button>
+                  }}
+                  className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  disabled={sendingNotification || (notifyType === 'manual' && !manualMessage.trim())}
+                  onClick={async () => {
+                    if (!notifyStudent) return;
+                    setSendingNotification(true);
+                    try {
+                      const message = notifyType === 'automated'
+                        ? `Hi ${notifyStudent.name}, we noticed a few signs that you might benefit from a quick chat. When you're ready, please consider speaking with a counselor — we're here to help.`
+                        : manualMessage.trim();
+
+                      await api.post(`/notify-student`, {
+                        user_id: notifyStudent.userId,
+                        message,
+                        type: notifyType,
+                      });
+
+                      setShowNotifyModal(false);
+                      setNotifyStudent(null);
+                      window.alert("Notification sent successfully!");
+                    } catch (e) {
+                      window.alert("Failed to send notification. Please try again.");
+                    } finally {
+                      setSendingNotification(false);
+                    }
+                  }}
+                  className="px-5 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {sendingNotification ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                      Sending...
+                    </>
+                  ) : (
+                    <>
+                      <Send className="h-4 w-4" />
+                      Send Notification
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
-    </main>
+        )}
+      </main>
     </TooltipProvider>
   );
 }

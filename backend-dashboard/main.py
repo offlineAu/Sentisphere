@@ -7,7 +7,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from sqlalchemy import case, func, select, text
 from sqlalchemy.orm import Session
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
+from zoneinfo import ZoneInfo
+
+# Philippine timezone
+PH_TZ = ZoneInfo("Asia/Manila")
+
+def get_ph_now() -> datetime:
+    """Get current datetime in Philippine timezone."""
+    return datetime.now(PH_TZ)
+
+def get_ph_now_str() -> str:
+    """Get current datetime in Philippine timezone as ISO string."""
+    return datetime.now(PH_TZ).strftime("%Y-%m-%d %H:%M:%S")
 import os
 from pathlib import Path
 import json
@@ -23,6 +35,10 @@ import time
 from fastapi.security import OAuth2PasswordBearer
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from concurrent.futures import ThreadPoolExecutor
+
+# Background thread pool for async tasks (sentiment analysis)
+_sentiment_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="sentiment_")
 
 
 from app.core.config import settings
@@ -392,33 +408,72 @@ def create_checkin(
         )
     created = CheckinService.create_checkin(db, payload)
 
-    # Automatically analyze sentiment for the new check-in
-    try:
-        SentimentService.analyze_checkin(db, created.checkin_id)
-        db.commit()
-        db.refresh(created)
-    except Exception:
-        # Do not fail the check-in creation if sentiment analysis fails
-        db.rollback()
-        db.refresh(created)
-
-    # Check for smart alert trigger (2-3 consecutive negative check-ins)
-    try:
+    # ASYNC: Run sentiment analysis in background thread (don't block response)
+    def _background_sentiment_analysis(checkin_id: int, user_id: int, comment: str):
+        """Run sentiment + crisis detection in background."""
+        from app.db.session import SessionLocal
+        from app.services.sentiment_service import SentimentService
+        from app.utils.crisis_detector import get_crisis_detector
         from app.services.smart_alert_service import SmartAlertService
-        alert_data = SmartAlertService.check_user_for_alert(db, current_user.user_id)
-        if alert_data:
-            alert = SmartAlertService.create_smart_alert(db, alert_data)
-            # Notify dashboard of new alert
-            try:
-                asyncio.create_task(notify_dashboard_update("new_alert"))
-                pusher_service.broadcast_new_alert(
-                    alert.alert_id, 
-                    alert.severity.value if hasattr(alert.severity, 'value') else str(alert.severity)
-                )
-            except Exception:
-                pass
-    except Exception as e:
-        logging.warning(f"Smart alert check failed: {e}")
+        from app.models.alert import AlertSeverity
+        
+        bg_db = SessionLocal()
+        try:
+            # Run sentiment analysis
+            SentimentService.analyze_checkin(bg_db, checkin_id)
+            bg_db.commit()
+            logging.info(f"[BG] Sentiment analyzed for checkin {checkin_id}")
+            
+            # Check for crisis if there's a comment
+            if comment:
+                crisis_detector = get_crisis_detector()
+                crisis_result = crisis_detector.analyze(comment)
+                
+                if crisis_result.requires_alert:
+                    # Create HIGH priority alert
+                    crisis_alert = SmartAlertService.create_smart_alert(bg_db, {
+                        "user_id": user_id,
+                        "severity": AlertSeverity.HIGH,
+                        "reason": f"CRISIS DETECTED: {crisis_result.reasoning}",
+                        "trigger_type": "crisis_detection",
+                    })
+                    logging.info(f"[BG] Crisis alert {crisis_alert.alert_id} created for user {user_id}")
+                    
+                    # Broadcast to dashboard
+                    try:
+                        pusher_service.broadcast_new_alert(crisis_alert.alert_id, "HIGH")
+                    except Exception:
+                        pass
+            
+            # Check for consecutive negative pattern
+            alert_data = SmartAlertService.check_user_for_alert(bg_db, user_id)
+            if alert_data:
+                alert = SmartAlertService.create_smart_alert(bg_db, alert_data)
+                logging.info(f"[BG] Pattern alert {alert.alert_id} created for user {user_id}")
+                try:
+                    pusher_service.broadcast_new_alert(
+                        alert.alert_id,
+                        alert.severity.value if hasattr(alert.severity, 'value') else str(alert.severity)
+                    )
+                except Exception:
+                    pass
+                    
+        except Exception as e:
+            logging.warning(f"[BG] Sentiment/alert task failed: {e}")
+            bg_db.rollback()
+        finally:
+            bg_db.close()
+    
+    # Submit to background thread pool (non-blocking)
+    _sentiment_executor.submit(
+        _background_sentiment_analysis,
+        created.checkin_id,
+        current_user.user_id,
+        created.comment or ""
+    )
+
+    # Note: Crisis detection, smart alerts, and sentiment analysis are now
+    # handled in the background thread (_background_sentiment_analysis)
 
     # Notify dashboard WebSocket clients of the new check-in
     try:
@@ -627,6 +682,43 @@ def debug_sentiment_probe(payload: SentimentProbeIn):
         confidence=out.confidence,
         model_version=out.model_version,
     )
+
+
+class EnsembleProbeIn(BaseModel):
+    """Input for ensemble sentiment analysis probe."""
+    text: str
+    mood_level: Optional[str] = None
+    energy_level: Optional[str] = None
+    stress_level: Optional[str] = None
+    feel_better: Optional[str] = None
+
+
+@app.post("/api/debug/sentiment/ensemble")
+def debug_ensemble_probe(payload: EnsembleProbeIn):
+    """
+    Debug endpoint for testing the ensemble sentiment pipeline.
+    
+    Returns the full three-stage analysis:
+    - XLM-RoBERTa base analysis
+    - Twitter-RoBERTa emotion detection
+    - Bisaya refinement (if triggered)
+    - Hybrid merged result
+    
+    Only available in non-production environments.
+    """
+    if settings.ENV.lower() == "production":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not available in production")
+    
+    from app.utils.nlp_loader import analyze_text_ensemble_detailed
+    
+    result = analyze_text_ensemble_detailed(
+        payload.text or "",
+        mood_level=payload.mood_level,
+        energy_level=payload.energy_level,
+        stress_level=payload.stress_level,
+        feel_better=payload.feel_better,
+    )
+    return result
 
 
 # --- Journals: Similarity ---
@@ -1552,16 +1644,17 @@ async def mobile_send_message(
     ).mappings().first()
     if not owner or int(owner["initiator_user_id"]) != int(uid):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+    ph_now = get_ph_now_str()
     res = mdb.execute(
         text(
             """
             INSERT INTO messages (conversation_id, sender_id, content, is_read, timestamp)
-            VALUES (:cid, :sid, :content, :is_read, NOW())
+            VALUES (:cid, :sid, :content, :is_read, :ts)
             """
         ),
-        {"cid": conversation_id, "sid": uid, "content": message_in.content, "is_read": bool(message_in.is_read)},
+        {"cid": conversation_id, "sid": uid, "content": message_in.content, "is_read": bool(message_in.is_read), "ts": ph_now},
     )
-    mdb.execute(text("UPDATE conversations SET last_activity_at = NOW() WHERE conversation_id = :cid"), {"cid": conversation_id})
+    mdb.execute(text("UPDATE conversations SET last_activity_at = :ts WHERE conversation_id = :cid"), {"cid": conversation_id, "ts": ph_now})
     mdb.commit()
     mid = res.lastrowid
     row = mdb.execute(
@@ -1617,11 +1710,16 @@ def mobile_typing_indicator(
     except Exception:
         pass
     
+    # DEBUG: Log typing indicator
+    print(f"[DEBUG TYPING] Mobile user {uid} ({nickname}) typing in conversation {conversation_id}")
+    
     # Broadcast via Pusher
+    pusher_result = False
     try:
-        pusher_service.broadcast_typing(conversation_id, uid, nickname)
-    except Exception:
-        pass
+        pusher_result = pusher_service.broadcast_typing(conversation_id, uid, nickname)
+        print(f"[DEBUG TYPING] Pusher broadcast result: {pusher_result}")
+    except Exception as e:
+        print(f"[DEBUG TYPING] Pusher error: {e}")
     
     # Also broadcast via WebSocket for backward compatibility
     try:
@@ -2047,23 +2145,41 @@ def counselor_send_message(
     """Send a message as a counselor to a conversation assigned to them."""
     counselor_id = current_user.user_id
     owner = mdb.execute(
-        text("SELECT counselor_id FROM conversations WHERE conversation_id = :cid"),
+        text("SELECT counselor_id, status FROM conversations WHERE conversation_id = :cid"),
         {"cid": conversation_id},
     ).mappings().first()
     if not owner or owner["counselor_id"] != counselor_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found or not assigned to you")
+    
+    # Reject messages to ended conversations
+    if owner.get("status") == "ended":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot send messages to an ended conversation")
+    
+    # DEBUG: Log timestamp details
+    import sys
+    utc_now = datetime.now(timezone.utc)
+    ph_now_dt = get_ph_now()
+    ph_now = get_ph_now_str()
+    print(f"[DEBUG MESSAGE TIMESTAMP]", file=sys.stderr)
+    print(f"  UTC now:        {utc_now.isoformat()}", file=sys.stderr)
+    print(f"  PH datetime:    {ph_now_dt.isoformat()}", file=sys.stderr)
+    print(f"  PH string (DB): {ph_now}", file=sys.stderr)
+    print(f"  Server TZ:      {datetime.now().astimezone().tzinfo}", file=sys.stderr)
+    
     res = mdb.execute(
         text(
             """
             INSERT INTO messages (conversation_id, sender_id, content, is_read, timestamp)
-            VALUES (:cid, :sid, :content, :is_read, NOW())
+            VALUES (:cid, :sid, :content, :is_read, :ts)
             """
         ),
-        {"cid": conversation_id, "sid": counselor_id, "content": message_in.content, "is_read": False},
+        {"cid": conversation_id, "sid": counselor_id, "content": message_in.content, "is_read": False, "ts": ph_now},
     )
-    mdb.execute(text("UPDATE conversations SET last_activity_at = NOW() WHERE conversation_id = :cid"), {"cid": conversation_id})
+    mdb.execute(text("UPDATE conversations SET last_activity_at = :ts WHERE conversation_id = :cid"), {"cid": conversation_id, "ts": ph_now})
     mdb.commit()
     mid = res.lastrowid
+    
+    # DEBUG: Verify what was actually stored
     row = mdb.execute(
         text(
             """
@@ -2073,7 +2189,33 @@ def counselor_send_message(
         ),
         {"mid": mid},
     ).mappings().first()
-    payload = dict(row) if row else {"message_id": mid, "conversation_id": conversation_id, "sender_id": counselor_id, "content": message_in.content, "is_read": False}
+    
+    # Build payload - FORCE Philippine timezone on timestamp
+    if row:
+        payload = dict(row)
+        # Convert timestamp to Philippine time string (DB may return UTC)
+        db_ts = row['timestamp']
+        if db_ts:
+            # If DB returned naive datetime, assume it's UTC and convert to PH
+            if hasattr(db_ts, 'tzinfo') and db_ts.tzinfo is None:
+                # Naive datetime from DB - assume UTC, convert to PH
+                utc_dt = db_ts.replace(tzinfo=timezone.utc)
+                ph_dt = utc_dt.astimezone(PH_TZ)
+                payload['timestamp'] = ph_dt.strftime("%Y-%m-%dT%H:%M:%S")
+            else:
+                payload['timestamp'] = db_ts.astimezone(PH_TZ).strftime("%Y-%m-%dT%H:%M:%S") if hasattr(db_ts, 'astimezone') else str(db_ts)
+    else:
+        payload = {"message_id": mid, "conversation_id": conversation_id, "sender_id": counselor_id, "content": message_in.content, "is_read": False, "timestamp": ph_now}
+    
+    # Add debug info to response
+    payload["_debug"] = {
+        "utc_now": utc_now.isoformat(),
+        "ph_now": ph_now_dt.isoformat(),
+        "ph_string_sent_to_db": ph_now,
+        "db_returned": str(row['timestamp']) if row else None,
+        "final_timestamp": payload.get('timestamp'),
+        "server_tz": str(datetime.now().astimezone().tzinfo),
+    }
     
     # Broadcast via Pusher for instant delivery to mobile
     try:
@@ -2325,30 +2467,22 @@ def high_risk_flags(
     _user: User = Depends(require_counselor),
     db: Session = Depends(get_db),
 ):
+    """Count unique students with HIGH severity open alerts only.
+    
+    This counts students who need immediate attention.
+    """
     start_dt, end_dt = parse_global_range(range, start, end)
-    alert_count = db.scalar(
-        select(func.count(Alert.alert_id)).where(
+    
+    # Count unique students with open HIGH severity alerts only
+    count = db.scalar(
+        select(func.count(func.distinct(Alert.user_id))).where(
             Alert.severity == AlertSeverity.HIGH,
             Alert.status.in_([AlertStatus.OPEN, AlertStatus.IN_PROGRESS]),
             Alert.created_at >= start_dt,
             Alert.created_at <= end_dt,
         )
     ) or 0
-    journal_count = db.scalar(
-        select(func.count(JournalSentiment.journal_id)).where(
-            JournalSentiment.sentiment == "negative",
-            JournalSentiment.analyzed_at >= start_dt,
-            JournalSentiment.analyzed_at <= end_dt,
-        )
-    ) or 0
-    checkin_count = db.scalar(
-        select(func.count(CheckinSentiment.checkin_id)).where(
-            CheckinSentiment.sentiment == "negative",
-            CheckinSentiment.analyzed_at >= start_dt,
-            CheckinSentiment.analyzed_at <= end_dt,
-        )
-    ) or 0
-    return {"count": int(alert_count + journal_count + checkin_count)}
+    return {"count": int(count)}
 
 
 @app.get("/api/sentiments")
@@ -3897,6 +4031,162 @@ def weekly_insights(
     return CounselorReportService.weekly_insights(db)
 
 
+@app.post("/api/reports/trigger-insights")
+def trigger_insights_generation(
+    _user: User = Depends(require_counselor),
+    db: Session = Depends(get_db),
+):
+    """
+    Manually trigger insight generation for last week.
+    Returns status indicating if new insights were generated or already up-to-date.
+    """
+    import traceback
+    logging.info("[trigger-insights] Starting manual trigger")
+    try:
+        from app.models.ai_insight import AIInsight
+        
+        # Calculate last week bounds
+        today = datetime.utcnow().date()
+        monday_this_week = today - timedelta(days=today.weekday())
+        last_monday = monday_this_week - timedelta(days=7)
+        last_sunday = last_monday + timedelta(days=6)
+        
+        logging.info(f"[trigger-insights] Window: {last_monday} to {last_sunday}")
+
+        # Check if insight already exists for last week
+        existing = db.query(AIInsight).filter(
+            AIInsight.type == 'weekly',
+            AIInsight.user_id.is_(None),  # Global insight
+            AIInsight.timeframe_start == last_monday,
+            AIInsight.timeframe_end == last_sunday,
+        ).first()
+        
+        if existing:
+            logging.info("[trigger-insights] Found existing insight")
+            return {
+                "status": "already_current",
+                "message": "Weekly insights are already up-to-date",
+                "generated_at": existing.generated_at.isoformat() if existing.generated_at else None,
+                "week_start": last_monday.isoformat(),
+                "week_end": last_sunday.isoformat(),
+            }
+        
+        # Generate new insight
+        start_dt = datetime.combine(last_monday, datetime.min.time())
+        end_dt = datetime.combine(last_sunday, datetime.max.time())
+        
+        logging.info("[trigger-insights] Building payload...")
+        payload = build_sanitized_payload(None, start_dt, end_dt)
+        logging.info(f"[trigger-insights] Payload built. Journals: {len(payload.get('journals', []))}, Checkins: {len(payload.get('checkins', []))}")
+        
+        # Check if enough data
+        journals = payload.get("journals") or []
+        checkins = payload.get("checkins") or []
+        
+        if len(journals) + len(checkins) < 3:
+            logging.info("[trigger-insights] Insufficient data")
+            return {
+                "status": "insufficient_data",
+                "message": f"Not enough data for insights (need 3+, have {len(journals) + len(checkins)})",
+                "week_start": last_monday.isoformat(),
+                "week_end": last_sunday.isoformat(),
+            }
+        
+        logging.info("[trigger-insights] Calling compute_and_store...")
+        data, stored = InsightGenerationService.compute_and_store(
+            db=db,
+            user_id=None,
+            timeframe_start=last_monday,
+            timeframe_end=last_sunday,
+            payload=payload,
+            insight_type="weekly",
+        )
+        logging.info(f"[trigger-insights] Result: stored={stored}")
+        
+        if stored:
+            return {
+                "status": "generated",
+                "message": "Successfully generated new weekly insights",
+                "week_start": last_monday.isoformat(),
+                "week_end": last_sunday.isoformat(),
+                "insight_preview": data.get("title", ""),
+            }
+        else:
+            return {
+                "status": "error",
+                "message": "Failed to store insight",
+                "reason": data.get("reason", "unknown"),
+            }
+    except Exception as e:
+        logging.error(f"[trigger-insights] CRITICAL ERROR: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/reports/rescan-alerts")
+def rescan_alerts(
+    lookback_days: int = Query(30, description="Days to look back for data"),
+    _user: User = Depends(require_counselor),
+    db: Session = Depends(get_db),
+):
+    """
+    Rescan all users for alerts based on recent activity.
+    This is useful after code changes to regenerate alerts.
+    """
+    import logging
+    from app.services.smart_alert_service import SmartAlertService
+    
+    logging.info(f"[rescan-alerts] Starting rescan for all users (lookback={lookback_days} days)")
+    
+    # Get all students with any activity
+    from datetime import timedelta
+    cutoff = datetime.utcnow() - timedelta(days=lookback_days)
+    
+    # Get unique user IDs from check-ins and journals
+    checkin_users = list(db.scalars(
+        select(EmotionalCheckin.user_id)
+        .where(EmotionalCheckin.created_at >= cutoff)
+        .distinct()
+    ))
+    
+    journal_users = list(db.scalars(
+        select(Journal.user_id)
+        .where(Journal.created_at >= cutoff, Journal.deleted_at.is_(None))
+        .distinct()
+    ))
+    
+    all_users = list(set(checkin_users + journal_users))
+    logging.info(f"[rescan-alerts] Found {len(all_users)} users with activity in last {lookback_days} days")
+    
+    new_alerts = []
+    
+    for user_id in all_users:
+        # Check all alert types
+        for check_fn in [
+            lambda uid: SmartAlertService.check_crisis_language(db, uid, lookback_days=lookback_days),
+            lambda uid: SmartAlertService.check_user_for_alert(db, uid, lookback_days=lookback_days),
+            lambda uid: SmartAlertService.check_sentiment_threshold(db, uid, lookback_days=lookback_days),
+            lambda uid: SmartAlertService.check_escalation_risk(db, uid, lookback_days=lookback_days),
+        ]:
+            alert_data = check_fn(user_id)
+            if alert_data:
+                alert = SmartAlertService.create_smart_alert(db, alert_data, commit=True)
+                new_alerts.append({
+                    "user_id": user_id,
+                    "severity": alert.severity.value if hasattr(alert.severity, 'value') else str(alert.severity),
+                    "reason": alert.reason,
+                })
+                break  # Only one alert per user
+    
+    logging.info(f"[rescan-alerts] Created {len(new_alerts)} new alerts")
+    
+    return {
+        "status": "completed",
+        "users_scanned": len(all_users),
+        "new_alerts_created": len(new_alerts),
+        "alerts": new_alerts,
+    }
+
 @app.get("/reports/behavior-insights")
 def behavior_insights(
     _user: User = Depends(require_counselor),
@@ -4222,13 +4512,22 @@ async def send_message(
         content=message_in.content,
         is_read=message_in.is_read,
     )
+    
+    # DEBUG: Log timestamp info
+    print(f"[DEBUG /api/conversations/{conversation_id}/messages]")
+    print(f"  PH time now: {get_ph_now().isoformat()}")
+    
+    message = ConversationService.add_message(db, conversation, message_payload)
+    
+    # DEBUG: Log what was stored
+    print(f"  Message timestamp: {message.timestamp}")
+    
     logging.info(
         "send_message: user_id=%s role=%s convo_id=%s",
         getattr(current_user, "user_id", None),
         getattr(current_user, "role", None),
         conversation_id,
     )
-    message = ConversationService.add_message(db, conversation, message_payload)
     # Broadcast to subscribers for this conversation after DB commit
     try:
         await ws_conv_manager.broadcast_message_created(
@@ -4393,14 +4692,15 @@ class MessageIn(BaseModel):
 
 @app.post("/api/_legacy/conversations/{conversation_id}/messages")
 def send_message(conversation_id: int, message: MessageIn, current_user: str = Depends(get_current_user)):
+    ph_now = get_ph_now_str()
     query = """
         INSERT INTO messages (conversation_id, sender_id, content, timestamp)
-        VALUES (:cid, :sid, :content, NOW())
+        VALUES (:cid, :sid, :content, :ts)
     """
     with engine.connect() as conn:
         result = conn.execute(
             text(query),
-            {"cid": conversation_id, "sid": message.sender_id, "content": message.content}
+            {"cid": conversation_id, "sid": message.sender_id, "content": message.content, "ts": ph_now}
         )
         conn.commit()
 
@@ -4409,7 +4709,7 @@ def send_message(conversation_id: int, message: MessageIn, current_user: str = D
             "conversation_id": conversation_id,
             "sender_id": message.sender_id,
             "content": message.content,
-            "timestamp": str(datetime.now())
+            "timestamp": ph_now
         }
 
 @app.get("/health")
@@ -5190,6 +5490,7 @@ def weekly_insights(
 
 
 @app.get("/api/reports/behavior-insights")
+@app.get("/api/reports/behavior")  # Alias for frontend compatibility
 def behavior_insights(
     range: str = Query("this_week"),
     start: Optional[str] = Query(None),
@@ -5320,8 +5621,18 @@ def get_top_stats(
     q_totals = text(
         """
         SELECT 
-            (SELECT COUNT(*) FROM user WHERE role = 'student') AS total_students,
-            (SELECT COUNT(*) FROM user WHERE is_active = TRUE) AS active_users
+            (SELECT COUNT(*) FROM user WHERE role = 'student') AS total_students
+        """
+    )
+    
+    q_active_users = text(
+        """
+        SELECT COUNT(DISTINCT ec.user_id) AS active_users
+        FROM emotional_checkin ec
+        JOIN user u ON ec.user_id = u.user_id
+        WHERE u.role = 'student'
+          AND ec.created_at >= :start
+          AND ec.created_at <= :end
         """
     )
 
@@ -5360,6 +5671,10 @@ def get_top_stats(
 
     with engine.connect() as conn:
         totals_row = conn.execute(q_totals).mappings().first()
+        active_row = conn.execute(
+            q_active_users,
+            {"start": start_dt.strftime("%Y-%m-%d %H:%M:%S"), "end": end_dt.strftime("%Y-%m-%d %H:%M:%S")},
+        ).mappings().first()
         at_risk_row = conn.execute(
             q_at_risk,
             {"start": start_dt.strftime("%Y-%m-%d %H:%M:%S"), "end": end_dt.strftime("%Y-%m-%d %H:%M:%S")},
@@ -5371,7 +5686,7 @@ def get_top_stats(
 
         return {
             "total_students": totals_row["total_students"],
-            "active_users": totals_row["active_users"],
+            "active_users": active_row["active_users"] if active_row else 0,
             "at_risk_students": at_risk_row["at_risk_students"] if at_risk_row else 0,
             "avg_wellness_score": float(wellness_row["avg_wellness_score"] or 0) if wellness_row else 0.0,
         }

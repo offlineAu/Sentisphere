@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.db.database import engine
 from app.utils.text_cleaning import clean_text
+from app.utils.date_utils import safe_parse_datetime
 
 from functools import lru_cache
 
@@ -91,15 +92,7 @@ class InsightGenerationService:
         except Exception:
             return {}
 
-    @staticmethod
-    def _redact(text_value: str) -> str:
-        if not text_value:
-            return text_value
-        s = text_value
-        s = re.sub(r"[A-Za-z0-9_.+-]+@[A-Za-z0-9-]+\.[A-Za-z0-9.-]+", "[REDACTED]", s)
-        s = re.sub(r"\b\+?\d[\d\s-]{7,}\b", "[REDACTED]", s)
-        s = re.sub(r"\b([A-Z][a-z]+\s+[A-Z][a-z]+)\b", "[REDACTED]", s)
-        return s
+
 
     @staticmethod
     def _match_keywords(texts: List[str]) -> Tuple[List[str], List[str]]:
@@ -184,14 +177,11 @@ class InsightGenerationService:
         """Count consecutive 'No' responses for feel_better."""
         by_day: Dict[str, List[str]] = defaultdict(list)
         for c in checkins:
-            dt = c.get("created_at")
+            dt = safe_parse_datetime(c.get("created_at"))
             fb = c.get("feel_better")
-            if not fb:
+            if not fb or not dt:
                 continue
-            try:
-                d = (datetime.fromisoformat(dt) if isinstance(dt, str) else dt).date().isoformat()
-            except Exception:
-                continue
+            d = dt.date().isoformat()
             by_day[d].append(fb)
         
         # Check majority per day
@@ -268,11 +258,10 @@ class InsightGenerationService:
     def _daily_avg_mood(checkins: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         by_day: Dict[str, List[int]] = defaultdict(list)
         for c in checkins:
-            dt = c.get("created_at")
-            try:
-                d = (datetime.fromisoformat(dt) if isinstance(dt, str) else dt).date().isoformat()
-            except Exception:
+            dt = safe_parse_datetime(c.get("created_at"))
+            if not dt:
                 continue
+            d = dt.date().isoformat()
             mood = c.get("mood_level")
             if mood in InsightGenerationService.MOOD_SCORE_MAP:
                 by_day[d].append(InsightGenerationService.MOOD_SCORE_MAP[mood])
@@ -299,13 +288,38 @@ class InsightGenerationService:
 
     @staticmethod
     def _sentiment_counts(items: List[str]) -> Dict[str, int]:
-        c = Counter([str(s).lower() for s in items if s in ("positive", "neutral", "negative")])
+        # Normalize sentiments: treat strongly_negative as negative
+        normalized = []
+        for s in items:
+            s_lower = str(s).lower()
+            if s_lower == "strongly_negative":
+                normalized.append("negative")
+            elif s_lower in ("positive", "neutral", "negative"):
+                normalized.append(s_lower)
+        
+        c = Counter(normalized)
         return {"positive": c.get("positive", 0), "neutral": c.get("neutral", 0), "negative": c.get("negative", 0)}
 
     @staticmethod
     def _collect_emotions(journal_items: List[Dict[str, Any]], checkin_items: List[Dict[str, Any]]) -> Counter:
         cnt: Counter = Counter()
         def add_e(em):
+            if not em:
+                return
+            try:
+                obj = json.loads(em) if isinstance(em, str) else em
+                if isinstance(obj, dict):
+                    for k, v in obj.items():
+                        if isinstance(v, (int, float)):
+                            cnt[k] += float(v)
+                        else:
+                            cnt[k] += 1
+                elif isinstance(obj, list):
+                    for k in obj:
+                        cnt[str(k)] += 1
+            except Exception:
+                # if not JSON, treat as label
+                cnt[str(em)] += 1
             if not em:
                 return
             try:
@@ -471,11 +485,10 @@ class InsightGenerationService:
         # Risk factors (for metadata and recommendation)
         sentiment_by_day: Dict[str, Counter] = defaultdict(Counter)
         for s in journals:
-            dt = s.get("created_at")
-            try:
-                d = (datetime.fromisoformat(dt) if isinstance(dt, str) else dt).date().isoformat()
-            except Exception:
+            dt = safe_parse_datetime(s.get("created_at"))
+            if not dt:
                 continue
+            d = dt.date().isoformat()
             sent = (s.get("sentiment") or "").lower()
             if sent:
                 sentiment_by_day[d][sent] += 1
@@ -485,11 +498,10 @@ class InsightGenerationService:
         daily_negative_mood: Dict[str, bool] = {}
         
         for c in checkins:
-            dt = c.get("created_at")
-            try:
-                d = (datetime.fromisoformat(dt) if isinstance(dt, str) else dt).date().isoformat()
-            except Exception:
+            dt = safe_parse_datetime(c.get("created_at"))
+            if not dt:
                 continue
+            d = dt.date().isoformat()
             if (c.get("stress_level") or "") in InsightGenerationService.HIGH_STRESS_LABELS:
                 stress_by_day[d] += 1
                 daily_high_stress[d] = True
@@ -511,13 +523,16 @@ class InsightGenerationService:
         # Late night journaling
         late_night_count = 0
         for j in journals:
+            t = safe_parse_datetime(j.get("created_at"))
+            if t and 0 <= t.hour <= 4:
+                late_night_count += 1
             dt = j.get("created_at")
             try:
                 t = datetime.fromisoformat(dt) if isinstance(dt, str) else dt
+                if isinstance(t, datetime) and 0 <= t.hour <= 4:
+                    late_night_count += 1
             except Exception:
                 continue
-            if 0 <= t.hour <= 4:
-                late_night_count += 1
         
         # Enhanced risk scoring
         score, reason, level = InsightGenerationService._risk_score(
@@ -679,16 +694,16 @@ class InsightGenerationService:
         negative_ratio = round((neg_sentiments / total_sentiments) * 100, 1) if total_sentiments else 0.0
 
         high_stress_days = len({
-            (datetime.fromisoformat(c["created_at"]) if isinstance(c.get("created_at"), str) else c.get("created_at")).date().isoformat()
+            safe_parse_datetime(c.get("created_at")).date().isoformat()
             for c in checkins
-            if str(c.get("stress_level")) in InsightGenerationService.HIGH_STRESS_LABELS
+            if safe_parse_datetime(c.get("created_at")) and str(c.get("stress_level")) in InsightGenerationService.HIGH_STRESS_LABELS
         })
 
         late_night_journals = sum(
             1
             for j in journals
-            if (lambda t: isinstance(t, datetime) and 0 <= t.hour <= 4)(
-                datetime.fromisoformat(j["created_at"]) if isinstance(j.get("created_at"), str) else j.get("created_at")
+            if (lambda t: t and 0 <= t.hour <= 4)(
+                safe_parse_datetime(j.get("created_at"))
             )
         )
 
@@ -699,11 +714,10 @@ class InsightGenerationService:
         sentiment_by_day: Dict[str, Counter] = defaultdict(Counter)
         
         for c in checkins:
-            dt = c.get("created_at")
-            try:
-                d = (datetime.fromisoformat(dt) if isinstance(dt, str) else dt).date().isoformat()
-            except Exception:
+            dt = safe_parse_datetime(c.get("created_at"))
+            if not dt:
                 continue
+            d = dt.date().isoformat()
             if str(c.get("stress_level")) in InsightGenerationService.HIGH_STRESS_LABELS:
                 daily_high_stress[d] = True
                 stress_by_day[d] += 1
@@ -718,11 +732,10 @@ class InsightGenerationService:
                 sentiment_by_day[d][sent] += 1
         
         for j in journals:
-            dt = j.get("created_at")
-            try:
-                d = (datetime.fromisoformat(dt) if isinstance(dt, str) else dt).date().isoformat()
-            except Exception:
+            dt = safe_parse_datetime(j.get("created_at"))
+            if not dt:
                 continue
+            d = dt.date().isoformat()
             sent = str(j.get("sentiment") or "").lower()
             if sent:
                 sentiment_by_day[d][sent] += 1
@@ -761,10 +774,8 @@ class InsightGenerationService:
         tod_cnt: Counter = Counter()
         dow_cnt: Counter = Counter()
         for item in journals + checkins:
-            dt = item.get("created_at")
-            try:
-                t = datetime.fromisoformat(dt) if isinstance(dt, str) else dt
-            except Exception:
+            t = safe_parse_datetime(item.get("created_at"))
+            if not t:
                 continue
             tod_cnt[tod_bucket(t)] += 1
             dow_cnt[t.weekday()] += 1  # 0=Mon
