@@ -2831,6 +2831,72 @@ def create_emotional_checkin(
     except Exception:
         db.rollback()
     
+    # =========================================================================
+    # CRISIS DETECTION - Check comment for crisis language (suicide, self-harm)
+    # =========================================================================
+    crisis_alert_created = False
+    crisis_alert_id = None
+    comment_text = payload.comment or ""
+    
+    if comment_text.strip():
+        try:
+            from app.utils.crisis_detector import get_crisis_detector
+            crisis_detector = get_crisis_detector()
+            crisis_result = crisis_detector.analyze(comment_text)
+            
+            if crisis_result.requires_alert:
+                # Check if user already has a recent open alert (within 24 hours)
+                check_recent_q = text(
+                    """
+                    SELECT alert_id FROM alert 
+                    WHERE user_id = :uid AND status = 'open' 
+                    AND created_at > DATE_SUB(NOW(), INTERVAL 24 HOUR)
+                    LIMIT 1
+                    """
+                )
+                with mobile_engine.connect() as conn:
+                    existing = conn.execute(check_recent_q, {"uid": uid}).first()
+                
+                if not existing:
+                    # Create HIGH severity crisis alert
+                    insert_alert_q = text(
+                        """
+                        INSERT INTO alert (user_id, reason, severity, status, created_at)
+                        VALUES (:uid, :reason, 'high', 'open', NOW())
+                        """
+                    )
+                    reason = f"CRISIS DETECTED in check-in: {crisis_result.reasoning}"
+                    
+                    with mobile_engine.begin() as conn:
+                        result = conn.execute(insert_alert_q, {"uid": uid, "reason": reason})
+                        crisis_alert_id = result.lastrowid
+                    
+                    crisis_alert_created = True
+                    logging.warning(f"[CRISIS] Created HIGH alert {crisis_alert_id} for user {uid} from check-in: {reason}")
+                    
+                    # Send wellness notification INSTANTLY for crisis
+                    try:
+                        from app.services.push_notification_service import send_alert_notification_instantly
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        try:
+                            loop.run_until_complete(
+                                send_alert_notification_instantly(
+                                    mobile_engine=mobile_engine,
+                                    alert_id=crisis_alert_id,
+                                    user_id=uid,
+                                    severity="high"
+                                )
+                            )
+                        finally:
+                            loop.close()
+                        logging.info(f"Crisis notification sent for check-in alert {crisis_alert_id}")
+                    except Exception as notif_err:
+                        logging.error(f"Failed to send crisis notification: {notif_err}")
+                        
+        except Exception as e:
+            logging.error(f"Crisis detection failed for check-in {checkin_id}: {e}")
+    
     # Send instant "Thanks for Checking in" notification
     notification_sent = False
     try:
@@ -2878,7 +2944,9 @@ def create_emotional_checkin(
     return {
         "ok": True, 
         "checkin_id": checkin_id,
-        "notification_sent": notification_sent
+        "notification_sent": notification_sent,
+        "crisis_alert_created": crisis_alert_created,
+        "crisis_alert_id": crisis_alert_id
     }
 
 
