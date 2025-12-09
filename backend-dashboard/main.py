@@ -580,6 +580,36 @@ def create_journal(
         db.rollback()
         db.refresh(created)
 
+    # =========================================================================
+    # CRISIS DETECTION - Check journal content for crisis language
+    # =========================================================================
+    if created.content:
+        try:
+            from app.utils.crisis_detector import get_crisis_detector
+            from app.services.smart_alert_service import SmartAlertService
+            from app.models.alert import AlertSeverity
+            
+            crisis_detector = get_crisis_detector()
+            crisis_result = crisis_detector.analyze(created.content)
+            
+            if crisis_result.requires_alert:
+                # Create HIGH severity alert using SmartAlertService
+                crisis_alert = SmartAlertService.create_smart_alert(db, {
+                    "user_id": current_user.user_id,
+                    "severity": AlertSeverity.HIGH,
+                    "reason": f"CRISIS DETECTED in journal: {crisis_result.reasoning}",
+                    "trigger_type": "crisis_detection",
+                })
+                logging.warning(f"[CRISIS] Created alert {crisis_alert.alert_id} for journal {created.journal_id}")
+                
+                # Broadcast to dashboard
+                try:
+                    pusher_service.broadcast_new_alert(crisis_alert.alert_id, "HIGH")
+                except Exception:
+                    pass
+        except Exception as e:
+            logging.error(f"Crisis detection failed for journal-service {created.journal_id}: {e}")
+
     # Publish a realtime journal.created event for connected dashboards
     try:
         journal_data = JournalSchema.model_validate(created).model_dump()
@@ -1435,22 +1465,39 @@ def mobile_list_counselors(
     token: str = Depends(oauth2_scheme),
     mdb: Session = Depends(get_mobile_db),
 ):
-    """List all active counselors from mobile DB for student to select when starting a conversation."""
+    """List all active counselors from mobile DB for student to select when starting a conversation.
+    
+    Returns counselor info including availability for dynamic time slot selection.
+    """
     _extract_user_id(token)  # Validate token
     rows = list(
         mdb.execute(
             text(
                 """
-                SELECT user_id, name, nickname, email
-                FROM user
-                WHERE role = 'counselor' AND is_active = 1
-                ORDER BY name ASC
+                SELECT u.user_id, u.name, u.nickname, u.email, cp.availability
+                FROM user u
+                LEFT JOIN counselor_profile cp ON u.user_id = cp.user_id
+                WHERE u.role = 'counselor' AND u.is_active = 1
+                ORDER BY u.name ASC
                 """
             )
         ).mappings()
     )
-    result = [dict(row) for row in rows]
-    print(f"[mobile_list_counselors] Found {len(result)} counselors: {result}")
+    result = []
+    for row in rows:
+        counselor = dict(row)
+        # Parse availability JSON string into array
+        raw_availability = counselor.get("availability")
+        if raw_availability:
+            try:
+                parsed = json.loads(raw_availability) if isinstance(raw_availability, str) else raw_availability
+                counselor["availability"] = parsed if isinstance(parsed, list) else []
+            except (json.JSONDecodeError, TypeError):
+                counselor["availability"] = []
+        else:
+            counselor["availability"] = []
+        result.append(counselor)
+    print(f"[mobile_list_counselors] Found {len(result)} counselors with availability")
     return result
 
 
@@ -2931,12 +2978,76 @@ def create_journal(
     except Exception:
         db.rollback()
     
-    # Auto-create alert for highly negative sentiment AND send notification INSTANTLY
+    # =========================================================================
+    # CRISIS DETECTION - Check for crisis language (suicide, self-harm, etc.)
+    # This runs BEFORE sentiment-based alerts to catch explicit crisis phrases
+    # =========================================================================
     alert_created = False
     alert_id = None
     notification_result = None
+    crisis_detected = False
     
-    if sentiment_result and sentiment_result.sentiment == "negative" and sentiment_result.confidence >= 0.6:
+    if content:
+        try:
+            from app.utils.crisis_detector import get_crisis_detector
+            crisis_detector = get_crisis_detector()
+            crisis_result = crisis_detector.analyze(content)
+            
+            if crisis_result.requires_alert:
+                # Check if user already has a recent open alert (within 24 hours)
+                check_recent_q = text(
+                    """
+                    SELECT alert_id FROM alert 
+                    WHERE user_id = :uid AND status = 'open' 
+                    AND created_at > DATE_SUB(NOW(), INTERVAL 24 HOUR)
+                    LIMIT 1
+                    """
+                )
+                with mobile_engine.connect() as conn:
+                    existing = conn.execute(check_recent_q, {"uid": uid}).first()
+                
+                if not existing:
+                    # Create HIGH severity crisis alert
+                    insert_alert_q = text(
+                        """
+                        INSERT INTO alert (user_id, reason, severity, status, created_at)
+                        VALUES (:uid, :reason, 'high', 'open', NOW())
+                        """
+                    )
+                    reason = f"CRISIS DETECTED in journal: {crisis_result.reasoning}"
+                    
+                    with mobile_engine.begin() as conn:
+                        result = conn.execute(insert_alert_q, {"uid": uid, "reason": reason})
+                        alert_id = result.lastrowid
+                    
+                    alert_created = True
+                    crisis_detected = True
+                    logging.warning(f"[CRISIS] Created HIGH alert {alert_id} for user {uid}: {reason}")
+                    
+                    # Send wellness notification INSTANTLY for crisis
+                    try:
+                        from app.services.push_notification_service import send_alert_notification_instantly
+                        notification_result = asyncio.get_event_loop().run_until_complete(
+                            send_alert_notification_instantly(
+                                mobile_engine=mobile_engine,
+                                alert_id=alert_id,
+                                user_id=uid,
+                                severity="high"
+                            )
+                        )
+                        logging.info(f"Crisis notification sent for alert {alert_id}: {notification_result.get('success')}")
+                    except Exception as notif_err:
+                        logging.error(f"Failed to send crisis notification: {notif_err}")
+                        
+        except Exception as e:
+            logging.error(f"Crisis detection failed for journal {journal_id}: {e}")
+    
+    # =========================================================================
+    # SENTIMENT-BASED ALERT - Fallback for negative sentiment (if no crisis found)
+    # =========================================================================
+    
+    # Only run sentiment-based alert if crisis detection didn't already create one
+    if not crisis_detected and sentiment_result and sentiment_result.sentiment == "negative" and sentiment_result.confidence >= 0.6:
         try:
             # Check if user already has a recent open alert (within 24 hours)
             check_recent_q = text(
