@@ -1,11 +1,10 @@
 /**
  * Centralized time utilities for consistent timestamp handling
  * 
- * IMPORTANT: The backend stores timestamps differently for different tables:
- * - Notifications: stored in UTC without timezone indicator
- * - Chat messages: stored in Philippine Time (server local time) without timezone indicator
+ * IMPORTANT: Railway MySQL server stores ALL timestamps in UTC (server time).
+ * All timestamps from the backend are in UTC without timezone indicator.
  * 
- * Use parseTimestamp() for notifications and parseLocalTimestamp() for chat.
+ * Use parseTimestamp() for all timestamps from the backend.
  * All times are displayed in Philippine Time (Asia/Manila).
  */
 
@@ -22,11 +21,12 @@ dayjs.extend(calendar);
 const APP_TIMEZONE = 'Asia/Manila';
 
 /**
- * Parse timestamp for NOTIFICATIONS and return dayjs object in APP_TIMEZONE
+ * Parse timestamp and return dayjs object in APP_TIMEZONE
  * 
- * Railway/PostgreSQL stores notification timestamps in UTC without timezone indicator.
- * Timestamps with Z suffix or timezone offset are explicitly treated as UTC.
- * Bare timestamps (no timezone) are treated as UTC and converted to display timezone.
+ * Railway MySQL stores timestamps in UTC without timezone indicator.
+ * This function explicitly interprets bare timestamps as UTC and converts to Manila time.
+ * 
+ * iOS-compatible: Uses explicit 'Z' suffix to ensure consistent UTC parsing across platforms.
  */
 export const parseTimestamp = (ts: string): dayjs.Dayjs => {
   if (!ts) return dayjs().tz(APP_TIMEZONE);
@@ -36,16 +36,17 @@ export const parseTimestamp = (ts: string): dayjs.Dayjs => {
     return dayjs.utc(ts).tz(APP_TIMEZONE);
   }
 
-  // No timezone indicator - treat as UTC (notification DB stores in UTC)
-  // and convert to Philippine Time for display
-  return dayjs.utc(ts).tz(APP_TIMEZONE);
+  // No timezone indicator - EXPLICITLY add 'Z' to force UTC interpretation
+  // This ensures consistent behavior across web and iOS
+  // Replace space with 'T' for ISO 8601 format compliance
+  const isoString = ts.replace(' ', 'T') + 'Z';
+  return dayjs.utc(isoString).tz(APP_TIMEZONE);
 };
 
 /**
- * Parse timestamp for CHAT MESSAGES and return dayjs object in APP_TIMEZONE
- * 
- * Chat messages are stored in Philippine Time (server local time) without timezone indicator.
- * This function treats bare timestamps as already being in Philippine Time.
+ * @deprecated Use parseTimestamp instead - Railway MySQL stores ALL timestamps in UTC.
+ * This function was based on incorrect assumption that chat used local time.
+ * Kept for backward compatibility only.
  */
 export const parseLocalTimestamp = (ts: string): dayjs.Dayjs => {
   if (!ts) return dayjs().tz(APP_TIMEZONE);
@@ -71,12 +72,14 @@ export const normalizeTimestamp = (ts: string): string => {
 /**
  * Format timestamp for chat message bubbles
  * Returns time in format: "12:33 PM"
- * Uses parseLocalTimestamp since chat messages are stored in Philippine time
+ * 
+ * Note: Chat messages use parseTimestamp (UTC) because Railway MySQL server
+ * stores timestamps in UTC (server time), not Philippine time.
  */
 export const formatChatTime = (ts: string): string => {
   if (!ts) return '';
   try {
-    return parseLocalTimestamp(ts).format('h:mm A');
+    return parseTimestamp(ts).format('h:mm A');
   } catch {
     return '';
   }
@@ -85,12 +88,13 @@ export const formatChatTime = (ts: string): string => {
 /**
  * Format timestamp for conversation list preview
  * Returns: "12:33 PM" (today), "Yesterday", "Mon", "Dec 5"
- * Uses parseLocalTimestamp since chat messages are stored in Philippine time
+ * 
+ * Note: Uses parseTimestamp (UTC) because Railway MySQL stores in UTC.
  */
 export const formatChatPreview = (ts: string): string => {
   if (!ts) return '';
   try {
-    const date = parseLocalTimestamp(ts);
+    const date = parseTimestamp(ts);
     const now = dayjs().tz(APP_TIMEZONE);
 
     // Same day - show time
@@ -118,16 +122,17 @@ export const formatChatPreview = (ts: string): string => {
 /**
  * Format timestamp for date separators in chat
  * Returns: "Today", "Yesterday", or "December 5, 2024"
- * Uses parseLocalTimestamp since chat messages are stored in Philippine time
+ * 
+ * Note: Uses parseTimestamp (UTC) because Railway MySQL stores in UTC.
  */
 export const formatDateLabel = (ts: string | number): string => {
   if (!ts) return '';
   try {
     // For milliseconds (number), it's already in correct timezone context from getTimestampMs
-    // For strings, use parseLocalTimestamp for chat context
+    // For strings, use parseTimestamp (UTC) for chat context
     const date = typeof ts === 'number'
       ? dayjs(ts).tz(APP_TIMEZONE)
-      : parseLocalTimestamp(ts);
+      : parseTimestamp(ts);
     const now = dayjs().tz(APP_TIMEZONE);
 
     if (date.isSame(now, 'day')) {
@@ -147,12 +152,13 @@ export const formatDateLabel = (ts: string | number): string => {
 /**
  * Get timestamp in milliseconds for sorting/comparison
  * Returns milliseconds that can be used for sorting
- * Uses parseLocalTimestamp since this is primarily used for chat messages
+ * 
+ * Note: Uses parseTimestamp (UTC) because Railway MySQL stores in UTC.
  */
 export const getTimestampMs = (ts: string): number => {
   if (!ts) return 0;
   try {
-    return parseLocalTimestamp(ts).valueOf();
+    return parseTimestamp(ts).valueOf();
   } catch {
     return 0;
   }

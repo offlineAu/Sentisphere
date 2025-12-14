@@ -135,6 +135,10 @@ ACTIVE_IDEATION_EN = [
     r"(suicide|suicidal)\s*(thoughts|ideation|plan|note)?",
     r"(this\s*is)?\s*(my\s*)?(last|final)\s*(goodbye|message|note)",
     r"(by\s*the\s*time\s*you\s*read\s*this)",
+    r"kill\s*(myself|my\s*self)",  # Standalone "kill myself" pattern
+    r"hang\s*(myself|my\s*self)",  # Standalone "hang myself" pattern
+    r"wanna\s+(die|kill\s*myself)",  # "wanna die" or "wanna kill myself"
+    r"end\s*it\s*all",  # "end it all" pattern
 ]
 
 # Goodbye/farewell patterns (English)

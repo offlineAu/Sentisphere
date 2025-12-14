@@ -22,6 +22,13 @@ import { useCallback } from 'react';
 import { KeyboardAwareScrollView, KeyboardAwareScrollViewRef } from '@/components/KeyboardAwareScrollView';
 import { BottomToast, ToastType } from '@/components/BottomToast';
 
+// Availability slot type from backend
+type AvailabilitySlot = {
+  day: string;
+  start: string;
+  end: string;
+};
+
 // Counselor type matching backend response
 type Counselor = {
   user_id: number;
@@ -29,9 +36,36 @@ type Counselor = {
   nickname?: string | null;
   email?: string | null;
   title?: string;
+  availability?: AvailabilitySlot[];
 };
 
-const TIME_SLOTS = ['9:00 AM', '10:00 AM', '11:00 AM', '1:00 PM', '2:00 PM', '3:00 PM'];
+// Default time slots when counselor has no availability set
+const DEFAULT_TIME_SLOTS = ['9:00 AM', '10:00 AM', '11:00 AM', '1:00 PM', '2:00 PM', '3:00 PM'];
+
+// Helper to convert 24h time to 12h format
+const formatTime12h = (hour: number): string => {
+  const period = hour >= 12 ? 'PM' : 'AM';
+  const displayHour = hour > 12 ? hour - 12 : hour === 0 ? 12 : hour;
+  return `${displayHour}:00 ${period}`;
+};
+
+// Generate time slots from counselor availability
+const generateTimeSlots = (availability: AvailabilitySlot[] | undefined): string[] => {
+  if (!availability || availability.length === 0) {
+    return DEFAULT_TIME_SLOTS;
+  }
+  const slots: string[] = [];
+  for (const slot of availability) {
+    const [startHour] = slot.start.split(':').map(Number);
+    const [endHour] = slot.end.split(':').map(Number);
+    for (let h = startHour; h < endHour; h++) {
+      slots.push(formatTime12h(h));
+    }
+  }
+  // Deduplicate and sort by time
+  const unique = [...new Set(slots)];
+  return unique.length > 0 ? unique : DEFAULT_TIME_SLOTS;
+};
 
 export default function AppointmentsScreen() {
   const scheme = useColorScheme() ?? 'light';
@@ -55,6 +89,8 @@ export default function AppointmentsScreen() {
   const [preferredDate, setPreferredDate] = useState('');
   const [preferredTime, setPreferredTime] = useState('');
   const [preferredCounselor, setPreferredCounselor] = useState('');
+  // Dynamic time slots based on selected counselor's availability
+  const [availableTimeSlots, setAvailableTimeSlots] = useState<string[]>(DEFAULT_TIME_SLOTS);
   const [urgency, setUrgency] = useState<'low' | 'medium' | 'high' | 'urgent'>('low');
   const [reason, setReason] = useState('');
   const [previous, setPrevious] = useState<'none' | 'institution' | 'other'>('none');
@@ -677,41 +713,6 @@ export default function AppointmentsScreen() {
                 </Animated.View>
               )}
 
-              <ThemedText style={styles.label}>Preferred Time</ThemedText>
-              <Pressable
-                onPress={() => { LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); setOpenTimeList((o) => !o); doHaptic('selection'); }}
-                style={StyleSheet.flatten([styles.field, { borderColor: openTimeList ? focusBlue : palette.border }])}
-              >
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                  <Icon name="clock" size={18} color={palette.icon} />
-                  <ThemedText style={[styles.fieldText, { color: preferredTime ? palette.text : '#9CA3AF' }]}>{preferredTime || 'Select preferred time'}</ThemedText>
-                </View>
-                <Icon name="arrow-right" size={18} color={palette.icon} />
-              </Pressable>
-              {openTimeList && (
-                <Animated.View
-                  style={StyleSheet.flatten([
-                    styles.dropdown,
-                    {
-                      borderColor: palette.border,
-                      backgroundColor: '#FFFFFF',
-                      opacity: timeOpenAnim,
-                      transform: [{ translateY: timeOpenAnim.interpolate({ inputRange: [0, 1], outputRange: [-4, 0] }) }],
-                    },
-                  ])}
-                >
-                  {TIME_SLOTS.map((t) => (
-                    <Pressable
-                      key={t}
-                      onPress={() => { setPreferredTime(t); LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); setOpenTimeList(false); doHaptic('selection'); showToast('Time selected'); }}
-                      style={({ pressed }) => [styles.option, { backgroundColor: pressed ? '#F3F4F6' : 'transparent' }]}
-                    >
-                      <ThemedText style={styles.optionText}>{t}</ThemedText>
-                    </Pressable>
-                  ))}
-                </Animated.View>
-              )}
-
               <ThemedText style={styles.label}>Preferred Counselor</ThemedText>
               <Pressable
                 onPress={() => { LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); setOpenCounselorList((o) => !o); doHaptic('selection'); }}
@@ -758,6 +759,11 @@ export default function AppointmentsScreen() {
                         onPress={() => {
                           setCounselor(c);
                           setPreferredCounselor(c.name || c.nickname || c.email || 'Counselor');
+                          // Generate time slots from counselor's availability
+                          const slots = generateTimeSlots(c.availability);
+                          setAvailableTimeSlots(slots);
+                          // Clear previously selected time since availability changed
+                          setPreferredTime('');
                           LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
                           setOpenCounselorList(false);
                           doHaptic('selection');
@@ -767,6 +773,48 @@ export default function AppointmentsScreen() {
                       >
                         <ThemedText style={styles.optionText}>{c.name || c.nickname || c.email}</ThemedText>
                         <ThemedText style={styles.optionSubtext}>{c.title || 'Guidance Counselor'}</ThemedText>
+                      </Pressable>
+                    ))
+                  )}
+                </Animated.View>
+              )}
+
+              <ThemedText style={styles.label}>Preferred Time</ThemedText>
+              <Pressable
+                onPress={() => { LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); setOpenTimeList((o) => !o); doHaptic('selection'); }}
+                style={StyleSheet.flatten([styles.field, { borderColor: openTimeList ? focusBlue : palette.border }])}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <Icon name="clock" size={18} color={palette.icon} />
+                  <ThemedText style={[styles.fieldText, { color: preferredTime ? palette.text : '#9CA3AF' }]}>{preferredTime || 'Select preferred time'}</ThemedText>
+                </View>
+                <Icon name="arrow-right" size={18} color={palette.icon} />
+              </Pressable>
+              {openTimeList && (
+                <Animated.View
+                  style={StyleSheet.flatten([
+                    styles.dropdown,
+                    {
+                      borderColor: palette.border,
+                      backgroundColor: '#FFFFFF',
+                      opacity: timeOpenAnim,
+                      transform: [{ translateY: timeOpenAnim.interpolate({ inputRange: [0, 1], outputRange: [-4, 0] }) }],
+                    },
+                  ])}
+                >
+                  {availableTimeSlots.length === 0 ? (
+                    <View style={{ padding: 20, alignItems: 'center' }}>
+                      <Icon name="clock" size={24} color="#9CA3AF" />
+                      <ThemedText style={{ color: '#6B7280', fontSize: 13, marginTop: 8, textAlign: 'center' }}>No time slots available</ThemedText>
+                    </View>
+                  ) : (
+                    availableTimeSlots.map((t: string) => (
+                      <Pressable
+                        key={t}
+                        onPress={() => { setPreferredTime(t); LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); setOpenTimeList(false); doHaptic('selection'); showToast('Time selected'); }}
+                        style={({ pressed }) => [styles.option, { backgroundColor: pressed ? '#F3F4F6' : 'transparent' }]}
+                      >
+                        <ThemedText style={styles.optionText}>{t}</ThemedText>
                       </Pressable>
                     ))
                   )}

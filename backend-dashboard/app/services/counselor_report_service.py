@@ -440,20 +440,19 @@ class CounselorReportService:
             AIInsight.user_id.is_(None),  # Global insights (not per-user)
         ]
         
-        # If date range provided, add to filters
-        if start:
-            start_date = start.date() if isinstance(start, datetime) else start
-            filters.append(AIInsight.timeframe_start >= start_date)
-        if end:
-            end_date = end.date() if isinstance(end, datetime) else end
-            filters.append(AIInsight.timeframe_end <= end_date)
+        # For weekly insights, we return the most recent N insights regardless of 
+        # exact date range. The date filter is not applied because:
+        # 1. Weekly insights are generated for PAST weeks (e.g., last week)
+        # 2. When user views "this_week", they still want to see recent insights
+        # 3. Strict date filtering would hide relevant insights from past weeks
+        # 
+        # The 'weeks' parameter limits how many recent insights to return (default: 6)
         
         # DEBUG LOGGING
         import logging
         logger = logging.getLogger(__name__)
-        logger.info(f"[weekly_insights] Query filters: start={start}, end={end}")
-        logger.info(f"[weekly_insights] Date range: {start_date if start else 'None'} to {end_date if end else 'None'}")
-        logger.info(f"[weekly_insights] Weeks limit: {weeks}")
+        logger.info(f"[weekly_insights] Returning most recent {weeks} weekly insights (no date filter applied)")
+        
         
         stored_insights = db.query(AIInsight).filter(
             *filters

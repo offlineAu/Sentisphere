@@ -9,6 +9,7 @@ import { Icon } from '@/components/ui/icon';
 import * as SecureStore from 'expo-secure-store';
 import { router } from 'expo-router';
 import { cleanupOnLogout } from '@/utils/notifications';
+import { setForceOnboardingAfterLogout } from '@/utils/onboarding';
 
 export default function LogoutScreen() {
   // Match success overlays: fade + scale in (0.96 -> 1) with cubic timing
@@ -34,6 +35,10 @@ export default function LogoutScreen() {
     } catch (error) {
       console.error('[Logout] Error during logout:', error);
     } finally {
+      // DEV-ONLY: Set flag to force onboarding flow (Entry → Terms → Auth) for demo purposes
+      // In production, this does nothing and normal flow applies
+      setForceOnboardingAfterLogout(true);
+
       // Navigate to Entry screen (/) so user goes through proper flow: Entry → Terms → Auth
       router.replace('/');
     }
